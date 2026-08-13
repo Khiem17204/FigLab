@@ -34,12 +34,12 @@ describe("browser bundle", () => {
                 groups: [], constraints: [], styles: []
               };
               const resolver = {
-                async describe() { return { widthPx: 1, heightPx: 1, bitDepth: 8, channels: 3 }; },
+                async describe() { return { widthPx: 1, heightPx: 1, bitDepth: 8, channels: 4 }; },
                 async getRegion() {
                   return {
-                    data: new Uint8Array([255, 0, 0]),
+                    data: new Uint8Array([255, 0, 0, 0]),
                     sourceRect: { x: 0, y: 0, width: 1, height: 1 },
-                    widthPx: 1, heightPx: 1, bitDepth: 8, channels: 3, pyramidLevel: 0
+                    widthPx: 1, heightPx: 1, bitDepth: 8, channels: 4, pyramidLevel: 0
                   };
                 }
               };
