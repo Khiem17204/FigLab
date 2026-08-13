@@ -1,9 +1,59 @@
 import { normalizedToPixelRect } from "@figlab/editor-core";
-import type { FigureDocumentV1, ObjectTransformV1 } from "@figlab/figure-schema";
-import { Application, Assets, Graphics, Sprite, type Texture } from "pixi.js";
+import type { FigureDocumentV1, ImageViewObjectV1, ObjectTransformV1 } from "@figlab/figure-schema";
+import { Application, Assets, Container, Graphics, Sprite, type Texture } from "pixi.js";
 import { useEffect, useRef } from "react";
 import { type ArtboardScreenTransform, artboardScreenTransform } from "./editor/geometry";
 import type { BrowserRasterRepository } from "./editor/raster-sources";
+
+export async function buildPixiArtboardScene({
+  stage,
+  document,
+  screenTransform,
+  preview,
+  loadTexture,
+  isDisposed = () => false,
+}: {
+  stage: Container;
+  document: FigureDocumentV1;
+  screenTransform: ArtboardScreenTransform;
+  preview?: { objectId: string; transform: ObjectTransformV1 };
+  loadTexture: (object: ImageViewObjectV1) => Promise<Texture | undefined>;
+  isDisposed?: () => boolean;
+}) {
+  const board = document.artboards[0];
+  if (!board) return;
+  const { scale, leftPx: left, topPx: top } = screenTransform;
+  const artboard = new Graphics()
+    .rect(0, 0, board.widthPt * scale, board.heightPt * scale)
+    .fill({ color: board.backgroundHex })
+    .stroke({ color: "#94a3b8", width: 1 });
+  artboard.position.set(left, top);
+  stage.addChild(artboard);
+
+  const rasterLayer = new Container({ sortableChildren: true });
+  stage.addChild(rasterLayer);
+  const objects = document.objects
+    .filter((object) => !object.hidden)
+    .map((object, documentIndex) => ({ documentIndex, object }))
+    .sort(
+      (leftObject, rightObject) =>
+        leftObject.object.zIndex - rightObject.object.zIndex ||
+        leftObject.documentIndex - rightObject.documentIndex,
+    );
+  for (const { object } of objects) {
+    const sourceTexture = await loadTexture(object);
+    if (isDisposed()) return;
+    if (!sourceTexture) continue;
+    const sprite = new Sprite(sourceTexture);
+    const transform = preview?.objectId === object.id ? preview.transform : object.transform;
+    sprite.label = object.id;
+    sprite.zIndex = object.zIndex;
+    sprite.position.set(left + transform.xPt * scale, top + transform.yPt * scale);
+    sprite.width = transform.widthPt * scale;
+    sprite.height = transform.heightPt * scale;
+    rasterLayer.addChild(sprite);
+  }
+}
 
 export function PixiArtboard({
   document,
@@ -35,34 +85,23 @@ export function PixiArtboard({
       const screen =
         screenTransform ??
         artboardScreenTransform(app.screen.width, app.screen.height, board.widthPt, board.heightPt);
-      const { scale, leftPx: left, topPx: top } = screen;
-      const artboard = new Graphics()
-        .rect(0, 0, board.widthPt * scale, board.heightPt * scale)
-        .fill({ color: board.backgroundHex })
-        .stroke({ color: "#94a3b8", width: 1 });
-      artboard.position.set(left, top);
-      app.stage.addChild(artboard);
-      for (const object of document.objects.filter((item) => !item.hidden)) {
-        if (!rasterSources.has(object.view.sourceAssetId)) continue;
-        const source = await rasterSources.describe(object.view.sourceAssetId);
-        const previewUrl = await rasterSources.getDisplayPreviewUrl(
-          object.view.sourceAssetId,
-          normalizedToPixelRect(object.view.viewport, source.widthPx, source.heightPx),
-          object.view.display,
-        );
-        const sourceTexture = await Assets.load<Texture>(previewUrl);
-        if (disposed) return;
-        const sprite = new Sprite(sourceTexture);
-        const transform = preview?.objectId === object.id ? preview.transform : object.transform;
-        const frame = new Graphics()
-          .rect(0, 0, transform.widthPt * scale, transform.heightPt * scale)
-          .fill({ color: 0xffffff });
-        frame.position.set(left + transform.xPt * scale, top + transform.yPt * scale);
-        frame.addChild(sprite);
-        sprite.width = transform.widthPt * scale;
-        sprite.height = transform.heightPt * scale;
-        app.stage.addChild(frame);
-      }
+      await buildPixiArtboardScene({
+        stage: app.stage,
+        document,
+        screenTransform: screen,
+        ...(preview ? { preview } : {}),
+        isDisposed: () => disposed,
+        loadTexture: async (object) => {
+          if (!rasterSources.has(object.view.sourceAssetId)) return undefined;
+          const source = await rasterSources.describe(object.view.sourceAssetId);
+          const previewUrl = await rasterSources.getDisplayPreviewUrl(
+            object.view.sourceAssetId,
+            normalizedToPixelRect(object.view.viewport, source.widthPx, source.heightPx),
+            object.view.display,
+          );
+          return Assets.load<Texture>(previewUrl);
+        },
+      });
     });
     return () => {
       disposed = true;
