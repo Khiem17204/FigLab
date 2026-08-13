@@ -1,4 +1,13 @@
-import { integer, jsonb, pgTable, text, timestamp, uniqueIndex, uuid } from "drizzle-orm/pg-core";
+import {
+  integer,
+  jsonb,
+  pgTable,
+  text,
+  timestamp,
+  unique,
+  uniqueIndex,
+  uuid,
+} from "drizzle-orm/pg-core";
 
 const id = () => uuid("id").primaryKey();
 const dates = {
@@ -15,17 +24,23 @@ export const workspaces = pgTable("workspaces", {
   name: text("name").notNull(),
   ...dates,
 });
-export const workspaceMembers = pgTable("workspace_members", {
-  id: id(),
-  workspaceId: uuid("workspace_id")
-    .notNull()
-    .references(() => workspaces.id),
-  userId: uuid("user_id")
-    .notNull()
-    .references(() => users.id),
-  role: text("role").notNull(),
-  ...dates,
-});
+export const workspaceMembers = pgTable(
+  "workspace_members",
+  {
+    id: id(),
+    workspaceId: uuid("workspace_id")
+      .notNull()
+      .references(() => workspaces.id),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id),
+    role: text("role").notNull(),
+    ...dates,
+  },
+  (table) => [
+    unique("workspace_members_workspace_user_unique").on(table.workspaceId, table.userId),
+  ],
+);
 export const projects = pgTable("projects", {
   id: id(),
   workspaceId: uuid("workspace_id")

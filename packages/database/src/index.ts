@@ -108,6 +108,56 @@ export interface Authorizer {
   requireWorkspace(principal: Principal, workspaceId: string): Promise<void>;
   requireProject(principal: Principal, project: ProjectRecord): Promise<void>;
 }
+
+export interface FigLabRepository {
+  bootstrapSingleUser(): Promise<Principal>;
+  createProject(workspaceId: string, name: string): Promise<ProjectRecord>;
+  listProjects(workspaceId: string): Promise<ProjectRecord[]>;
+  getProject(projectId: string): Promise<ProjectRecord>;
+  renameProject(projectId: string, name: string): Promise<ProjectRecord>;
+  markProjectDeleting(projectId: string): Promise<ProjectRecord>;
+  getDocument(projectId: string): Promise<DocumentRecord>;
+  saveDocument(
+    projectId: string,
+    baseRevision: number,
+    document: unknown,
+  ): Promise<
+    { kind: "saved"; document: DocumentRecord } | { kind: "conflict"; currentRevision: number }
+  >;
+  createUpload(input: {
+    projectId: string;
+    filename: string;
+    mimeType: string;
+    contentLength: number;
+    checksumSha256: string;
+    storageKey: string;
+    expiresAt?: string;
+    assetId?: string;
+  }): Promise<UploadRecord>;
+  getUpload(id: string): Promise<UploadRecord>;
+  getAsset(id: string): Promise<AssetRecord>;
+  completeUpload(id: string): Promise<AssetRecord>;
+  updateAsset(
+    id: string,
+    update: Partial<
+      Pick<
+        AssetRecord,
+        | "status"
+        | "widthPx"
+        | "heightPx"
+        | "bitDepth"
+        | "channelCount"
+        | "metadata"
+        | "rejectionReason"
+      >
+    >,
+  ): Promise<AssetRecord>;
+  assertReadyAssets(projectId: string, ids: Iterable<string>): Promise<void>;
+  recordExport(input: Omit<ExportRecord, "id" | "createdAt">): Promise<ExportRecord>;
+  listAuditEvents(projectId: string): Promise<AuditEvent[]>;
+  listProjectAssets(projectId: string): Promise<AssetRecord[]>;
+  deleteProjectData(projectId: string): Promise<void>;
+}
 export class SingleUserAuthorizer implements Authorizer {
   async requireWorkspace(principal: Principal, workspaceId: string): Promise<void> {
     if (principal.workspaceId !== workspaceId) throw new NotFoundError();
@@ -117,7 +167,7 @@ export class SingleUserAuthorizer implements Authorizer {
   }
 }
 
-export class InMemoryFigLabRepository {
+export class InMemoryFigLabRepository implements FigLabRepository {
   private readonly projects = new Map<string, ProjectRecord>();
   private readonly documents = new Map<string, DocumentRecord>();
   private readonly uploads = new Map<string, UploadRecord>();
@@ -130,9 +180,9 @@ export class InMemoryFigLabRepository {
   async bootstrapSingleUser(): Promise<Principal> {
     if (!this.principal)
       this.principal = {
-        id: "local-admin",
+        id: "00000000-0000-4000-8000-000000000001",
         email: "local-admin@figlab.invalid",
-        workspaceId: "local-workspace",
+        workspaceId: "00000000-0000-4000-8000-000000000002",
       };
     return { ...this.principal };
   }
@@ -374,3 +424,5 @@ function deriveDocumentDiff(before: unknown, after: unknown): Record<string, unk
     artboardCountAfter: newDocument.artboards?.length ?? 0,
   };
 }
+
+export { createPostgresRepository, PostgresFigLabRepository } from "./postgres.js";

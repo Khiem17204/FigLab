@@ -1,5 +1,7 @@
+import { getTableConfig } from "drizzle-orm/pg-core";
 import { describe, expect, it } from "vitest";
-import { InMemoryFigLabRepository } from "./index.js";
+import { InMemoryFigLabRepository, PostgresFigLabRepository } from "./index.js";
+import { workspaceMembers } from "./schema.js";
 
 describe("InMemoryFigLabRepository", () => {
   it("bootstraps one stable owner and preserves a newer document when a stale save arrives", async () => {
@@ -7,6 +9,10 @@ describe("InMemoryFigLabRepository", () => {
     const first = await repository.bootstrapSingleUser();
     const second = await repository.bootstrapSingleUser();
     expect(second).toEqual(first);
+    expect(first.id).toMatch(
+      /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/,
+    );
+    expect(first.workspaceId).toMatch(/^[0-9a-f-]{36}$/);
 
     const project = await repository.createProject(first.workspaceId, "Experiment");
     const initial = await repository.getDocument(project.id);
@@ -55,5 +61,16 @@ describe("InMemoryFigLabRepository", () => {
         storageKey: "other-key",
       }),
     ).rejects.toThrow("already has an asset");
+  });
+
+  it("exposes a PostgreSQL repository for durable production persistence", () => {
+    expect(PostgresFigLabRepository).toBeTypeOf("function");
+  });
+
+  it("defines one membership per workspace/user pair in Drizzle", () => {
+    const config = getTableConfig(workspaceMembers);
+    expect(config.uniqueConstraints.some((constraint) => constraint.columns.length === 2)).toBe(
+      true,
+    );
   });
 });

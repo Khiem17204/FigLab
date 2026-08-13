@@ -1,20 +1,36 @@
 import { createHash } from "node:crypto";
-import type { InMemoryFigLabRepository } from "@figlab/database";
-import type { ObjectStore } from "@figlab/storage";
-import sharp, { type Metadata } from "sharp";
+import { pathToFileURL } from "node:url";
+import { createPostgresRepository, type FigLabRepository } from "@figlab/database";
+import { type ObjectStore, S3ObjectStore } from "@figlab/storage";
+import { type Runner, run, type TaskList } from "graphile-worker";
+import sharp from "sharp";
 
 const MAX_IMAGE_PIXELS = 100_000_000;
+
 export async function verifyAsset(
-  repository: InMemoryFigLabRepository,
+  repository: FigLabRepository,
   store: ObjectStore,
   assetId: string,
 ): Promise<void> {
   const asset = await repository.getAsset(assetId);
+  const bytes = await streamBytes(await store.read(asset.storageKey));
+  const checksum = createHash("sha256").update(bytes).digest("hex");
+  if (checksum !== asset.checksumSha256)
+    return reject(repository, assetId, "SHA-256 checksum mismatch");
+
   try {
-    const bytes = await streamBytes(await store.read(asset.storageKey));
-    const checksum = createHash("sha256").update(bytes).digest("hex");
-    if (checksum !== asset.checksumSha256)
-      return reject(repository, assetId, "SHA-256 checksum mismatch");
+    if (asset.mimeType === "image/tiff") {
+      const description = await decodeTiffAuthoritatively(bytes);
+      await repository.updateAsset(assetId, {
+        status: "ready",
+        widthPx: description.widthPx,
+        heightPx: description.heightPx,
+        bitDepth: description.bitDepth,
+        channelCount: description.channels,
+        metadata: { format: "tiff" },
+      });
+      return;
+    }
     const metadata = await sharp(bytes, { animated: false, pages: 1 }).metadata();
     if (!metadata.format || !matchesMime(asset.mimeType, metadata.format))
       return reject(repository, assetId, "Image signature does not match declared MIME type");
@@ -24,11 +40,6 @@ export async function verifyAsset(
     const channelCount = metadata.channels;
     if (!bitDepth || (channelCount !== 1 && channelCount !== 3 && channelCount !== 4))
       return reject(repository, assetId, "Unsupported image sample format");
-    if (
-      metadata.format === "tiff" &&
-      (!isSupportedTiff(metadata, bitDepth, channelCount) || metadata.pages !== 1)
-    )
-      return reject(repository, assetId, "Unsupported TIFF layout");
     await repository.updateAsset(assetId, {
       status: "ready",
       widthPx: metadata.width,
@@ -38,15 +49,12 @@ export async function verifyAsset(
       metadata: { format: metadata.format, space: metadata.space, density: metadata.density },
     });
   } catch (error) {
-    await reject(
-      repository,
-      assetId,
-      error instanceof Error ? `Verification failed: ${error.message}` : "Verification failed",
-    );
+    await reject(repository, assetId, error instanceof Error ? error.message : "Unsupported image");
   }
 }
+
 export async function deleteProject(
-  repository: InMemoryFigLabRepository,
+  repository: FigLabRepository,
   store: ObjectStore,
   projectId: string,
 ): Promise<void> {
@@ -54,36 +62,122 @@ export async function deleteProject(
     await store.delete(asset.storageKey);
   await repository.deleteProjectData(projectId);
 }
+
+export function createTaskList(repository: FigLabRepository, store: ObjectStore): TaskList {
+  return {
+    verify_asset: async (payload) => {
+      const assetId = requiredPayloadId(payload, "assetId");
+      await verifyAsset(repository, store, assetId);
+    },
+    delete_project: async (payload) => {
+      const projectId = requiredPayloadId(payload, "projectId");
+      await deleteProject(repository, store, projectId);
+    },
+  };
+}
+
+export async function startJobsFromEnv(
+  environment: NodeJS.ProcessEnv = process.env,
+): Promise<Runner> {
+  const databaseUrl = required(environment, "DATABASE_URL");
+  const { repository, close } = createPostgresRepository(databaseUrl);
+  const store = new S3ObjectStore({
+    bucket: required(environment, "OBJECT_STORE_BUCKET"),
+    region: environment.OBJECT_STORE_REGION ?? "us-east-1",
+    internalEndpoint: required(environment, "OBJECT_STORE_INTERNAL_ENDPOINT"),
+    publicEndpoint: required(environment, "OBJECT_STORE_PUBLIC_ENDPOINT"),
+    accessKeyId: required(environment, "OBJECT_STORE_ACCESS_KEY"),
+    secretAccessKey: required(environment, "OBJECT_STORE_SECRET_KEY"),
+    forcePathStyle: environment.OBJECT_STORE_FORCE_PATH_STYLE !== "false",
+  });
+  const runner = await run(
+    { connectionString: databaseUrl, concurrency: Number(environment.JOB_CONCURRENCY ?? 2) },
+    createTaskList(repository, store),
+  );
+  runner.events.once("stop", () => void close());
+  return runner;
+}
+
+async function decodeTiffAuthoritatively(bytes: Uint8Array): Promise<{
+  widthPx: number;
+  heightPx: number;
+  bitDepth: 8 | 16;
+  channels: 1 | 3;
+}> {
+  if (isBigTiff(bytes)) throw new Error("Unsupported TIFF: BigTIFF is not supported");
+  const imageProcessingModule = "@figlab/image-processing";
+  const imageProcessing = (await import(imageProcessingModule)) as unknown as {
+    decodeTiff(input: ArrayBuffer): Promise<{
+      widthPx: number;
+      heightPx: number;
+      bitDepth: 8 | 16;
+      channels: 1 | 3;
+    }>;
+  };
+  if (typeof imageProcessing.decodeTiff !== "function")
+    throw new Error("Unsupported TIFF: shared decoder is unavailable");
+  const exact = bytes.buffer.slice(
+    bytes.byteOffset,
+    bytes.byteOffset + bytes.byteLength,
+  ) as ArrayBuffer;
+  return imageProcessing.decodeTiff(exact);
+}
+
+function isBigTiff(bytes: Uint8Array): boolean {
+  if (bytes.byteLength < 4) return false;
+  const little = bytes[0] === 0x49 && bytes[1] === 0x49;
+  const big = bytes[0] === 0x4d && bytes[1] === 0x4d;
+  return (
+    (little && bytes[2] === 43 && bytes[3] === 0) || (big && bytes[2] === 0 && bytes[3] === 43)
+  );
+}
+
 async function streamBytes(stream: AsyncIterable<Uint8Array>): Promise<Uint8Array> {
-  const hashChunks: Uint8Array[] = [];
-  for await (const chunk of stream) hashChunks.push(chunk);
-  const length = hashChunks.reduce((total, chunk) => total + chunk.byteLength, 0);
+  const chunks: Uint8Array[] = [];
+  for await (const chunk of stream) chunks.push(chunk);
+  const length = chunks.reduce((total, chunk) => total + chunk.byteLength, 0);
   const bytes = new Uint8Array(length);
   let offset = 0;
-  for (const chunk of hashChunks) {
+  for (const chunk of chunks) {
     bytes.set(chunk, offset);
     offset += chunk.byteLength;
   }
   return bytes;
 }
+
 async function reject(
-  repository: InMemoryFigLabRepository,
+  repository: FigLabRepository,
   assetId: string,
   reason: string,
 ): Promise<void> {
   await repository.updateAsset(assetId, { status: "rejected", rejectionReason: reason });
 }
+
 function matchesMime(mimeType: string, format: string): boolean {
   return (
     (mimeType === "image/png" && format === "png") ||
-    (mimeType === "image/jpeg" && format === "jpeg") ||
-    (mimeType === "image/tiff" && format === "tiff")
+    (mimeType === "image/jpeg" && format === "jpeg")
   );
 }
-function isSupportedTiff(metadata: Metadata, bitDepth: 8 | 16, channels: 1 | 3 | 4): boolean {
-  return (
-    metadata.format === "tiff" &&
-    (bitDepth === 8 || bitDepth === 16) &&
-    (channels === 1 || channels === 3)
-  );
+
+function requiredPayloadId(payload: unknown, key: string): string {
+  if (typeof payload !== "object" || payload === null || !(key in payload))
+    throw new Error(`Job payload requires ${key}`);
+  const value = (payload as Record<string, unknown>)[key];
+  if (typeof value !== "string" || value.length === 0)
+    throw new Error(`Job payload requires ${key}`);
+  return value;
+}
+
+function required(environment: NodeJS.ProcessEnv, name: string): string {
+  const value = environment[name];
+  if (!value) throw new Error(`${name} is required`);
+  return value;
+}
+
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  startJobsFromEnv().catch((error) => {
+    console.error(error);
+    process.exitCode = 1;
+  });
 }

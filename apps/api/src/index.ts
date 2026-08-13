@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { pathToFileURL } from "node:url";
 import swagger from "@fastify/swagger";
 import {
   AssetDescriptorSchema,
@@ -13,17 +14,19 @@ import {
   SaveDocumentRequestSchema,
   SaveDocumentResponseSchema,
   UpdateProjectRequestSchema,
+  validateRecordExportRequest,
 } from "@figlab/api-contract";
 import {
   type AssetRecord,
   type Authorizer,
-  type InMemoryFigLabRepository,
+  createPostgresRepository,
+  type FigLabRepository,
   NotFoundError,
   type Principal,
   SingleUserAuthorizer,
 } from "@figlab/database";
 import { decodeFigureDocument } from "@figlab/figure-schema";
-import type { ObjectStore } from "@figlab/storage";
+import { type ObjectStore, S3ObjectStore } from "@figlab/storage";
 import { Type } from "@sinclair/typebox";
 import Fastify, { type FastifyInstance } from "fastify";
 
@@ -60,11 +63,13 @@ const exportSchema = Type.Object({
 });
 
 export interface AppDependencies {
-  repository: InMemoryFigLabRepository;
+  repository: FigLabRepository;
   store: ObjectStore;
   principal: Principal;
   authorizer?: Authorizer;
   uploadTtlSeconds?: number;
+  publicAppUrl?: string;
+  allowInsecureSingleUserRemote?: boolean;
 }
 export function assertSingleUserConfiguration(
   publicAppUrl: string,
@@ -77,6 +82,10 @@ export function assertSingleUserConfiguration(
     throw new Error("Single-user mode requires a localhost or loopback PUBLIC_APP_URL");
 }
 export async function buildApp(dependencies: AppDependencies): Promise<FastifyInstance> {
+  assertSingleUserConfiguration(
+    dependencies.publicAppUrl ?? "http://localhost",
+    dependencies.allowInsecureSingleUserRemote ?? false,
+  );
   const app = Fastify({ logger: false });
   const authorizer = dependencies.authorizer ?? new SingleUserAuthorizer();
   await app.register(swagger, { openapi: { info: { title: "FigLab API", version: "0.1.0" } } });
@@ -209,6 +218,7 @@ export async function buildApp(dependencies: AppDependencies): Promise<FastifyIn
           .status(400)
           .send({ code: "UPLOAD_INVALID", message: "Unsupported upload claim" });
       const assetId = randomUUID();
+      const uploadTtlSeconds = Math.min(600, Math.max(1, dependencies.uploadTtlSeconds ?? 600));
       const key = `workspaces/${dependencies.principal.workspaceId}/projects/${id}/assets/${assetId}/original`;
       const upload = await dependencies.repository.createUpload({
         projectId: id,
@@ -216,15 +226,13 @@ export async function buildApp(dependencies: AppDependencies): Promise<FastifyIn
         mimeType: body.contentType,
         assetId,
         storageKey: key,
-        expiresAt: new Date(
-          Date.now() + (dependencies.uploadTtlSeconds ?? 600) * 1000,
-        ).toISOString(),
+        expiresAt: new Date(Date.now() + uploadTtlSeconds * 1000).toISOString(),
       });
       const signed = await dependencies.store.presignPut({
         key,
         contentType: body.contentType,
         contentLength: body.contentLength,
-        expiresInSeconds: dependencies.uploadTtlSeconds ?? 600,
+        expiresInSeconds: uploadTtlSeconds,
       });
       return reply
         .status(201)
@@ -289,7 +297,16 @@ export async function buildApp(dependencies: AppDependencies): Promise<FastifyIn
   );
   app.post(
     apiRoutes.projectExports,
-    { schema: { params, body: RecordExportRequestSchema, response: { 201: exportSchema } } },
+    {
+      schema: {
+        params,
+        body: RecordExportRequestSchema,
+        response: {
+          201: exportSchema,
+          400: Type.Object({ code: Type.Literal("BAD_REQUEST"), message: Type.String() }),
+        },
+      },
+    },
     async (request, reply) => {
       const id = (request.params as { projectId: string }).projectId;
       await projectFor(id);
@@ -300,12 +317,60 @@ export async function buildApp(dependencies: AppDependencies): Promise<FastifyIn
         heightPx: number;
         checksumSha256: string;
       };
+      if (!validateRecordExportRequest(body))
+        return reply.status(400).send({ code: "BAD_REQUEST", message: "Invalid export metadata" });
       return reply
         .status(201)
         .send(await dependencies.repository.recordExport({ projectId: id, ...body }));
     },
   );
   return app;
+}
+
+export async function startServerFromEnv(
+  environment: NodeJS.ProcessEnv = process.env,
+): Promise<FastifyInstance> {
+  const publicAppUrl = required(environment, "PUBLIC_APP_URL");
+  const allowInsecureSingleUserRemote = environment.ALLOW_INSECURE_SINGLE_USER_REMOTE === "true";
+  assertSingleUserConfiguration(publicAppUrl, allowInsecureSingleUserRemote);
+  const { repository, close } = createPostgresRepository(required(environment, "DATABASE_URL"));
+  const principal = await repository.bootstrapSingleUser();
+  const store = new S3ObjectStore({
+    bucket: required(environment, "OBJECT_STORE_BUCKET"),
+    region: environment.OBJECT_STORE_REGION ?? "us-east-1",
+    internalEndpoint: required(environment, "OBJECT_STORE_INTERNAL_ENDPOINT"),
+    publicEndpoint: required(environment, "OBJECT_STORE_PUBLIC_ENDPOINT"),
+    accessKeyId: required(environment, "OBJECT_STORE_ACCESS_KEY"),
+    secretAccessKey: required(environment, "OBJECT_STORE_SECRET_KEY"),
+    forcePathStyle: environment.OBJECT_STORE_FORCE_PATH_STYLE !== "false",
+  });
+  const app = await buildApp({
+    repository,
+    store,
+    principal,
+    publicAppUrl,
+    allowInsecureSingleUserRemote,
+    uploadTtlSeconds: Number(environment.UPLOAD_URL_TTL_SECONDS ?? 600),
+  });
+  app.addHook("onClose", close);
+  await app.listen({
+    host: environment.API_HOST ?? "0.0.0.0",
+    port: Number(environment.API_PORT ?? 3000),
+  });
+  return app;
+}
+
+function required(environment: NodeJS.ProcessEnv, name: string): string {
+  const value = environment[name];
+  if (!value) throw new Error(`${name} is required`);
+  return value;
+}
+
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  startServerFromEnv().catch((error) => {
+    console.error(error);
+    process.exitCode = 1;
+  });
 }
 async function assetFor(
   dependencies: AppDependencies,
