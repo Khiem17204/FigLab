@@ -15,7 +15,7 @@
     "check:write": "biome check --write .",
     "dev": "turbo run dev --parallel",
     "test:compose": "node scripts/test-compose.mjs",
-    "test:e2e": "playwright test --grep-invert @visual",
+    "test:e2e": "corepack pnpm --filter @figlab/web test:e2e",
     "test:integration": "turbo run test:integration",
     "test:unit": "turbo run test:unit",
     "test:visual": "playwright test --grep @visual",

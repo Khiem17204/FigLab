@@ -1,319 +1,1256 @@
-openapi: 3.1.0
+---
+openapi: 3.0.3
 info:
   title: FigLab API
   version: 0.1.0
-  license:
-    name: AGPL-3.0-only
+components:
+  schemas: {}
 paths:
-  /health:
+  "/health":
     get:
-      operationId: health
       responses:
         '200':
-          description: Service is healthy.
+          description: Default Response
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/HealthResponse'
-  /v1/projects:
+                type: object
+                required:
+                - ok
+                properties:
+                  ok:
+                    type: boolean
+                    enum:
+                    - true
+  "/v1/projects":
     get:
-      operationId: listProjects
       responses:
         '200':
-          description: Projects listed.
+          description: Default Response
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ProjectListResponse'
+                additionalProperties: false
+                type: object
+                required:
+                - projects
+                properties:
+                  projects:
+                    type: array
+                    items:
+                      additionalProperties: false
+                      type: object
+                      required:
+                      - id
+                      - workspaceId
+                      - name
+                      - status
+                      - createdAt
+                      - updatedAt
+                      properties:
+                        id:
+                          minLength: 1
+                          type: string
+                        workspaceId:
+                          minLength: 1
+                          type: string
+                        name:
+                          minLength: 1
+                          maxLength: 120
+                          type: string
+                        status:
+                          anyOf:
+                          - type: string
+                            enum:
+                            - active
+                          - type: string
+                            enum:
+                            - deleting
+                        createdAt:
+                          minLength: 1
+                          type: string
+                        updatedAt:
+                          minLength: 1
+                          type: string
     post:
-      operationId: createProject
       requestBody:
         required: true
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/CreateProjectRequest'
+              additionalProperties: false
+              type: object
+              required:
+              - name
+              properties:
+                name:
+                  minLength: 1
+                  maxLength: 120
+                  type: string
       responses:
         '201':
-          description: Project created.
+          description: Default Response
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/Project'
-  /v1/projects/{projectId}:
+                additionalProperties: false
+                type: object
+                required:
+                - id
+                - workspaceId
+                - name
+                - status
+                - createdAt
+                - updatedAt
+                properties:
+                  id:
+                    minLength: 1
+                    type: string
+                  workspaceId:
+                    minLength: 1
+                    type: string
+                  name:
+                    minLength: 1
+                    maxLength: 120
+                    type: string
+                  status:
+                    anyOf:
+                    - type: string
+                      enum:
+                      - active
+                    - type: string
+                      enum:
+                      - deleting
+                  createdAt:
+                    minLength: 1
+                    type: string
+                  updatedAt:
+                    minLength: 1
+                    type: string
+  "/v1/projects/{projectId}":
     get:
-      operationId: getProject
       parameters:
-        - $ref: '#/components/parameters/projectId'
+      - schema:
+          minLength: 1
+          type: string
+        in: path
+        name: projectId
+        required: true
       responses:
         '200':
-          description: Project returned.
+          description: Default Response
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/Project'
-  /v1/projects/{projectId}/document:
-    get:
-      operationId: getProjectDocument
-      parameters:
-        - $ref: '#/components/parameters/projectId'
-      responses:
-        '200':
-          description: Document returned.
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ProjectDocumentResponse'
+                additionalProperties: false
+                type: object
+                required:
+                - id
+                - workspaceId
+                - name
+                - status
+                - createdAt
+                - updatedAt
+                properties:
+                  id:
+                    minLength: 1
+                    type: string
+                  workspaceId:
+                    minLength: 1
+                    type: string
+                  name:
+                    minLength: 1
+                    maxLength: 120
+                    type: string
+                  status:
+                    anyOf:
+                    - type: string
+                      enum:
+                      - active
+                    - type: string
+                      enum:
+                      - deleting
+                  createdAt:
+                    minLength: 1
+                    type: string
+                  updatedAt:
+                    minLength: 1
+                    type: string
     put:
-      operationId: saveProjectDocument
-      parameters:
-        - $ref: '#/components/parameters/projectId'
       requestBody:
         required: true
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/SaveDocumentRequest'
+              additionalProperties: false
+              type: object
+              required:
+              - name
+              properties:
+                name:
+                  minLength: 1
+                  maxLength: 120
+                  type: string
+      parameters:
+      - schema:
+          minLength: 1
+          type: string
+        in: path
+        name: projectId
+        required: true
       responses:
         '200':
-          description: Document saved.
+          description: Default Response
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/SaveDocumentResponse'
-  /v1/projects/{projectId}/uploads:
-    post:
-      operationId: prepareUpload
+                additionalProperties: false
+                type: object
+                required:
+                - id
+                - workspaceId
+                - name
+                - status
+                - createdAt
+                - updatedAt
+                properties:
+                  id:
+                    minLength: 1
+                    type: string
+                  workspaceId:
+                    minLength: 1
+                    type: string
+                  name:
+                    minLength: 1
+                    maxLength: 120
+                    type: string
+                  status:
+                    anyOf:
+                    - type: string
+                      enum:
+                      - active
+                    - type: string
+                      enum:
+                      - deleting
+                  createdAt:
+                    minLength: 1
+                    type: string
+                  updatedAt:
+                    minLength: 1
+                    type: string
+    delete:
       parameters:
-        - $ref: '#/components/parameters/projectId'
-      requestBody:
+      - schema:
+          minLength: 1
+          type: string
+        in: path
+        name: projectId
         required: true
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/PrepareUploadRequest'
-      responses:
-        '201':
-          description: Upload prepared.
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/PrepareUploadResponse'
-  /v1/uploads/{uploadId}/complete:
-    post:
-      operationId: completeUpload
-      parameters:
-        - $ref: '#/components/parameters/uploadId'
       responses:
         '202':
-          description: Upload queued for verification.
+          description: Default Response
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/CompleteUploadResponse'
-  /v1/assets/{assetId}:
+                additionalProperties: false
+                type: object
+                required:
+                - id
+                - workspaceId
+                - name
+                - status
+                - createdAt
+                - updatedAt
+                properties:
+                  id:
+                    minLength: 1
+                    type: string
+                  workspaceId:
+                    minLength: 1
+                    type: string
+                  name:
+                    minLength: 1
+                    maxLength: 120
+                    type: string
+                  status:
+                    anyOf:
+                    - type: string
+                      enum:
+                      - active
+                    - type: string
+                      enum:
+                      - deleting
+                  createdAt:
+                    minLength: 1
+                    type: string
+                  updatedAt:
+                    minLength: 1
+                    type: string
+  "/v1/projects/{projectId}/document":
     get:
-      operationId: getAsset
       parameters:
-        - $ref: '#/components/parameters/assetId'
+      - schema:
+          minLength: 1
+          type: string
+        in: path
+        name: projectId
+        required: true
       responses:
         '200':
-          description: Asset returned.
+          description: Default Response
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/AssetDescriptor'
-  /v1/assets/{assetId}/download-url:
-    post:
-      operationId: createAssetDownloadUrl
-      parameters:
-        - $ref: '#/components/parameters/assetId'
-      responses:
-        '201':
-          description: Download URL created.
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/DownloadUrlResponse'
-  /v1/projects/{projectId}/exports:
-    post:
-      operationId: recordExport
-      parameters:
-        - $ref: '#/components/parameters/projectId'
+                additionalProperties: false
+                type: object
+                required:
+                - projectId
+                - revision
+                - document
+                - updatedAt
+                properties:
+                  projectId:
+                    minLength: 1
+                    type: string
+                  revision:
+                    minimum: 0
+                    type: integer
+                  document:
+                    additionalProperties: false
+                    type: object
+                    required:
+                    - schemaVersion
+                    - artboards
+                    - objects
+                    - groups
+                    - constraints
+                    - styles
+                    properties:
+                      schemaVersion:
+                        type: number
+                        enum:
+                        - 1
+                      artboards:
+                        minItems: 1
+                        type: array
+                        items:
+                          additionalProperties: false
+                          type: object
+                          required:
+                          - id
+                          - name
+                          - widthPt
+                          - heightPt
+                          - backgroundHex
+                          properties:
+                            id:
+                              minLength: 1
+                              type: string
+                            name:
+                              minLength: 1
+                              type: string
+                            widthPt:
+                              exclusiveMinimum: 0
+                              type: number
+                            heightPt:
+                              exclusiveMinimum: 0
+                              type: number
+                            backgroundHex:
+                              pattern: "^#[0-9A-Fa-f]{6}$"
+                              type: string
+                      objects:
+                        type: array
+                        items:
+                          additionalProperties: false
+                          type: object
+                          required:
+                          - id
+                          - type
+                          - artboardId
+                          - transform
+                          - zIndex
+                          - locked
+                          - hidden
+                          - view
+                          properties:
+                            id:
+                              minLength: 1
+                              type: string
+                            type:
+                              type: string
+                              enum:
+                              - image-view
+                            artboardId:
+                              minLength: 1
+                              type: string
+                            transform:
+                              additionalProperties: false
+                              type: object
+                              required:
+                              - xPt
+                              - yPt
+                              - widthPt
+                              - heightPt
+                              - rotationDeg
+                              properties:
+                                xPt:
+                                  type: number
+                                yPt:
+                                  type: number
+                                widthPt:
+                                  exclusiveMinimum: 0
+                                  type: number
+                                heightPt:
+                                  exclusiveMinimum: 0
+                                  type: number
+                                rotationDeg:
+                                  type: number
+                                  enum:
+                                  - 0
+                            zIndex:
+                              type: integer
+                            locked:
+                              type: boolean
+                            hidden:
+                              type: boolean
+                            view:
+                              additionalProperties: false
+                              type: object
+                              required:
+                              - sourceAssetId
+                              - viewport
+                              - display
+                              properties:
+                                sourceAssetId:
+                                  minLength: 1
+                                  type: string
+                                viewport:
+                                  additionalProperties: false
+                                  type: object
+                                  required:
+                                  - x
+                                  - y
+                                  - width
+                                  - height
+                                  properties:
+                                    x:
+                                      minimum: 0
+                                      maximum: 1
+                                      type: number
+                                    y:
+                                      minimum: 0
+                                      maximum: 1
+                                      type: number
+                                    width:
+                                      exclusiveMinimum: 0
+                                      maximum: 1
+                                      type: number
+                                    height:
+                                      exclusiveMinimum: 0
+                                      maximum: 1
+                                      type: number
+                                display:
+                                  additionalProperties: false
+                                  type: object
+                                  required:
+                                  - brightness
+                                  - contrast
+                                  - gamma
+                                  - invert
+                                  properties:
+                                    brightness:
+                                      minimum: -1
+                                      maximum: 1
+                                      type: number
+                                    contrast:
+                                      minimum: 0
+                                      maximum: 4
+                                      type: number
+                                    gamma:
+                                      minimum: 0.1
+                                      maximum: 10
+                                      type: number
+                                    invert:
+                                      type: boolean
+                      groups:
+                        type: array
+                        minItems: 0
+                        maxItems: 0
+                      constraints:
+                        type: array
+                        minItems: 0
+                        maxItems: 0
+                      styles:
+                        type: array
+                        minItems: 0
+                        maxItems: 0
+                  updatedAt:
+                    minLength: 1
+                    type: string
+    put:
       requestBody:
         required: true
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/RecordExportRequest'
+              additionalProperties: false
+              type: object
+              required:
+              - baseRevision
+              - document
+              properties:
+                baseRevision:
+                  minimum: 0
+                  type: integer
+                document:
+                  additionalProperties: false
+                  type: object
+                  required:
+                  - schemaVersion
+                  - artboards
+                  - objects
+                  - groups
+                  - constraints
+                  - styles
+                  properties:
+                    schemaVersion:
+                      type: number
+                      enum:
+                      - 1
+                    artboards:
+                      minItems: 1
+                      type: array
+                      items:
+                        additionalProperties: false
+                        type: object
+                        required:
+                        - id
+                        - name
+                        - widthPt
+                        - heightPt
+                        - backgroundHex
+                        properties:
+                          id:
+                            minLength: 1
+                            type: string
+                          name:
+                            minLength: 1
+                            type: string
+                          widthPt:
+                            exclusiveMinimum: 0
+                            type: number
+                          heightPt:
+                            exclusiveMinimum: 0
+                            type: number
+                          backgroundHex:
+                            pattern: "^#[0-9A-Fa-f]{6}$"
+                            type: string
+                    objects:
+                      type: array
+                      items:
+                        additionalProperties: false
+                        type: object
+                        required:
+                        - id
+                        - type
+                        - artboardId
+                        - transform
+                        - zIndex
+                        - locked
+                        - hidden
+                        - view
+                        properties:
+                          id:
+                            minLength: 1
+                            type: string
+                          type:
+                            type: string
+                            enum:
+                            - image-view
+                          artboardId:
+                            minLength: 1
+                            type: string
+                          transform:
+                            additionalProperties: false
+                            type: object
+                            required:
+                            - xPt
+                            - yPt
+                            - widthPt
+                            - heightPt
+                            - rotationDeg
+                            properties:
+                              xPt:
+                                type: number
+                              yPt:
+                                type: number
+                              widthPt:
+                                exclusiveMinimum: 0
+                                type: number
+                              heightPt:
+                                exclusiveMinimum: 0
+                                type: number
+                              rotationDeg:
+                                type: number
+                                enum:
+                                - 0
+                          zIndex:
+                            type: integer
+                          locked:
+                            type: boolean
+                          hidden:
+                            type: boolean
+                          view:
+                            additionalProperties: false
+                            type: object
+                            required:
+                            - sourceAssetId
+                            - viewport
+                            - display
+                            properties:
+                              sourceAssetId:
+                                minLength: 1
+                                type: string
+                              viewport:
+                                additionalProperties: false
+                                type: object
+                                required:
+                                - x
+                                - y
+                                - width
+                                - height
+                                properties:
+                                  x:
+                                    minimum: 0
+                                    maximum: 1
+                                    type: number
+                                  y:
+                                    minimum: 0
+                                    maximum: 1
+                                    type: number
+                                  width:
+                                    exclusiveMinimum: 0
+                                    maximum: 1
+                                    type: number
+                                  height:
+                                    exclusiveMinimum: 0
+                                    maximum: 1
+                                    type: number
+                              display:
+                                additionalProperties: false
+                                type: object
+                                required:
+                                - brightness
+                                - contrast
+                                - gamma
+                                - invert
+                                properties:
+                                  brightness:
+                                    minimum: -1
+                                    maximum: 1
+                                    type: number
+                                  contrast:
+                                    minimum: 0
+                                    maximum: 4
+                                    type: number
+                                  gamma:
+                                    minimum: 0.1
+                                    maximum: 10
+                                    type: number
+                                  invert:
+                                    type: boolean
+                    groups:
+                      type: array
+                      minItems: 0
+                      maxItems: 0
+                    constraints:
+                      type: array
+                      minItems: 0
+                      maxItems: 0
+                    styles:
+                      type: array
+                      minItems: 0
+                      maxItems: 0
+      parameters:
+      - schema:
+          minLength: 1
+          type: string
+        in: path
+        name: projectId
+        required: true
       responses:
-        '201':
-          description: Export recorded.
+        '200':
+          description: Default Response
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/RecordExportResponse'
-components:
-  parameters:
-    assetId:
-      in: path
-      name: assetId
-      required: true
-      schema:
-        type: string
-    projectId:
-      in: path
-      name: projectId
-      required: true
-      schema:
-        type: string
-    uploadId:
-      in: path
-      name: uploadId
-      required: true
-      schema:
-        type: string
-  schemas:
-    AssetDescriptor:
-      type: object
-      additionalProperties: false
-      required: [id, projectId, filename, mimeType, checksumSha256, widthPx, heightPx, bitDepth, channelCount, status, metadata, createdAt]
-      properties:
-        id: { type: string, minLength: 1 }
-        projectId: { type: string, minLength: 1 }
-        filename: { type: string, minLength: 1 }
-        mimeType: { type: string, minLength: 1 }
-        checksumSha256: { type: string, pattern: '^[a-f0-9]{64}$' }
-        widthPx: { type: integer, minimum: 1 }
-        heightPx: { type: integer, minimum: 1 }
-        bitDepth: { enum: [8, 16] }
-        channelCount: { enum: [1, 3, 4] }
-        status: { $ref: '#/components/schemas/AssetStatus' }
-        metadata: { type: object, additionalProperties: true }
-        rejectionReason: { type: string, minLength: 1 }
-        createdAt: { type: string, minLength: 1 }
-    AssetStatus:
-      enum: [pending-verification, ready, rejected]
-    CompleteUploadResponse:
-      type: object
-      additionalProperties: false
-      required: [assetId, status]
-      properties:
-        assetId: { type: string, minLength: 1 }
-        status: { $ref: '#/components/schemas/AssetStatus' }
-    CreateProjectRequest:
-      type: object
-      additionalProperties: false
-      required: [name]
-      properties:
-        name: { type: string, minLength: 1, maxLength: 120 }
-    DownloadUrlResponse:
-      type: object
-      additionalProperties: false
-      required: [url, expiresAt]
-      properties:
-        url: { type: string, minLength: 1 }
-        expiresAt: { type: string, minLength: 1 }
-    FigureDocumentV1:
-      type: object
-      additionalProperties: false
-      required: [schemaVersion, artboards, objects, groups, constraints, styles]
-      properties:
-        schemaVersion: { const: 1 }
-        artboards: { type: array }
-        objects: { type: array }
-        groups: { type: array }
-        constraints: { type: array }
-        styles: { type: array }
-    HealthResponse:
-      type: object
-      additionalProperties: false
-      required: [status]
-      properties:
-        status: { const: ok }
-    PrepareUploadRequest:
-      type: object
-      additionalProperties: false
-      required: [filename, contentType, contentLength, checksumSha256]
-      properties:
-        filename: { type: string, minLength: 1, maxLength: 255 }
-        contentType: { type: string, minLength: 1, maxLength: 255 }
-        contentLength: { type: integer, minimum: 1, maximum: 104857600 }
-        checksumSha256: { type: string, pattern: '^[a-f0-9]{64}$' }
-    PrepareUploadResponse:
-      type: object
-      additionalProperties: false
-      required: [uploadId, assetId, upload]
-      properties:
-        uploadId: { type: string, minLength: 1 }
-        assetId: { type: string, minLength: 1 }
-        upload:
-          type: object
-          additionalProperties: false
-          required: [url, method, headers, expiresAt]
-          properties:
-            url: { type: string, minLength: 1 }
-            method: { const: PUT }
-            headers: { type: object, additionalProperties: { type: string } }
-            expiresAt: { type: string, minLength: 1 }
-    Project:
-      type: object
-      additionalProperties: false
-      required: [id, workspaceId, name, status, createdAt, updatedAt]
-      properties:
-        id: { type: string, minLength: 1 }
-        workspaceId: { type: string, minLength: 1 }
-        name: { type: string, minLength: 1, maxLength: 120 }
-        status: { enum: [active, deleting] }
-        createdAt: { type: string, minLength: 1 }
-        updatedAt: { type: string, minLength: 1 }
-    ProjectDocumentResponse:
-      type: object
-      additionalProperties: false
-      required: [projectId, revision, document, updatedAt]
-      properties:
-        projectId: { type: string, minLength: 1 }
-        revision: { type: integer, minimum: 0 }
-        document: { $ref: '#/components/schemas/FigureDocumentV1' }
-        updatedAt: { type: string, minLength: 1 }
-    ProjectListResponse:
-      type: object
-      additionalProperties: false
-      required: [projects]
-      properties:
-        projects:
-          type: array
-          items: { $ref: '#/components/schemas/Project' }
-    RecordExportRequest:
-      type: object
-      additionalProperties: false
-      required: [format, revision, widthPx, heightPx, checksumSha256]
-      properties:
-        format: { const: png }
-        revision: { type: integer, minimum: 0 }
-        widthPx: { type: integer, minimum: 1, maximum: 16384 }
-        heightPx: { type: integer, minimum: 1, maximum: 16384 }
-        checksumSha256: { type: string, pattern: '^[a-f0-9]{64}$' }
-      x-figlab-max-pixels: 100000000
-    RecordExportResponse:
-      type: object
-      additionalProperties: false
-      required: [exportId]
-      properties:
-        exportId: { type: string, minLength: 1 }
-    SaveDocumentRequest:
-      type: object
-      additionalProperties: false
-      required: [baseRevision, document]
-      properties:
-        baseRevision: { type: integer, minimum: 0 }
-        document: { $ref: '#/components/schemas/FigureDocumentV1' }
-    SaveDocumentResponse:
-      type: object
-      additionalProperties: false
-      required: [projectId, revision, document, updatedAt]
-      properties:
-        projectId: { type: string, minLength: 1 }
-        revision: { type: integer, minimum: 1 }
-        document: { $ref: '#/components/schemas/FigureDocumentV1' }
-        updatedAt: { type: string, minLength: 1 }
+                additionalProperties: false
+                type: object
+                required:
+                - projectId
+                - revision
+                - document
+                - updatedAt
+                properties:
+                  projectId:
+                    minLength: 1
+                    type: string
+                  revision:
+                    minimum: 1
+                    type: integer
+                  document:
+                    additionalProperties: false
+                    type: object
+                    required:
+                    - schemaVersion
+                    - artboards
+                    - objects
+                    - groups
+                    - constraints
+                    - styles
+                    properties:
+                      schemaVersion:
+                        type: number
+                        enum:
+                        - 1
+                      artboards:
+                        minItems: 1
+                        type: array
+                        items:
+                          additionalProperties: false
+                          type: object
+                          required:
+                          - id
+                          - name
+                          - widthPt
+                          - heightPt
+                          - backgroundHex
+                          properties:
+                            id:
+                              minLength: 1
+                              type: string
+                            name:
+                              minLength: 1
+                              type: string
+                            widthPt:
+                              exclusiveMinimum: 0
+                              type: number
+                            heightPt:
+                              exclusiveMinimum: 0
+                              type: number
+                            backgroundHex:
+                              pattern: "^#[0-9A-Fa-f]{6}$"
+                              type: string
+                      objects:
+                        type: array
+                        items:
+                          additionalProperties: false
+                          type: object
+                          required:
+                          - id
+                          - type
+                          - artboardId
+                          - transform
+                          - zIndex
+                          - locked
+                          - hidden
+                          - view
+                          properties:
+                            id:
+                              minLength: 1
+                              type: string
+                            type:
+                              type: string
+                              enum:
+                              - image-view
+                            artboardId:
+                              minLength: 1
+                              type: string
+                            transform:
+                              additionalProperties: false
+                              type: object
+                              required:
+                              - xPt
+                              - yPt
+                              - widthPt
+                              - heightPt
+                              - rotationDeg
+                              properties:
+                                xPt:
+                                  type: number
+                                yPt:
+                                  type: number
+                                widthPt:
+                                  exclusiveMinimum: 0
+                                  type: number
+                                heightPt:
+                                  exclusiveMinimum: 0
+                                  type: number
+                                rotationDeg:
+                                  type: number
+                                  enum:
+                                  - 0
+                            zIndex:
+                              type: integer
+                            locked:
+                              type: boolean
+                            hidden:
+                              type: boolean
+                            view:
+                              additionalProperties: false
+                              type: object
+                              required:
+                              - sourceAssetId
+                              - viewport
+                              - display
+                              properties:
+                                sourceAssetId:
+                                  minLength: 1
+                                  type: string
+                                viewport:
+                                  additionalProperties: false
+                                  type: object
+                                  required:
+                                  - x
+                                  - y
+                                  - width
+                                  - height
+                                  properties:
+                                    x:
+                                      minimum: 0
+                                      maximum: 1
+                                      type: number
+                                    y:
+                                      minimum: 0
+                                      maximum: 1
+                                      type: number
+                                    width:
+                                      exclusiveMinimum: 0
+                                      maximum: 1
+                                      type: number
+                                    height:
+                                      exclusiveMinimum: 0
+                                      maximum: 1
+                                      type: number
+                                display:
+                                  additionalProperties: false
+                                  type: object
+                                  required:
+                                  - brightness
+                                  - contrast
+                                  - gamma
+                                  - invert
+                                  properties:
+                                    brightness:
+                                      minimum: -1
+                                      maximum: 1
+                                      type: number
+                                    contrast:
+                                      minimum: 0
+                                      maximum: 4
+                                      type: number
+                                    gamma:
+                                      minimum: 0.1
+                                      maximum: 10
+                                      type: number
+                                    invert:
+                                      type: boolean
+                      groups:
+                        type: array
+                        minItems: 0
+                        maxItems: 0
+                      constraints:
+                        type: array
+                        minItems: 0
+                        maxItems: 0
+                      styles:
+                        type: array
+                        minItems: 0
+                        maxItems: 0
+                  updatedAt:
+                    minLength: 1
+                    type: string
+        '409':
+          description: Default Response
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                - code
+                - message
+                - currentRevision
+                properties:
+                  code:
+                    type: string
+                    enum:
+                    - REVISION_CONFLICT
+                  message:
+                    type: string
+                  currentRevision:
+                    type: integer
+  "/v1/projects/{projectId}/uploads":
+    post:
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              additionalProperties: false
+              type: object
+              required:
+              - filename
+              - contentType
+              - contentLength
+              - checksumSha256
+              properties:
+                filename:
+                  minLength: 1
+                  maxLength: 255
+                  type: string
+                contentType:
+                  minLength: 1
+                  maxLength: 255
+                  type: string
+                contentLength:
+                  minimum: 1
+                  maximum: 104857600
+                  type: integer
+                checksumSha256:
+                  pattern: "^[a-f0-9]{64}$"
+                  type: string
+      parameters:
+      - schema:
+          minLength: 1
+          type: string
+        in: path
+        name: projectId
+        required: true
+      responses:
+        '201':
+          description: Default Response
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                - uploadId
+                - assetId
+                - upload
+                properties:
+                  uploadId:
+                    type: string
+                  assetId:
+                    type: string
+                  upload:
+                    type: object
+                    required:
+                    - url
+                    - method
+                    - headers
+                    - expiresAt
+                    properties:
+                      url:
+                        type: string
+                      method:
+                        type: string
+                        enum:
+                        - PUT
+                      headers:
+                        type: object
+                        additionalProperties:
+                          type: string
+                      expiresAt:
+                        type: string
+        '400':
+          description: Default Response
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                - code
+                - message
+                properties:
+                  code:
+                    type: string
+                    enum:
+                    - UPLOAD_INVALID
+                  message:
+                    type: string
+  "/v1/uploads/{uploadId}/complete":
+    post:
+      parameters:
+      - schema:
+          minLength: 1
+          type: string
+        in: path
+        name: uploadId
+        required: true
+      responses:
+        '202':
+          description: Default Response
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                - assetId
+                - status
+                properties:
+                  assetId:
+                    type: string
+                  status:
+                    anyOf:
+                    - type: string
+                      enum:
+                      - pending-verification
+                    - type: string
+                      enum:
+                      - ready
+                    - type: string
+                      enum:
+                      - rejected
+        '400':
+          description: Default Response
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                - code
+                - message
+                properties:
+                  code:
+                    type: string
+                    enum:
+                    - UPLOAD_INVALID
+                  message:
+                    type: string
+  "/v1/assets/{assetId}":
+    get:
+      parameters:
+      - schema:
+          minLength: 1
+          type: string
+        in: path
+        name: assetId
+        required: true
+      responses:
+        '200':
+          description: Default Response
+          content:
+            application/json:
+              schema:
+                additionalProperties: false
+                type: object
+                required:
+                - id
+                - projectId
+                - filename
+                - mimeType
+                - checksumSha256
+                - widthPx
+                - heightPx
+                - bitDepth
+                - channelCount
+                - status
+                - metadata
+                - createdAt
+                properties:
+                  id:
+                    minLength: 1
+                    type: string
+                  projectId:
+                    minLength: 1
+                    type: string
+                  filename:
+                    minLength: 1
+                    type: string
+                  mimeType:
+                    minLength: 1
+                    type: string
+                  checksumSha256:
+                    pattern: "^[a-f0-9]{64}$"
+                    type: string
+                  widthPx:
+                    minimum: 1
+                    type: integer
+                  heightPx:
+                    minimum: 1
+                    type: integer
+                  bitDepth:
+                    anyOf:
+                    - type: number
+                      enum:
+                      - 8
+                    - type: number
+                      enum:
+                      - 16
+                  channelCount:
+                    anyOf:
+                    - type: number
+                      enum:
+                      - 1
+                    - type: number
+                      enum:
+                      - 3
+                    - type: number
+                      enum:
+                      - 4
+                  status:
+                    anyOf:
+                    - type: string
+                      enum:
+                      - pending-verification
+                    - type: string
+                      enum:
+                      - ready
+                    - type: string
+                      enum:
+                      - rejected
+                  metadata:
+                    type: object
+                    additionalProperties: {}
+                  rejectionReason:
+                    minLength: 1
+                    type: string
+                  createdAt:
+                    minLength: 1
+                    type: string
+  "/v1/assets/{assetId}/download-url":
+    post:
+      parameters:
+      - schema:
+          minLength: 1
+          type: string
+        in: path
+        name: assetId
+        required: true
+      responses:
+        '201':
+          description: Default Response
+          content:
+            application/json:
+              schema:
+                additionalProperties: false
+                type: object
+                required:
+                - url
+                - expiresAt
+                properties:
+                  url:
+                    minLength: 1
+                    type: string
+                  expiresAt:
+                    minLength: 1
+                    type: string
+        '409':
+          description: Default Response
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                - code
+                - message
+                properties:
+                  code:
+                    type: string
+                    enum:
+                    - ASSET_NOT_READY
+                  message:
+                    type: string
+  "/v1/projects/{projectId}/exports":
+    post:
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              additionalProperties: false
+              type: object
+              required:
+              - format
+              - revision
+              - widthPx
+              - heightPx
+              - checksumSha256
+              properties:
+                format:
+                  type: string
+                  enum:
+                  - png
+                revision:
+                  minimum: 0
+                  type: integer
+                widthPx:
+                  minimum: 1
+                  maximum: 16384
+                  type: integer
+                heightPx:
+                  minimum: 1
+                  maximum: 16384
+                  type: integer
+                checksumSha256:
+                  pattern: "^[a-f0-9]{64}$"
+                  type: string
+      parameters:
+      - schema:
+          minLength: 1
+          type: string
+        in: path
+        name: projectId
+        required: true
+      responses:
+        '201':
+          description: Default Response
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                - id
+                - projectId
+                - revision
+                - format
+                - widthPx
+                - heightPx
+                - checksumSha256
+                - createdAt
+                properties:
+                  id:
+                    type: string
+                  projectId:
+                    type: string
+                  revision:
+                    type: integer
+                  format:
+                    type: string
+                    enum:
+                    - png
+                  widthPx:
+                    type: integer
+                  heightPx:
+                    type: integer
+                  checksumSha256:
+                    type: string
+                  createdAt:
+                    type: string
+        '400':
+          description: Default Response
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                - code
+                - message
+                properties:
+                  code:
+                    type: string
+                    enum:
+                    - BAD_REQUEST
+                  message:
+                    type: string
+
