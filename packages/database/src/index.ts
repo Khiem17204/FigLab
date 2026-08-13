@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { isDeepStrictEqual } from "node:util";
 
 export type ProjectStatus = "active" | "deleting";
 export type UploadStatus =
@@ -13,6 +14,11 @@ export type AuditAction =
   | "PROJECT_CREATED"
   | "PROJECT_RENAMED"
   | "DOCUMENT_UPDATED"
+  | "CROP_CREATED"
+  | "CROP_CHANGED"
+  | "DISPLAY_CHANGED"
+  | "OBJECT_TRANSFORMED"
+  | "OBJECT_REMOVED"
   | "ASSET_UPLOADED"
   | "EXPORT_CREATED"
   | "PROJECT_DELETED";
@@ -266,6 +272,8 @@ export class InMemoryFigLabRepository implements FigLabRepository {
     };
     this.documents.set(projectId, updated);
     this.recordAudit(projectId, "DOCUMENT_UPDATED", deriveDocumentDiff(old.document, document));
+    for (const event of deriveDocumentAuditEvents(old.document, document))
+      this.recordAudit(projectId, event.action, event.details);
     return { kind: "saved", document: structuredClone(updated) };
   }
   async createUpload(input: {
@@ -439,6 +447,91 @@ function deriveDocumentDiff(before: unknown, after: unknown): Record<string, unk
     artboardCountBefore: oldDocument.artboards?.length ?? 0,
     artboardCountAfter: newDocument.artboards?.length ?? 0,
   };
+}
+
+type AuditableObject = {
+  id: string;
+  transform: unknown;
+  view: { viewport: unknown; display: unknown };
+};
+
+export function deriveDocumentAuditEvents(
+  before: unknown,
+  after: unknown,
+): { action: AuditAction; details: Record<string, unknown> }[] {
+  const prior = documentObjects(before);
+  const next = documentObjects(after);
+  const events: { action: AuditAction; details: Record<string, unknown> }[] = [];
+
+  for (const [objectId, object] of next) {
+    const old = prior.get(objectId);
+    if (!old) {
+      events.push({
+        action: "CROP_CREATED",
+        details: { objectId, viewport: structuredClone(object.view.viewport) },
+      });
+      continue;
+    }
+    if (!sameValue(old.view.viewport, object.view.viewport))
+      events.push({
+        action: "CROP_CHANGED",
+        details: {
+          objectId,
+          before: structuredClone(old.view.viewport),
+          after: structuredClone(object.view.viewport),
+        },
+      });
+    if (!sameValue(old.view.display, object.view.display))
+      events.push({
+        action: "DISPLAY_CHANGED",
+        details: {
+          objectId,
+          before: structuredClone(old.view.display),
+          after: structuredClone(object.view.display),
+        },
+      });
+    if (!sameValue(old.transform, object.transform))
+      events.push({
+        action: "OBJECT_TRANSFORMED",
+        details: {
+          objectId,
+          before: structuredClone(old.transform),
+          after: structuredClone(object.transform),
+        },
+      });
+  }
+  for (const objectId of prior.keys())
+    if (!next.has(objectId)) events.push({ action: "OBJECT_REMOVED", details: { objectId } });
+
+  return events;
+}
+
+function documentObjects(document: unknown): Map<string, AuditableObject> {
+  if (typeof document !== "object" || document === null || !("objects" in document))
+    return new Map();
+  const objects = (document as { objects?: unknown }).objects;
+  if (!Array.isArray(objects)) return new Map();
+  return new Map(
+    objects
+      .filter(
+        (object): object is AuditableObject =>
+          typeof object === "object" &&
+          object !== null &&
+          "id" in object &&
+          typeof object.id === "string" &&
+          "transform" in object &&
+          "view" in object &&
+          typeof object.view === "object" &&
+          object.view !== null &&
+          "viewport" in object.view &&
+          "display" in object.view,
+      )
+      .map((object) => [object.id, object]),
+  );
+}
+
+function sameValue(left: unknown, right: unknown): boolean {
+  return isDeepStrictEqual(left, right);
 }
 
 export { createPostgresRepository, PostgresFigLabRepository } from "./postgres.js";

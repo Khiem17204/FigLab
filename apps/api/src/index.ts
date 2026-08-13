@@ -96,7 +96,7 @@ export async function buildApp(dependencies: AppDependencies): Promise<FastifyIn
     dependencies.publicAppUrl ?? "http://localhost",
     dependencies.allowInsecureSingleUserRemote ?? false,
   );
-  const app = Fastify({ logger: false });
+  const app = Fastify({ logger: false, ajv: { customOptions: { removeAdditional: false } } });
   const authorizer = dependencies.authorizer ?? new SingleUserAuthorizer();
   await app.register(swagger, {
     openapi: {

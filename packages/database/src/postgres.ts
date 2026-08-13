@@ -12,7 +12,12 @@ import type {
   ProjectRecord,
   UploadRecord,
 } from "./index.js";
-import { assertResourceId, NotFoundError, UploadExpiredError } from "./index.js";
+import {
+  assertResourceId,
+  deriveDocumentAuditEvents,
+  NotFoundError,
+  UploadExpiredError,
+} from "./index.js";
 import * as schema from "./schema.js";
 
 const LOCAL_USER_ID = "00000000-0000-4000-8000-000000000001";
@@ -177,6 +182,8 @@ export class PostgresFigLabRepository implements FigLabRepository {
         "DOCUMENT_UPDATED",
         documentDiff(first(prior.rows).document, document),
       );
+      for (const event of deriveDocumentAuditEvents(first(prior.rows).document, document))
+        await this.insertAudit(client, projectId, event.action, event.details);
       return { kind: "saved", document: record };
     });
   }

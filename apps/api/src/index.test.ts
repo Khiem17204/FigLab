@@ -133,6 +133,31 @@ describe("buildApp", () => {
     await app.close();
   });
 
+  it("rejects client-supplied audit events instead of persisting them", async () => {
+    const repository = new InMemoryFigLabRepository();
+    const principal = await repository.bootstrapSingleUser();
+    const project = await repository.createProject(principal.workspaceId, "Cells");
+    const current = await repository.getDocument(project.id);
+    const app = await buildApp({ repository, store: new FakeObjectStore(), principal });
+
+    const response = await app.inject({
+      method: "PUT",
+      url: `/v1/projects/${project.id}/document`,
+      payload: {
+        baseRevision: 0,
+        document: current.document,
+        auditEvents: [{ action: "PROJECT_DELETED", details: { forged: true } }],
+      },
+    });
+
+    expect(response.statusCode).toBe(400);
+    expect((await repository.getDocument(project.id)).revision).toBe(0);
+    expect((await repository.listAuditEvents(project.id)).map((event) => event.action)).toEqual([
+      "PROJECT_CREATED",
+    ]);
+    await app.close();
+  });
+
   it("returns a typed bad-request envelope for a future figure document version", async () => {
     const repository = new InMemoryFigLabRepository();
     const principal = await repository.bootstrapSingleUser();

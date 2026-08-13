@@ -48,6 +48,80 @@ describe("InMemoryFigLabRepository", () => {
     expect((await repository.getDocument(project.id)).revision).toBe(1);
   });
 
+  it("derives granular document audit events from object changes", async () => {
+    const repository = new InMemoryFigLabRepository();
+    const principal = await repository.bootstrapSingleUser();
+    const project = await repository.createProject(principal.workspaceId, "Experiment");
+    const initial = await repository.getDocument(project.id);
+    const artboardId = (initial.document as { artboards: { id: string }[] }).artboards[0]?.id ?? "";
+    const original = {
+      id: "view-1",
+      type: "image-view",
+      artboardId,
+      transform: { xPt: 10, yPt: 20, widthPt: 100, heightPt: 80, rotationDeg: 0 },
+      zIndex: 0,
+      locked: false,
+      hidden: false,
+      view: {
+        sourceAssetId: "asset-1",
+        viewport: { x: 0, y: 0, width: 1, height: 1 },
+        display: { brightness: 0, contrast: 1, gamma: 1, invert: false },
+      },
+    };
+    const withObject = { ...(initial.document as object), objects: [original] };
+    await repository.saveDocument(project.id, 0, withObject);
+    const changed = structuredClone(withObject) as { objects: (typeof original)[] };
+    changed.objects[0] = {
+      ...original,
+      transform: { ...original.transform, xPt: 30 },
+      view: {
+        ...original.view,
+        viewport: { x: 0.1, y: 0.2, width: 0.5, height: 0.6 },
+        display: { ...original.view.display, brightness: 0.25 },
+      },
+    };
+    await repository.saveDocument(project.id, 1, changed);
+    await repository.saveDocument(project.id, 2, {
+      ...(initial.document as object),
+      objects: [],
+    });
+
+    const granular = (await repository.listAuditEvents(project.id))
+      .filter((event) => event.action !== "PROJECT_CREATED" && event.action !== "DOCUMENT_UPDATED")
+      .map(({ action, details }) => ({ action, details }));
+    expect(granular).toEqual([
+      {
+        action: "CROP_CREATED",
+        details: { objectId: "view-1", viewport: original.view.viewport },
+      },
+      {
+        action: "CROP_CHANGED",
+        details: {
+          objectId: "view-1",
+          before: original.view.viewport,
+          after: changed.objects[0]?.view.viewport,
+        },
+      },
+      {
+        action: "DISPLAY_CHANGED",
+        details: {
+          objectId: "view-1",
+          before: original.view.display,
+          after: changed.objects[0]?.view.display,
+        },
+      },
+      {
+        action: "OBJECT_TRANSFORMED",
+        details: {
+          objectId: "view-1",
+          before: original.transform,
+          after: changed.objects[0]?.transform,
+        },
+      },
+      { action: "OBJECT_REMOVED", details: { objectId: "view-1" } },
+    ]);
+  });
+
   it("creates exactly one asset record for an upload session", async () => {
     const repository = new InMemoryFigLabRepository();
     const principal = await repository.bootstrapSingleUser();

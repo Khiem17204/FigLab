@@ -80,4 +80,44 @@ describe.skipIf(!databaseUrl)("PostgresFigLabRepository", () => {
     });
     expect((await pool.query("SELECT identifier FROM graphile_worker.jobs")).rows).toEqual([]);
   });
+
+  it("persists server-derived granular document audit events", async () => {
+    const principal = await repository.bootstrapSingleUser();
+    const project = await repository.createProject(principal.workspaceId, "Audit derivation");
+    const current = await repository.getDocument(project.id);
+    const artboardId = (current.document as { artboards: { id: string }[] }).artboards[0]?.id ?? "";
+    await repository.saveDocument(project.id, 0, {
+      ...(current.document as object),
+      objects: [
+        {
+          id: "view-1",
+          type: "image-view",
+          artboardId,
+          transform: { xPt: 0, yPt: 0, widthPt: 100, heightPt: 100, rotationDeg: 0 },
+          zIndex: 0,
+          locked: false,
+          hidden: false,
+          view: {
+            sourceAssetId: "asset-1",
+            viewport: { x: 0, y: 0, width: 1, height: 1 },
+            display: { brightness: 0, contrast: 1, gamma: 1, invert: false },
+          },
+        },
+      ],
+    });
+
+    expect(
+      (await repository.listAuditEvents(project.id))
+        .filter((event) => event.action === "CROP_CREATED")
+        .map(({ action, details }) => ({ action, details })),
+    ).toEqual([
+      {
+        action: "CROP_CREATED",
+        details: {
+          objectId: "view-1",
+          viewport: { x: 0, y: 0, width: 1, height: 1 },
+        },
+      },
+    ]);
+  });
 });
