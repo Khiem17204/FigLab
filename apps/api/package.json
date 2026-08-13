@@ -1,0 +1,29 @@
+{
+  "name": "@figlab/api",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "dev": "tsx watch src/index.ts",
+    "start": "node dist/index.js",
+    "test:integration": "vitest run --passWithNoTests",
+    "test:unit": "vitest run --passWithNoTests",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@fastify/cors": "11.3.0",
+    "@fastify/swagger": "9.8.1",
+    "@fastify/swagger-ui": "6.1.1",
+    "@figlab/api-contract": "workspace:*",
+    "@figlab/database": "workspace:*",
+    "@figlab/editor-core": "workspace:*",
+    "@figlab/figure-schema": "workspace:*",
+    "@figlab/storage": "workspace:*",
+    "@sinclair/typebox": "0.34.52",
+    "fastify": "5.11.3"
+  },
+  "devDependencies": {
+    "tsx": "4.23.12"
+  }
+}

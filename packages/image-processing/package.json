@@ -1,0 +1,24 @@
+{
+  "name": "@figlab/image-processing",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "test:integration": "vitest run --passWithNoTests",
+    "test:unit": "vitest run",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@figlab/api-contract": "workspace:*",
+    "@figlab/figure-schema": "workspace:*",
+    "geotiff": "3.0.5",
+    "pngjs": "7.0.0"
+  },
+  "devDependencies": {
+    "@types/pngjs": "6.0.5"
+  }
+}

@@ -1,0 +1,33 @@
+{
+  "name": "@figlab/web",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "vite build",
+    "dev": "vite --port 4173",
+    "preview": "vite preview --port 4173",
+    "test:integration": "vitest run --passWithNoTests",
+    "test:unit": "vitest run --passWithNoTests",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@figlab/api-contract": "workspace:*",
+    "@figlab/editor-core": "workspace:*",
+    "@figlab/figure-schema": "workspace:*",
+    "@figlab/image-processing": "workspace:*",
+    "@figlab/ui": "workspace:*",
+    "@radix-ui/react-dialog": "1.1.23",
+    "@tanstack/react-query": "5.101.4",
+    "pixi.js": "8.19.0",
+    "react": "19.2.8",
+    "react-dom": "19.2.8",
+    "zustand": "5.0.15"
+  },
+  "devDependencies": {
+    "@types/react": "19.2.18",
+    "@types/react-dom": "19.2.4",
+    "@vitejs/plugin-react": "6.0.5",
+    "vite": "8.2.1"
+  }
+}

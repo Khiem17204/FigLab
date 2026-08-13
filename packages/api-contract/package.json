@@ -1,0 +1,19 @@
+{
+  "name": "@figlab/api-contract",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "test:integration": "vitest run --passWithNoTests",
+    "test:unit": "vitest run --root ../.. packages/api-contract/src",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@figlab/figure-schema": "workspace:*",
+    "@sinclair/typebox": "0.34.52"
+  }
+}

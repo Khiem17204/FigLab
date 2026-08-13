@@ -1,0 +1,19 @@
+{
+  "name": "@figlab/storage",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "test:integration": "vitest run --passWithNoTests",
+    "test:unit": "vitest run",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@aws-sdk/client-s3": "3.1109.0",
+    "@aws-sdk/s3-request-presigner": "3.1109.0"
+  }
+}
