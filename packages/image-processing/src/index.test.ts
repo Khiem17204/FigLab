@@ -142,7 +142,8 @@ describe("CPU PNG export", () => {
       },
     };
 
-    const decoded = PNG.sync.read(await composeArtboardPng(document, "board", 2, 1, resolver));
+    const bytes = await composeArtboardPng(document, "board", 2, 1, resolver);
+    const decoded = PNG.sync.read(Buffer.from(bytes));
     expect([...decoded.data]).toEqual([255, 0, 0, 255, 0, 255, 0, 255]);
   });
 

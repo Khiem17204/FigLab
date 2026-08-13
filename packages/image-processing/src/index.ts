@@ -1,6 +1,5 @@
 import type { DisplayTransformV1, FigureDocumentV1, NormalizedRect } from "@figlab/figure-schema";
 import { fromArrayBuffer } from "geotiff";
-import { PNG } from "pngjs";
 
 export const MAX_RASTER_PIXELS = 100_000_000;
 export const MAX_EXPORT_EDGE_PX = 16_384;
@@ -198,8 +197,8 @@ export async function composeArtboardPng(
   validateExportDimensions(widthPx, heightPx);
   const artboard = document.artboards.find((candidate) => candidate.id === artboardId);
   if (artboard === undefined) throw new Error(`Artboard ${artboardId} was not found`);
-  const canvas = new PNG({ width: widthPx, height: heightPx });
-  fillBackground(canvas.data, artboard.backgroundHex);
+  const canvas = new Uint8Array(widthPx * heightPx * 4);
+  fillBackground(canvas, artboard.backgroundHex);
   const views = document.objects
     .filter((object) => object.artboardId === artboardId && !object.hidden)
     .slice()
@@ -209,7 +208,7 @@ export async function composeArtboardPng(
     const sourceRect = normalizedToPixelRect(object.view.viewport, source.widthPx, source.heightPx);
     const region = await resolver.getRegion(object.view.sourceAssetId, sourceRect, 0);
     compositeImageView(
-      canvas.data,
+      canvas,
       widthPx,
       heightPx,
       artboard.widthPt,
@@ -219,7 +218,91 @@ export async function composeArtboardPng(
       object.view.display,
     );
   }
-  return PNG.sync.write(canvas);
+  return encodePngRgba(canvas, widthPx, heightPx);
+}
+
+async function encodePngRgba(
+  data: Uint8Array,
+  widthPx: number,
+  heightPx: number,
+): Promise<Uint8Array> {
+  const rowByteLength = widthPx * 4;
+  const scanlines = new Uint8Array((rowByteLength + 1) * heightPx);
+  for (let y = 0; y < heightPx; y += 1) {
+    const sourceOffset = y * rowByteLength;
+    const targetOffset = y * (rowByteLength + 1);
+    scanlines[targetOffset] = 0;
+    scanlines.set(data.subarray(sourceOffset, sourceOffset + rowByteLength), targetOffset + 1);
+  }
+
+  const header = new Uint8Array(13);
+  const headerView = new DataView(header.buffer);
+  headerView.setUint32(0, widthPx, false);
+  headerView.setUint32(4, heightPx, false);
+  header[8] = 8;
+  header[9] = 6;
+  const compressed = await deflate(scanlines);
+  return concatenateBytes([
+    new Uint8Array([137, 80, 78, 71, 13, 10, 26, 10]),
+    pngChunk("IHDR", header),
+    pngChunk("IDAT", compressed),
+    pngChunk("IEND", new Uint8Array()),
+  ]);
+}
+
+async function deflate(data: Uint8Array): Promise<Uint8Array> {
+  if (typeof CompressionStream === "undefined") {
+    throw new Error("PNG export requires CompressionStream support");
+  }
+  const compression = new CompressionStream("deflate");
+  const compressed = readStream(compression.readable);
+  const writer = compression.writable.getWriter();
+  const input = new Uint8Array(new ArrayBuffer(data.byteLength));
+  input.set(data);
+  await writer.write(input);
+  await writer.close();
+  return compressed;
+}
+
+async function readStream(stream: ReadableStream<Uint8Array>): Promise<Uint8Array> {
+  const reader = stream.getReader();
+  const chunks: Uint8Array[] = [];
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) return concatenateBytes(chunks);
+    chunks.push(value);
+  }
+}
+
+function pngChunk(type: string, data: Uint8Array): Uint8Array {
+  const chunk = new Uint8Array(data.length + 12);
+  const view = new DataView(chunk.buffer);
+  view.setUint32(0, data.length, false);
+  for (let index = 0; index < 4; index += 1) chunk[index + 4] = type.charCodeAt(index);
+  chunk.set(data, 8);
+  view.setUint32(data.length + 8, crc32(chunk.subarray(4, data.length + 8)), false);
+  return chunk;
+}
+
+function crc32(data: Uint8Array): number {
+  let crc = 0xffff_ffff;
+  for (const byte of data) {
+    crc ^= byte;
+    for (let bit = 0; bit < 8; bit += 1) {
+      crc = (crc >>> 1) ^ (crc & 1 ? 0xedb8_8320 : 0);
+    }
+  }
+  return (crc ^ 0xffff_ffff) >>> 0;
+}
+
+function concatenateBytes(chunks: ReadonlyArray<Uint8Array>): Uint8Array {
+  const output = new Uint8Array(chunks.reduce((length, chunk) => length + chunk.length, 0));
+  let offset = 0;
+  for (const chunk of chunks) {
+    output.set(chunk, offset);
+    offset += chunk.length;
+  }
+  return output;
 }
 
 function validateExportDimensions(widthPx: number, heightPx: number): void {
