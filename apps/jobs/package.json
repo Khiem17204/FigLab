@@ -8,11 +8,12 @@
     "dev": "tsx watch src/index.ts",
     "start": "node dist/index.js",
     "test:integration": "vitest run --passWithNoTests",
-    "test:unit": "vitest run --passWithNoTests",
+    "test:unit": "vitest run --config vitest.config.ts",
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
     "@figlab/database": "workspace:*",
+    "@figlab/image-processing": "workspace:*",
     "@figlab/storage": "workspace:*",
     "file-type": "22.0.1",
     "graphile-worker": "0.17.3",
