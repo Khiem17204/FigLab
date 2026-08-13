@@ -1,5 +1,5 @@
 import { FigureDocumentV1Schema } from "@figlab/figure-schema";
-import { type Static, Type } from "@sinclair/typebox";
+import { Kind, type Static, Type, TypeRegistry } from "@sinclair/typebox";
 import { Value } from "@sinclair/typebox/value";
 
 export const MAX_UPLOAD_BYTES = 104_857_600;
@@ -183,7 +183,7 @@ export const DownloadUrlResponseSchema = Type.Object(
   { additionalProperties: false },
 );
 
-export const RecordExportRequestSchema = Type.Object(
+const RecordExportRequestStructuralSchema = Type.Object(
   {
     format: Type.Literal("png"),
     revision: Type.Integer({ minimum: 0 }),
@@ -194,10 +194,23 @@ export const RecordExportRequestSchema = Type.Object(
   { additionalProperties: false },
 );
 
-export const validateRecordExportRequest = (request: unknown): request is RecordExportRequest => {
-  if (!Value.Check(RecordExportRequestSchema, request)) return false;
+const RecordExportRequestKind = "FigLabRecordExportRequest";
 
-  return request.widthPx * request.heightPx <= MAX_EXPORT_PIXELS;
+TypeRegistry.Set(RecordExportRequestKind, (_schema, value) => {
+  if (!Value.Check(RecordExportRequestStructuralSchema, value)) return false;
+
+  return value.widthPx * value.heightPx <= MAX_EXPORT_PIXELS;
+});
+
+export const RecordExportRequestSchema = Type.Unsafe<
+  Static<typeof RecordExportRequestStructuralSchema>
+>({
+  ...RecordExportRequestStructuralSchema,
+  [Kind]: RecordExportRequestKind,
+});
+
+export const validateRecordExportRequest = (request: unknown): request is RecordExportRequest => {
+  return Value.Check(RecordExportRequestSchema, request);
 };
 
 export type ErrorEnvelope = Static<typeof ErrorEnvelopeSchema>;

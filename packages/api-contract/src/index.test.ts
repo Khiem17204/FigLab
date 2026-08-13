@@ -1,10 +1,10 @@
 import { Value } from "@sinclair/typebox/value";
 import { describe, expect, it } from "vitest";
-import * as apiContract from "./index.js";
 import {
   AssetDescriptorSchema,
   apiRoutes,
   PrepareUploadRequestSchema,
+  RecordExportRequestSchema,
   RevisionConflictSchema,
   SaveDocumentRequestSchema,
 } from "./index.js";
@@ -76,32 +76,17 @@ describe("public API contracts", () => {
     ).toBe(false);
   });
 
-  it("rejects exports over 100 million pixels even when each edge is allowed", () => {
-    const validateRecordExportRequest = (
-      apiContract as {
-        validateRecordExportRequest?: (request: unknown) => boolean;
-      }
-    ).validateRecordExportRequest;
+  it("directly rejects exports over 100 million pixels even when each edge is allowed", () => {
+    const request = {
+      format: "png",
+      revision: 0,
+      widthPx: 10_000,
+      heightPx: 10_000,
+      checksumSha256: "c".repeat(64),
+    };
 
-    expect(validateRecordExportRequest).toBeTypeOf("function");
-    expect(
-      validateRecordExportRequest?.({
-        format: "png",
-        revision: 0,
-        widthPx: 10_000,
-        heightPx: 10_000,
-        checksumSha256: "c".repeat(64),
-      }),
-    ).toBe(true);
-    expect(
-      validateRecordExportRequest?.({
-        format: "png",
-        revision: 0,
-        widthPx: 10_001,
-        heightPx: 10_000,
-        checksumSha256: "c".repeat(64),
-      }),
-    ).toBe(false);
+    expect(Value.Check(RecordExportRequestSchema, request)).toBe(true);
+    expect(Value.Check(RecordExportRequestSchema, { ...request, widthPx: 10_001 })).toBe(false);
   });
 
   it("uses the typed revision-conflict error envelope", () => {

@@ -16,7 +16,7 @@ export default defineConfig({
     },
   ],
   webServer: {
-    command: "pnpm --filter @figlab/web dev --host 127.0.0.1",
+    command: "corepack pnpm@10.34.5 --filter @figlab/web dev --host 127.0.0.1",
     url: "http://127.0.0.1:4173",
     reuseExistingServer: !process.env.CI,
   },

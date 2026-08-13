@@ -11,17 +11,35 @@ paths:
       responses:
         '200':
           description: Service is healthy.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HealthResponse'
   /v1/projects:
     get:
       operationId: listProjects
       responses:
         '200':
           description: Projects listed.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProjectListResponse'
     post:
       operationId: createProject
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateProjectRequest'
       responses:
         '201':
           description: Project created.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Project'
   /v1/projects/{projectId}:
     get:
       operationId: getProject
@@ -30,6 +48,10 @@ paths:
       responses:
         '200':
           description: Project returned.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Project'
   /v1/projects/{projectId}/document:
     get:
       operationId: getProjectDocument
@@ -38,21 +60,45 @@ paths:
       responses:
         '200':
           description: Document returned.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProjectDocumentResponse'
     put:
       operationId: saveProjectDocument
       parameters:
         - $ref: '#/components/parameters/projectId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SaveDocumentRequest'
       responses:
         '200':
           description: Document saved.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SaveDocumentResponse'
   /v1/projects/{projectId}/uploads:
     post:
       operationId: prepareUpload
       parameters:
         - $ref: '#/components/parameters/projectId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PrepareUploadRequest'
       responses:
         '201':
           description: Upload prepared.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PrepareUploadResponse'
   /v1/uploads/{uploadId}/complete:
     post:
       operationId: completeUpload
@@ -61,6 +107,10 @@ paths:
       responses:
         '202':
           description: Upload queued for verification.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CompleteUploadResponse'
   /v1/assets/{assetId}:
     get:
       operationId: getAsset
@@ -69,6 +119,10 @@ paths:
       responses:
         '200':
           description: Asset returned.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AssetDescriptor'
   /v1/assets/{assetId}/download-url:
     post:
       operationId: createAssetDownloadUrl
@@ -77,14 +131,28 @@ paths:
       responses:
         '201':
           description: Download URL created.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DownloadUrlResponse'
   /v1/projects/{projectId}/exports:
     post:
       operationId: recordExport
       parameters:
         - $ref: '#/components/parameters/projectId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RecordExportRequest'
       responses:
         '201':
           description: Export recorded.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RecordExportResponse'
 components:
   parameters:
     assetId:
@@ -105,3 +173,147 @@ components:
       required: true
       schema:
         type: string
+  schemas:
+    AssetDescriptor:
+      type: object
+      additionalProperties: false
+      required: [id, projectId, filename, mimeType, checksumSha256, widthPx, heightPx, bitDepth, channelCount, status, metadata, createdAt]
+      properties:
+        id: { type: string, minLength: 1 }
+        projectId: { type: string, minLength: 1 }
+        filename: { type: string, minLength: 1 }
+        mimeType: { type: string, minLength: 1 }
+        checksumSha256: { type: string, pattern: '^[a-f0-9]{64}$' }
+        widthPx: { type: integer, minimum: 1 }
+        heightPx: { type: integer, minimum: 1 }
+        bitDepth: { enum: [8, 16] }
+        channelCount: { enum: [1, 3, 4] }
+        status: { $ref: '#/components/schemas/AssetStatus' }
+        metadata: { type: object, additionalProperties: true }
+        rejectionReason: { type: string, minLength: 1 }
+        createdAt: { type: string, minLength: 1 }
+    AssetStatus:
+      enum: [pending-verification, ready, rejected]
+    CompleteUploadResponse:
+      type: object
+      additionalProperties: false
+      required: [assetId, status]
+      properties:
+        assetId: { type: string, minLength: 1 }
+        status: { $ref: '#/components/schemas/AssetStatus' }
+    CreateProjectRequest:
+      type: object
+      additionalProperties: false
+      required: [name]
+      properties:
+        name: { type: string, minLength: 1, maxLength: 120 }
+    DownloadUrlResponse:
+      type: object
+      additionalProperties: false
+      required: [url, expiresAt]
+      properties:
+        url: { type: string, minLength: 1 }
+        expiresAt: { type: string, minLength: 1 }
+    FigureDocumentV1:
+      type: object
+      additionalProperties: false
+      required: [schemaVersion, artboards, objects, groups, constraints, styles]
+      properties:
+        schemaVersion: { const: 1 }
+        artboards: { type: array }
+        objects: { type: array }
+        groups: { type: array }
+        constraints: { type: array }
+        styles: { type: array }
+    HealthResponse:
+      type: object
+      additionalProperties: false
+      required: [status]
+      properties:
+        status: { const: ok }
+    PrepareUploadRequest:
+      type: object
+      additionalProperties: false
+      required: [filename, contentType, contentLength, checksumSha256]
+      properties:
+        filename: { type: string, minLength: 1, maxLength: 255 }
+        contentType: { type: string, minLength: 1, maxLength: 255 }
+        contentLength: { type: integer, minimum: 1, maximum: 104857600 }
+        checksumSha256: { type: string, pattern: '^[a-f0-9]{64}$' }
+    PrepareUploadResponse:
+      type: object
+      additionalProperties: false
+      required: [uploadId, assetId, upload]
+      properties:
+        uploadId: { type: string, minLength: 1 }
+        assetId: { type: string, minLength: 1 }
+        upload:
+          type: object
+          additionalProperties: false
+          required: [url, method, headers, expiresAt]
+          properties:
+            url: { type: string, minLength: 1 }
+            method: { const: PUT }
+            headers: { type: object, additionalProperties: { type: string } }
+            expiresAt: { type: string, minLength: 1 }
+    Project:
+      type: object
+      additionalProperties: false
+      required: [id, workspaceId, name, status, createdAt, updatedAt]
+      properties:
+        id: { type: string, minLength: 1 }
+        workspaceId: { type: string, minLength: 1 }
+        name: { type: string, minLength: 1, maxLength: 120 }
+        status: { enum: [active, deleting] }
+        createdAt: { type: string, minLength: 1 }
+        updatedAt: { type: string, minLength: 1 }
+    ProjectDocumentResponse:
+      type: object
+      additionalProperties: false
+      required: [projectId, revision, document, updatedAt]
+      properties:
+        projectId: { type: string, minLength: 1 }
+        revision: { type: integer, minimum: 0 }
+        document: { $ref: '#/components/schemas/FigureDocumentV1' }
+        updatedAt: { type: string, minLength: 1 }
+    ProjectListResponse:
+      type: object
+      additionalProperties: false
+      required: [projects]
+      properties:
+        projects:
+          type: array
+          items: { $ref: '#/components/schemas/Project' }
+    RecordExportRequest:
+      type: object
+      additionalProperties: false
+      required: [format, revision, widthPx, heightPx, checksumSha256]
+      properties:
+        format: { const: png }
+        revision: { type: integer, minimum: 0 }
+        widthPx: { type: integer, minimum: 1, maximum: 16384 }
+        heightPx: { type: integer, minimum: 1, maximum: 16384 }
+        checksumSha256: { type: string, pattern: '^[a-f0-9]{64}$' }
+      x-figlab-max-pixels: 100000000
+    RecordExportResponse:
+      type: object
+      additionalProperties: false
+      required: [exportId]
+      properties:
+        exportId: { type: string, minLength: 1 }
+    SaveDocumentRequest:
+      type: object
+      additionalProperties: false
+      required: [baseRevision, document]
+      properties:
+        baseRevision: { type: integer, minimum: 0 }
+        document: { $ref: '#/components/schemas/FigureDocumentV1' }
+    SaveDocumentResponse:
+      type: object
+      additionalProperties: false
+      required: [projectId, revision, document, updatedAt]
+      properties:
+        projectId: { type: string, minLength: 1 }
+        revision: { type: integer, minimum: 1 }
+        document: { $ref: '#/components/schemas/FigureDocumentV1' }
+        updatedAt: { type: string, minLength: 1 }
