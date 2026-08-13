@@ -1,1 +1,340 @@
-export {};
+import { randomUUID } from "node:crypto";
+import swagger from "@fastify/swagger";
+import {
+  AssetDescriptorSchema,
+  apiRoutes,
+  CreateProjectRequestSchema,
+  DownloadUrlResponseSchema,
+  PrepareUploadRequestSchema,
+  ProjectDocumentResponseSchema,
+  ProjectListResponseSchema,
+  ProjectSchema,
+  RecordExportRequestSchema,
+  SaveDocumentRequestSchema,
+  SaveDocumentResponseSchema,
+  UpdateProjectRequestSchema,
+} from "@figlab/api-contract";
+import {
+  type AssetRecord,
+  type Authorizer,
+  type InMemoryFigLabRepository,
+  NotFoundError,
+  type Principal,
+  SingleUserAuthorizer,
+} from "@figlab/database";
+import { decodeFigureDocument } from "@figlab/figure-schema";
+import type { ObjectStore } from "@figlab/storage";
+import { Type } from "@sinclair/typebox";
+import Fastify, { type FastifyInstance } from "fastify";
+
+const params = Type.Object({ projectId: Type.String({ minLength: 1 }) });
+const uploadParams = Type.Object({ uploadId: Type.String({ minLength: 1 }) });
+const assetParams = Type.Object({ assetId: Type.String({ minLength: 1 }) });
+const completionSchema = Type.Object({
+  assetId: Type.String(),
+  status: Type.Union([
+    Type.Literal("pending-verification"),
+    Type.Literal("ready"),
+    Type.Literal("rejected"),
+  ]),
+});
+const uploadSchema = Type.Object({
+  uploadId: Type.String(),
+  assetId: Type.String(),
+  upload: Type.Object({
+    url: Type.String(),
+    method: Type.Literal("PUT"),
+    headers: Type.Record(Type.String(), Type.String()),
+    expiresAt: Type.String(),
+  }),
+});
+const exportSchema = Type.Object({
+  id: Type.String(),
+  projectId: Type.String(),
+  revision: Type.Integer(),
+  format: Type.Literal("png"),
+  widthPx: Type.Integer(),
+  heightPx: Type.Integer(),
+  checksumSha256: Type.String(),
+  createdAt: Type.String(),
+});
+
+export interface AppDependencies {
+  repository: InMemoryFigLabRepository;
+  store: ObjectStore;
+  principal: Principal;
+  authorizer?: Authorizer;
+  uploadTtlSeconds?: number;
+}
+export function assertSingleUserConfiguration(
+  publicAppUrl: string,
+  allowInsecureRemote = false,
+): void {
+  const host = new URL(publicAppUrl).hostname;
+  const local =
+    host === "localhost" || host === "::1" || host === "127.0.0.1" || host.startsWith("127.");
+  if (!local && !allowInsecureRemote)
+    throw new Error("Single-user mode requires a localhost or loopback PUBLIC_APP_URL");
+}
+export async function buildApp(dependencies: AppDependencies): Promise<FastifyInstance> {
+  const app = Fastify({ logger: false });
+  const authorizer = dependencies.authorizer ?? new SingleUserAuthorizer();
+  await app.register(swagger, { openapi: { info: { title: "FigLab API", version: "0.1.0" } } });
+  const projectFor = async (projectId: string) => {
+    const project = await dependencies.repository.getProject(projectId);
+    await authorizer.requireProject(dependencies.principal, project);
+    return project;
+  };
+  app.setErrorHandler((error, request, reply) => {
+    if (error instanceof NotFoundError)
+      return reply.status(404).send({ code: "NOT_FOUND", message: "Resource not found" });
+    if (typeof error === "object" && error !== null && "validation" in error)
+      return reply.status(400).send({
+        code: request.url.includes("/uploads") ? "UPLOAD_INVALID" : "BAD_REQUEST",
+        message: "Invalid request",
+      });
+    return reply.status(500).send({ code: "INTERNAL_ERROR", message: "Internal server error" });
+  });
+  app.get(
+    apiRoutes.health,
+    { schema: { response: { 200: Type.Object({ ok: Type.Literal(true) }) } } },
+    async () => ({ ok: true }),
+  );
+  app.get(
+    apiRoutes.projects,
+    { schema: { response: { 200: ProjectListResponseSchema } } },
+    async () => ({
+      projects: await dependencies.repository.listProjects(dependencies.principal.workspaceId),
+    }),
+  );
+  app.post(
+    apiRoutes.projects,
+    { schema: { body: CreateProjectRequestSchema, response: { 201: ProjectSchema } } },
+    async (request, reply) => {
+      const body = request.body as { name: string };
+      const project = await dependencies.repository.createProject(
+        dependencies.principal.workspaceId,
+        body.name,
+      );
+      return reply.status(201).send(project);
+    },
+  );
+  app.get(
+    apiRoutes.project,
+    { schema: { params, response: { 200: ProjectSchema } } },
+    async (request) => projectFor((request.params as { projectId: string }).projectId),
+  );
+  app.put(
+    apiRoutes.project,
+    { schema: { params, body: UpdateProjectRequestSchema, response: { 200: ProjectSchema } } },
+    async (request) => {
+      const id = (request.params as { projectId: string }).projectId;
+      await projectFor(id);
+      return dependencies.repository.renameProject(id, (request.body as { name: string }).name);
+    },
+  );
+  app.delete(
+    apiRoutes.project,
+    { schema: { params, response: { 202: ProjectSchema } } },
+    async (request, reply) => {
+      const id = (request.params as { projectId: string }).projectId;
+      await projectFor(id);
+      return reply.status(202).send(await dependencies.repository.markProjectDeleting(id));
+    },
+  );
+  app.get(
+    apiRoutes.projectDocument,
+    { schema: { params, response: { 200: ProjectDocumentResponseSchema } } },
+    async (request) => {
+      const id = (request.params as { projectId: string }).projectId;
+      await projectFor(id);
+      return dependencies.repository.getDocument(id);
+    },
+  );
+  app.put(
+    apiRoutes.projectDocument,
+    {
+      schema: {
+        params,
+        body: SaveDocumentRequestSchema,
+        response: {
+          200: SaveDocumentResponseSchema,
+          409: Type.Object({
+            code: Type.Literal("REVISION_CONFLICT"),
+            message: Type.String(),
+            currentRevision: Type.Integer(),
+          }),
+        },
+      },
+    },
+    async (request, reply) => {
+      const id = (request.params as { projectId: string }).projectId;
+      await projectFor(id);
+      const body = request.body as { baseRevision: number; document: unknown };
+      const document = decodeFigureDocument(body.document);
+      await dependencies.repository.assertReadyAssets(id, sourceAssetIds(document));
+      const saved = await dependencies.repository.saveDocument(id, body.baseRevision, document);
+      if (saved.kind === "conflict")
+        return reply.status(409).send({
+          code: "REVISION_CONFLICT",
+          message: "Document revision conflict",
+          currentRevision: saved.currentRevision,
+        });
+      return saved.document;
+    },
+  );
+  app.post(
+    apiRoutes.projectUploads,
+    {
+      schema: {
+        params,
+        body: PrepareUploadRequestSchema,
+        response: {
+          201: uploadSchema,
+          400: Type.Object({ code: Type.Literal("UPLOAD_INVALID"), message: Type.String() }),
+        },
+      },
+    },
+    async (request, reply) => {
+      const id = (request.params as { projectId: string }).projectId;
+      const body = request.body as {
+        filename: string;
+        contentType: string;
+        contentLength: number;
+        checksumSha256: string;
+      };
+      await projectFor(id);
+      if (!isValidUpload(body))
+        return reply
+          .status(400)
+          .send({ code: "UPLOAD_INVALID", message: "Unsupported upload claim" });
+      const assetId = randomUUID();
+      const key = `workspaces/${dependencies.principal.workspaceId}/projects/${id}/assets/${assetId}/original`;
+      const upload = await dependencies.repository.createUpload({
+        projectId: id,
+        ...body,
+        mimeType: body.contentType,
+        assetId,
+        storageKey: key,
+        expiresAt: new Date(
+          Date.now() + (dependencies.uploadTtlSeconds ?? 600) * 1000,
+        ).toISOString(),
+      });
+      const signed = await dependencies.store.presignPut({
+        key,
+        contentType: body.contentType,
+        contentLength: body.contentLength,
+        expiresInSeconds: dependencies.uploadTtlSeconds ?? 600,
+      });
+      return reply
+        .status(201)
+        .send({ uploadId: upload.id, assetId: upload.assetId, upload: signed });
+    },
+  );
+  app.post(
+    apiRoutes.uploadComplete,
+    {
+      schema: {
+        params: uploadParams,
+        response: {
+          202: completionSchema,
+          400: Type.Object({ code: Type.Literal("UPLOAD_INVALID"), message: Type.String() }),
+        },
+      },
+    },
+    async (request, reply) => {
+      const upload = await dependencies.repository.getUpload(
+        (request.params as { uploadId: string }).uploadId,
+      );
+      await projectFor(upload.projectId);
+      const asset = await dependencies.repository.getAsset(upload.assetId);
+      const stat = await dependencies.store.stat(asset.storageKey);
+      if (!stat || stat.contentLength !== upload.contentLength)
+        return reply.status(400).send({
+          code: "UPLOAD_INVALID",
+          message: "Uploaded object is missing or has an unexpected length",
+        });
+      await dependencies.repository.completeUpload(upload.id);
+      return reply.status(202).send({ assetId: asset.id, status: asset.status });
+    },
+  );
+  app.get(
+    apiRoutes.asset,
+    { schema: { params: assetParams, response: { 200: AssetDescriptorSchema } } },
+    async (request) =>
+      assetFor(dependencies, authorizer, (request.params as { assetId: string }).assetId),
+  );
+  app.post(
+    apiRoutes.assetDownloadUrl,
+    {
+      schema: {
+        params: assetParams,
+        response: {
+          201: DownloadUrlResponseSchema,
+          409: Type.Object({ code: Type.Literal("ASSET_NOT_READY"), message: Type.String() }),
+        },
+      },
+    },
+    async (request, reply) => {
+      const asset = await assetFor(
+        dependencies,
+        authorizer,
+        (request.params as { assetId: string }).assetId,
+      );
+      if (asset.status !== "ready")
+        return reply.status(409).send({ code: "ASSET_NOT_READY", message: "Asset is not ready" });
+      const signed = await dependencies.store.presignDownload(asset.storageKey);
+      return reply.status(201).send({ url: signed.url, expiresAt: signed.expiresAt });
+    },
+  );
+  app.post(
+    apiRoutes.projectExports,
+    { schema: { params, body: RecordExportRequestSchema, response: { 201: exportSchema } } },
+    async (request, reply) => {
+      const id = (request.params as { projectId: string }).projectId;
+      await projectFor(id);
+      const body = request.body as {
+        format: "png";
+        revision: number;
+        widthPx: number;
+        heightPx: number;
+        checksumSha256: string;
+      };
+      return reply
+        .status(201)
+        .send(await dependencies.repository.recordExport({ projectId: id, ...body }));
+    },
+  );
+  return app;
+}
+async function assetFor(
+  dependencies: AppDependencies,
+  authorizer: Authorizer,
+  id: string,
+): Promise<AssetRecord> {
+  const asset = await dependencies.repository.getAsset(id);
+  await authorizer.requireProject(
+    dependencies.principal,
+    await dependencies.repository.getProject(asset.projectId),
+  );
+  return asset;
+}
+function sourceAssetIds(document: {
+  objects: { type: string; view?: { sourceAssetId: string } }[];
+}): string[] {
+  return document.objects
+    .filter((object) => object.type === "image-view" && object.view)
+    .map((object) => object.view?.sourceAssetId ?? "");
+}
+function isValidUpload(input: {
+  contentType: string;
+  contentLength: number;
+  checksumSha256: string;
+}): boolean {
+  return (
+    ["image/png", "image/jpeg", "image/tiff"].includes(input.contentType) &&
+    input.contentLength > 0 &&
+    input.contentLength <= 104_857_600 &&
+    /^[a-f0-9]{64}$/.test(input.checksumSha256)
+  );
+}
