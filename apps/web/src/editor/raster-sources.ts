@@ -130,6 +130,17 @@ class CanvasRasterDecoder {
     context.drawImage(bitmap, 0, 0);
     bitmap.close();
     const rgba = context.getImageData(0, 0, canvas.width, canvas.height).data;
+    if (mimeType === "image/png") {
+      return {
+        data: new Uint8Array(rgba),
+        sourceRect: { x: 0, y: 0, width: canvas.width, height: canvas.height },
+        widthPx: canvas.width,
+        heightPx: canvas.height,
+        bitDepth: 8,
+        channels: 4,
+        pyramidLevel: 0,
+      };
+    }
     const rgb = new Uint8Array(canvas.width * canvas.height * 3);
     for (let source = 0, target = 0; source < rgba.length; source += 4, target += 3) {
       rgb[target] = rgba[source] ?? 0;

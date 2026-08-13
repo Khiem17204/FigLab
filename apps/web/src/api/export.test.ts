@@ -1,6 +1,7 @@
 import { createDefaultFigureDocument } from "@figlab/figure-schema";
 import { describe, expect, it, vi } from "vitest";
 
+import { renderDisplayRgba } from "../editor/raster-sources";
 import { createArtboardPngExporter, exportPng } from "./export";
 
 describe("PNG export", () => {
@@ -54,13 +55,21 @@ describe("PNG export", () => {
     ]);
   });
 
-  it("retains transparent RGBA source alpha in the composed PNG", async () => {
+  it("keeps the RGBA preview texture consistent with source-over PNG export", async () => {
     const document = createDefaultFigureDocument("artboard-1");
+    const artboard = document.artboards[0];
+    if (!artboard) throw new Error("default document must contain an artboard");
+    document.artboards[0] = {
+      ...artboard,
+      widthPt: 2,
+      heightPt: 1,
+      backgroundHex: "#FFFFFF",
+    };
     document.objects.push({
       id: "transparent",
       type: "image-view",
       artboardId: "artboard-1",
-      transform: { xPt: 0, yPt: 0, widthPt: 612, heightPt: 792, rotationDeg: 0 },
+      transform: { xPt: 0, yPt: 0, widthPt: 2, heightPt: 1, rotationDeg: 0 },
       zIndex: 0,
       locked: false,
       hidden: false,
@@ -70,24 +79,51 @@ describe("PNG export", () => {
         display: { brightness: 0, contrast: 1, gamma: 1, invert: false },
       },
     });
+    const region = {
+      data: new Uint8Array([255, 0, 0, 0, 0, 255, 0, 127]),
+      sourceRect: { x: 0, y: 0, width: 2, height: 1 },
+      widthPx: 2,
+      heightPx: 1,
+      bitDepth: 8 as const,
+      channels: 4 as const,
+      pyramidLevel: 0,
+    };
+    expect(
+      renderDisplayRgba(region, { brightness: 0, contrast: 1, gamma: 1, invert: false }),
+    ).toEqual(new Uint8ClampedArray([255, 0, 0, 0, 0, 255, 0, 127]));
     const sourceExporter = createArtboardPngExporter("artboard-1", {
-      describe: async () => ({ widthPx: 1, heightPx: 1, bitDepth: 8, channels: 4 }),
-      getRegion: async () => ({
-        data: new Uint8Array([255, 0, 0, 0]),
-        sourceRect: { x: 0, y: 0, width: 1, height: 1 },
-        widthPx: 1,
-        heightPx: 1,
-        bitDepth: 8,
-        channels: 4,
-        pyramidLevel: 0,
-      }),
+      describe: async () => ({ widthPx: 2, heightPx: 1, bitDepth: 8, channels: 4 }),
+      getRegion: async () => region,
     });
 
-    const png = new Uint8Array(
-      await (await sourceExporter(document, { widthPx: 1, heightPx: 1 })).arrayBuffer(),
-    );
+    const png = await sourceExporter(document, { widthPx: 2, heightPx: 1 });
 
-    expect(Array.from(png.slice(0, 8))).toEqual([137, 80, 78, 71, 13, 10, 26, 10]);
-    expect(png.byteLength).toBeGreaterThan(60);
+    expect(await decodeSingleScanline(png)).toEqual(
+      new Uint8Array([255, 255, 255, 255, 128, 255, 128, 255]),
+    );
   });
 });
+
+async function decodeSingleScanline(png: Blob): Promise<Uint8Array> {
+  const bytes = new Uint8Array(await png.arrayBuffer());
+  const chunks: Uint8Array[] = [];
+  for (let offset = 8; offset < bytes.length; ) {
+    const length = new DataView(bytes.buffer, bytes.byteOffset + offset, 4).getUint32(0, false);
+    const type = String.fromCharCode(...bytes.subarray(offset + 4, offset + 8));
+    if (type === "IDAT") chunks.push(bytes.slice(offset + 8, offset + 8 + length));
+    offset += length + 12;
+  }
+  const compressed = new Uint8Array(chunks.reduce((sum, chunk) => sum + chunk.length, 0));
+  let cursor = 0;
+  for (const chunk of chunks) {
+    compressed.set(chunk, cursor);
+    cursor += chunk.length;
+  }
+  const inflated = new Uint8Array(
+    await new Response(
+      new Blob([compressed]).stream().pipeThrough(new DecompressionStream("deflate")),
+    ).arrayBuffer(),
+  );
+  if (inflated[0] !== 0) throw new Error("fixture PNG must use the no-filter scanline");
+  return inflated.slice(1);
+}
