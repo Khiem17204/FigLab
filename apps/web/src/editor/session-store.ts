@@ -1,5 +1,6 @@
 import {
   createImageViewCommand,
+  deleteObjectsCommand,
   MAX_HISTORY_SNAPSHOTS,
   type ResizeAnchor,
   setDisplayCommand,
@@ -40,6 +41,7 @@ export type EditorSessionState = EditorSnapshot & {
   previewObjectResize: (delta: Point, draggedCorner: ResizeAnchor) => void;
   commitObjectTransform: () => void;
   setDisplay: (objectId: string, display: DisplayTransformV1) => void;
+  deleteSelectedObject: () => void;
   selectObject: (objectId: string | undefined) => void;
   replaceDocument: (document: FigureDocumentV1) => void;
   undo: () => void;
@@ -201,6 +203,15 @@ export function createEditorSession(initialDocument: FigureDocumentV1) {
       if (!state.document.objects.some((object) => object.id === objectId)) return;
       set({
         document: setDisplayCommand(objectId, clampDisplay(display))(state.document),
+        ...pushHistory(state),
+      });
+    },
+    deleteSelectedObject: () => {
+      const state = get();
+      if (!state.selectedObjectId) return;
+      set({
+        document: deleteObjectsCommand([state.selectedObjectId])(state.document),
+        selectedObjectId: undefined,
         ...pushHistory(state),
       });
     },

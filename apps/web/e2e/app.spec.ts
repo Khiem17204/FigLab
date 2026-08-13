@@ -1,3 +1,4 @@
+import { readFile } from "node:fs/promises";
 import { expect, test } from "@playwright/test";
 
 const project = {
@@ -221,6 +222,15 @@ test("uploads and verifies an original, then creates a crop with accessible hand
     .poll(() => selection.evaluate((element) => (element as HTMLElement).style.width))
     .toBe(resizedWidth);
 
+  await page.getByRole("button", { name: "Delete selected panel" }).click();
+  await expect(page.getByRole("button", { name: /Move view-/ })).toHaveCount(1);
+  await page.keyboard.press("Control+z");
+  await expect(page.getByRole("button", { name: /Move view-/ })).toHaveCount(2);
+  await page.keyboard.press("Delete");
+  await expect(page.getByRole("button", { name: /Move view-/ })).toHaveCount(1);
+  await page.keyboard.press("Control+z");
+  await expect(page.getByRole("button", { name: /Move view-/ })).toHaveCount(2);
+
   await page.getByRole("slider", { name: "Brightness" }).fill("0.5");
   await expect(page.getByRole("slider", { name: "Brightness" })).toHaveValue("0.5");
   await page.getByRole("checkbox", { name: "Invert" }).check();
@@ -234,10 +244,58 @@ test("uploads and verifies an original, then creates a crop with accessible hand
   await expect(page.getByRole("button", { name: "Reload latest" })).toBeVisible();
   await expect(page.getByRole("button", { name: "Download my JSON" })).toBeVisible();
 
-  await page.getByRole("radio", { name: "Custom width" }).check();
-  await page.getByRole("spinbutton", { name: "Custom width" }).fill("10");
+  await page.getByRole("button", { name: "Projects" }).click();
+  await expect(page.getByRole("heading", { name: "Cell Atlas" })).toBeVisible();
+
+  const recoveryDownload = page.waitForEvent("download");
+  await page.getByRole("button", { name: "Download my JSON" }).click();
+  const recovery = await recoveryDownload;
+  const recoveryPath = await recovery.path();
+  if (!recoveryPath) throw new Error("recovery download has no local path");
+  const recoveredDocument = JSON.parse(await readFile(recoveryPath, "utf8")) as {
+    objects: { view: { display: { invert: boolean } } }[];
+  };
+  expect(recoveredDocument.objects.some((object) => object.view.display.invert)).toBe(true);
+
+  await page.getByRole("button", { name: "Export PNG" }).click();
+  await expect(
+    page.getByRole("status").filter({ hasText: "Save the project before exporting" }),
+  ).toBeVisible();
+  expect(exportMetadata).toBeUndefined();
+});
+
+test("exports the exact saved revision at the current artboard dimensions", async ({ page }) => {
+  const landscape = {
+    ...documentResponse,
+    document: {
+      ...documentResponse.document,
+      artboards: [
+        {
+          ...documentResponse.document.artboards[0],
+          widthPt: 400,
+          heightPt: 200,
+        },
+      ],
+    },
+  };
+  let savedBody: unknown;
+  await page.route(new RegExp(`/v1/projects/${project.id}/document$`), async (route) => {
+    if (route.request().method() === "GET") return route.fulfill({ json: landscape });
+    savedBody = route.request().postDataJSON();
+    return route.fulfill({ json: { ...landscape, revision: 4 } });
+  });
+  let exportMetadata: unknown;
+  await page.route(`**/v1/projects/${project.id}/exports`, async (route) => {
+    exportMetadata = route.request().postDataJSON();
+    await route.fulfill({ status: 204 });
+  });
+  await page.goto("/");
+  await page.getByRole("button", { name: "Open Cell Atlas" }).click();
+
   const download = page.waitForEvent("download");
   await page.getByRole("button", { name: "Export PNG" }).click();
-  expect((await download).suggestedFilename()).toBe("figlab-10x13.png");
-  expect(exportMetadata).toMatchObject({ format: "png", revision: 3, widthPx: 10, heightPx: 13 });
+
+  expect((await download).suggestedFilename()).toBe("figlab-400x200.png");
+  expect(savedBody).toMatchObject({ baseRevision: 3, document: landscape.document });
+  expect(exportMetadata).toMatchObject({ format: "png", revision: 4, widthPx: 400, heightPx: 200 });
 });

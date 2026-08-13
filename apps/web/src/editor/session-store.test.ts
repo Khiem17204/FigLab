@@ -115,6 +115,18 @@ describe("editor session crop commands", () => {
     session.getState().redo();
     expect(session.getState().document.objects[0]?.view.display.invert).toBe(true);
   });
+
+  it("deletes the selected panel as an undoable document command", () => {
+    const session = sessionWithView();
+    session.getState().selectObject("view-1");
+
+    session.getState().deleteSelectedObject();
+
+    expect(session.getState().document.objects).toEqual([]);
+    expect(session.getState().selectedObjectId).toBeUndefined();
+    session.getState().undo();
+    expect(session.getState().document.objects.map((object) => object.id)).toEqual(["view-1"]);
+  });
 });
 
 function sessionWithView() {

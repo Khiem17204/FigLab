@@ -8,7 +8,7 @@ describe("editor autosave binding", () => {
   it("persists an undo that returns history to zero after the idle delay", async () => {
     vi.useFakeTimers();
     const session = createEditorSession(createDefaultFigureDocument("board"));
-    const save = vi.fn().mockResolvedValue(undefined);
+    const save = vi.fn().mockResolvedValue(2);
     const autosave = new AutosaveController(
       save,
       () => session.getState().document,

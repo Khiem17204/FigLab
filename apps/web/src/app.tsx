@@ -206,7 +206,9 @@ export function FigLabEditor({
       new AutosaveController(
         async (baseRevision, document) => {
           const response = await client.saveDocument(project.id, baseRevision, document);
+          saveState.current = { ...saveState.current, revision: response.revision };
           setRevision(response.revision);
+          return response.revision;
         },
         () => saveState.current.document,
         () => saveState.current.revision,
@@ -218,15 +220,24 @@ export function FigLabEditor({
   useEffect(() => () => rasterSources.dispose(), [rasterSources]);
 
   const navigateBack = useCallback(async () => {
-    await autosave.flushBeforeNavigation();
-    if (autosave.getStatus() !== "conflict") onBack();
+    const saved = await autosave.flushBeforeNavigation();
+    if (saved) onBack();
   }, [autosave, onBack]);
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
-      if (!(event.metaKey || event.ctrlKey) || event.key.toLowerCase() !== "z") return;
-      event.preventDefault();
-      if (event.shiftKey) session.getState().redo();
-      else session.getState().undo();
+      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "z") {
+        event.preventDefault();
+        if (event.shiftKey) session.getState().redo();
+        else session.getState().undo();
+        return;
+      }
+      if (
+        (event.key === "Delete" || event.key === "Backspace") &&
+        !isTextEntryTarget(event.target)
+      ) {
+        event.preventDefault();
+        session.getState().deleteSelectedObject();
+      }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
@@ -325,9 +336,11 @@ export function FigLabEditor({
           Redo
         </Button>
       </header>
-      {saveStatus === "conflict" && (
+      {(saveStatus === "conflict" || saveStatus === "error") && (
         <div className="conflict-banner" role="alert">
-          The project changed on the server. Your local work is retained.
+          {saveStatus === "conflict"
+            ? "The project changed on the server. Your local work is retained."
+            : "The project could not be saved. Your local work is retained."}
           <Button onClick={() => void recoverLatest()}>Reload latest</Button>
           <Button
             onClick={() => downloadBlob(autosave.downloadMyJson(), `${project.name}-local.json`)}
@@ -397,22 +410,36 @@ export function FigLabEditor({
         <aside aria-label="Display inspector" className="display-inspector">
           <h2>Display inspector</h2>
           {selected ? (
-            <TransformControls
-              object={selected}
-              onChange={(display) => session.getState().setDisplay(selected.id, display)}
-            />
+            <>
+              <TransformControls
+                object={selected}
+                onChange={(display) => session.getState().setDisplay(selected.id, display)}
+              />
+              <Button onClick={() => session.getState().deleteSelectedObject()}>
+                Delete selected panel
+              </Button>
+            </>
           ) : (
             <p className="empty-state">Select or crop an image to adjust its display transform.</p>
           )}
           <ExportControls
+            artboard={state.document.artboards[0]}
             onExport={async (widthPx, heightPx) => {
-              const artboardId = state.document.artboards[0]?.id;
-              if (!artboardId) return;
-              setExportStatus("Preparing original-source PNG…");
+              setExportStatus("Saving the exact revision for export…");
               try {
+                const saved = await autosave.saveNow();
+                if (!saved) {
+                  setExportStatus(
+                    "Save the project before exporting. Recover your local work first.",
+                  );
+                  return;
+                }
+                const artboardId = saved.document.artboards[0]?.id;
+                if (!artboardId) return;
+                setExportStatus("Preparing original-source PNG…");
                 await exportPng({
-                  document: state.document,
-                  revision,
+                  document: saved.document,
+                  revision: saved.revision,
                   widthPx,
                   heightPx,
                   sourceExporter: createArtboardPngExporter(artboardId, rasterSources),
@@ -654,16 +681,19 @@ function ArtboardEditor({
 }
 
 function ExportControls({
+  artboard,
   onExport,
   status,
 }: {
+  artboard: FigureDocumentV1["artboards"][number] | undefined;
   onExport: (width: number, height: number) => Promise<void>;
   status: string;
 }) {
   const [scale, setScale] = useState<"1" | "2" | "custom">("1");
   const [custom, setCustom] = useState("1200");
-  const width = scale === "custom" ? Number(custom) : 600 * Number(scale);
-  const height = Math.round(width * (792 / 612));
+  const width =
+    scale === "custom" ? Number(custom) : Math.round((artboard?.widthPt ?? 0) * Number(scale));
+  const height = Math.round(width * ((artboard?.heightPt ?? 0) / (artboard?.widthPt ?? 1)));
   return (
     <section aria-labelledby="png-export" className="export-controls">
       <h3 id="png-export">PNG export</h3>
@@ -703,7 +733,7 @@ function ExportControls({
         value={custom}
       />
       <Button
-        disabled={!Number.isFinite(width) || width < 1}
+        disabled={!artboard || !Number.isFinite(width) || width < 1 || height < 1}
         onClick={() => void onExport(width, height)}
       >
         Export PNG
@@ -790,4 +820,14 @@ function transformStyle(
     width: transform.widthPt * screen.scale,
     height: transform.heightPt * screen.scale,
   };
+}
+
+function isTextEntryTarget(target: EventTarget | null): boolean {
+  if (!(target instanceof HTMLElement)) return false;
+  return (
+    target.isContentEditable ||
+    target instanceof HTMLInputElement ||
+    target instanceof HTMLTextAreaElement ||
+    target instanceof HTMLSelectElement
+  );
 }
