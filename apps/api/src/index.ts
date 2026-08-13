@@ -98,7 +98,15 @@ export async function buildApp(dependencies: AppDependencies): Promise<FastifyIn
   );
   const app = Fastify({ logger: false });
   const authorizer = dependencies.authorizer ?? new SingleUserAuthorizer();
-  await app.register(swagger, { openapi: { info: { title: "FigLab API", version: "0.1.0" } } });
+  await app.register(swagger, {
+    openapi: {
+      info: {
+        title: "FigLab API",
+        version: "0.1.0",
+        license: { name: "AGPL-3.0-only" },
+      },
+    },
+  });
   const projectFor = async (projectId: string) => {
     assertResourceId(projectId);
     const project = await dependencies.repository.getProject(projectId);

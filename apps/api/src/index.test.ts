@@ -4,6 +4,16 @@ import { describe, expect, it } from "vitest";
 import { assertSingleUserConfiguration, bootstrapSingleUserFromEnv, buildApp } from "./index.js";
 
 describe("buildApp", () => {
+  it("publishes the project license in generated OpenAPI metadata", async () => {
+    const repository = new InMemoryFigLabRepository();
+    const principal = await repository.bootstrapSingleUser();
+    const app = await buildApp({ repository, store: new FakeObjectStore(), principal });
+    await app.ready();
+
+    expect(app.swagger().info.license).toEqual({ name: "AGPL-3.0-only" });
+    await app.close();
+  });
+
   it("threads SINGLE_USER_EMAIL into single-user bootstrap", async () => {
     const repository = new InMemoryFigLabRepository();
 
