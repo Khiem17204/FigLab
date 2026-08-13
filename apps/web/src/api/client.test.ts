@@ -2,6 +2,30 @@ import { describe, expect, it, vi } from "vitest";
 
 import { FigLabClient } from "./client";
 
+describe("FigLabClient project routes", () => {
+  it("renames a project with PUT", async () => {
+    const fetcher = vi.fn<typeof fetch>().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          id: "project-1",
+          name: "Renamed",
+          status: "active",
+          createdAt: "2026-08-12T00:00:00.000Z",
+          updatedAt: "2026-08-13T00:00:00.000Z",
+        }),
+      ),
+    );
+
+    await new FigLabClient(fetcher).renameProject("project-1", "Renamed");
+
+    expect(fetcher).toHaveBeenCalledWith("/v1/projects/project-1", {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ name: "Renamed" }),
+    });
+  });
+});
+
 describe("FigLabClient direct uploads", () => {
   it("puts original bytes to the reserved target using only the signed headers", async () => {
     const fetcher = vi
@@ -173,6 +197,7 @@ describe("FigLabClient direct uploads", () => {
 
     const result = await new FigLabClient(fetcher).downloadAsset("asset-1");
 
+    expect(fetcher.mock.calls[0]).toEqual(["/v1/assets/asset-1/download-url", { method: "POST" }]);
     expect(new TextDecoder().decode(result.bytes)).toBe("original-bytes");
     expect(result.mimeType).toBe("image/png");
   });
