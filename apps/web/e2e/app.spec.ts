@@ -65,6 +65,7 @@ test("uploads and verifies an original, then creates a crop with accessible hand
   page,
 }) => {
   let assetPoll = 0;
+  let putHeaders: Record<string, string> = {};
   await page.route(`**/v1/projects/${project.id}/uploads`, (route) =>
     route.fulfill({
       json: {
@@ -79,7 +80,10 @@ test("uploads and verifies an original, then creates a crop with accessible hand
       },
     }),
   );
-  await page.route("**/minio/upload-1", (route) => route.fulfill({ status: 200 }));
+  await page.route("**/minio/upload-1", (route) => {
+    putHeaders = route.request().headers();
+    return route.fulfill({ status: 200 });
+  });
   await page.route("**/v1/uploads/upload-1/complete", (route) =>
     route.fulfill({ json: { assetId: "asset-1", status: "pending-verification" } }),
   );
@@ -129,33 +133,102 @@ test("uploads and verifies an original, then creates a crop with accessible hand
   });
 
   await expect(page.getByRole("status").filter({ hasText: "completed" })).toBeVisible();
+  expect(putHeaders["x-signed"]).toBe("yes");
+  expect(putHeaders["content-type"]).toBeUndefined();
   await expect(page.getByRole("img", { name: "Original cells.png" })).toBeVisible();
   const source = page.getByTestId("source-canvas");
-  const box = await source.boundingBox();
-  if (!box) throw new Error("source canvas has no box");
-  await source.dispatchEvent("pointerdown", {
-    pointerId: 1,
-    clientX: box.x + 10,
-    clientY: box.y + 10,
+  const content = await source.evaluate((element) => {
+    const target = element as HTMLElement;
+    const rect = target.getBoundingClientRect();
+    return {
+      left: rect.left,
+      top: rect.top,
+      width: target.clientWidth,
+      height: target.clientHeight,
+    };
   });
-  await source.dispatchEvent("pointermove", {
-    pointerId: 1,
-    clientX: box.x + box.width / 2,
-    clientY: box.y + box.height / 2,
-  });
-  await source.dispatchEvent("pointerup", {
-    pointerId: 1,
-    clientX: box.x + box.width / 2,
-    clientY: box.y + box.height / 2,
-  });
+  const imageSize = Math.min(content.width, content.height);
+  const imageLeft = content.left + (content.width - imageSize) / 2;
+  const imageTop = content.top + (content.height - imageSize) / 2;
+  await page.mouse.move(imageLeft + imageSize / 4, imageTop + imageSize / 4);
+  await page.mouse.down();
+  await page.mouse.move(imageLeft + imageSize / 2, imageTop + imageSize / 2);
+  await page.mouse.up();
 
   await expect(page.getByRole("button", { name: /Move view-/ })).toBeVisible();
   await expect(page.getByRole("button", { name: /Resize view-.* from top left/ })).toBeVisible();
-  await expect(page.getByText(/Source crop x /)).toBeVisible();
+  await expect(
+    page.getByText(/Source crop x 0\.25, y 0\.25, width 0\.25, height 0\.25/),
+  ).toBeVisible();
+
+  const firstMove = page.getByRole("button", { name: /Move view-/ });
+  const firstMoveLabel = await firstMove.getAttribute("aria-label");
+  if (!firstMoveLabel) throw new Error("first image view has no move label");
+  const firstViewId = firstMoveLabel.replace("Move ", "");
+
+  await page.mouse.move(imageLeft + imageSize / 2, imageTop + imageSize / 2);
+  await page.mouse.down();
+  await page.mouse.move(imageLeft + (imageSize * 3) / 4, imageTop + (imageSize * 3) / 4);
+  await page.mouse.up();
+  await expect(page.getByText("Source crop x 0.5, y 0.5, width 0.25, height 0.25.")).toBeVisible();
+  await expect(page.getByText(`Sibling panels: ${firstViewId}`)).toBeVisible();
+
+  const moves = page.getByRole("button", { name: /Move view-/ });
+  await expect(moves).toHaveCount(2);
+  const move = moves.last();
+  const selection = move.locator("..");
+  const originalLeft = await selection.evaluate((element) => (element as HTMLElement).style.left);
+  const moveBox = await move.boundingBox();
+  if (!moveBox) throw new Error("move handle has no box");
+  await page.mouse.move(moveBox.x + moveBox.width / 2, moveBox.y + moveBox.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(moveBox.x + moveBox.width / 2 + 20, moveBox.y + moveBox.height / 2 + 10);
+  await expect
+    .poll(() => selection.evaluate((element) => (element as HTMLElement).style.left))
+    .not.toBe(originalLeft);
+  await page.mouse.up();
+  const movedLeft = await selection.evaluate((element) => (element as HTMLElement).style.left);
   await page.keyboard.press("Control+z");
-  await expect(page.getByRole("button", { name: /Move view-/ })).toHaveCount(0);
+  await expect
+    .poll(() => selection.evaluate((element) => (element as HTMLElement).style.left))
+    .toBe(originalLeft);
   await page.keyboard.press("Control+Shift+z");
-  await expect(page.getByRole("button", { name: /Move view-/ })).toBeVisible();
+  await expect
+    .poll(() => selection.evaluate((element) => (element as HTMLElement).style.left))
+    .toBe(movedLeft);
+
+  const resize = page.getByRole("button", { name: /Resize view-.* from bottom right/ }).last();
+  const originalWidth = await selection.evaluate((element) => (element as HTMLElement).style.width);
+  const resizeBox = await resize.boundingBox();
+  if (!resizeBox) throw new Error("resize handle has no box");
+  await page.mouse.move(resizeBox.x + resizeBox.width / 2, resizeBox.y + resizeBox.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(
+    resizeBox.x + resizeBox.width / 2 + 20,
+    resizeBox.y + resizeBox.height / 2 + 10,
+  );
+  await expect
+    .poll(() => selection.evaluate((element) => (element as HTMLElement).style.width))
+    .not.toBe(originalWidth);
+  await page.mouse.up();
+  const resizedWidth = await selection.evaluate((element) => (element as HTMLElement).style.width);
+  await page.keyboard.press("Control+z");
+  await expect
+    .poll(() => selection.evaluate((element) => (element as HTMLElement).style.width))
+    .toBe(originalWidth);
+  await page.keyboard.press("Control+Shift+z");
+  await expect
+    .poll(() => selection.evaluate((element) => (element as HTMLElement).style.width))
+    .toBe(resizedWidth);
+
+  await page.getByRole("slider", { name: "Brightness" }).fill("0.5");
+  await expect(page.getByRole("slider", { name: "Brightness" })).toHaveValue("0.5");
+  await page.getByRole("checkbox", { name: "Invert" }).check();
+  await expect(page.getByRole("checkbox", { name: "Invert" })).toBeChecked();
+  await page.keyboard.press("Control+z");
+  await expect(page.getByRole("checkbox", { name: "Invert" })).not.toBeChecked();
+  await page.keyboard.press("Control+Shift+z");
+  await expect(page.getByRole("checkbox", { name: "Invert" })).toBeChecked();
 
   await expect(page.getByRole("alert")).toContainText("local work is retained", { timeout: 3000 });
   await expect(page.getByRole("button", { name: "Reload latest" })).toBeVisible();

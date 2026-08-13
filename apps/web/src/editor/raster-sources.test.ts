@@ -37,4 +37,23 @@ describe("browser raster sources", () => {
 
     expect(rgba).toEqual(new Uint8ClampedArray([255, 128, 0, 255]));
   });
+
+  it("preserves transparent PNG alpha exactly through crop and preview", async () => {
+    const repository = new BrowserRasterRepository(async () => ({
+      data: new Uint8Array([255, 0, 0, 0, 0, 255, 0, 127]),
+      sourceRect: { x: 0, y: 0, width: 2, height: 1 },
+      widthPx: 2,
+      heightPx: 1,
+      bitDepth: 8,
+      channels: 4,
+      pyramidLevel: 0,
+    }));
+    await repository.add("rgba", new ArrayBuffer(1), "image/png");
+
+    const region = await repository.getRegion("rgba", { x: 0, y: 0, width: 2, height: 1 });
+    expect(region.data).toEqual(new Uint8Array([255, 0, 0, 0, 0, 255, 0, 127]));
+    expect(
+      renderDisplayRgba(region, { brightness: 0, contrast: 1, gamma: 1, invert: false }),
+    ).toEqual(new Uint8ClampedArray([255, 0, 0, 0, 0, 255, 0, 127]));
+  });
 });

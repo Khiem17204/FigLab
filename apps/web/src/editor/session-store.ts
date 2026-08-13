@@ -1,7 +1,6 @@
 import {
   createImageViewCommand,
   MAX_HISTORY_SNAPSHOTS,
-  proportionallyResizeTransform,
   type ResizeAnchor,
   setDisplayCommand,
   setObjectTransformsCommand,
@@ -14,6 +13,8 @@ import type {
   ObjectTransformV1,
 } from "@figlab/figure-schema";
 import { createStore } from "zustand/vanilla";
+
+import { resizeFromDraggedCorner } from "./geometry";
 
 export type Point = { x: number; y: number };
 
@@ -36,7 +37,7 @@ export type EditorSessionState = EditorSnapshot & {
   beginObjectGesture: (objectId: string) => void;
   previewObjectTransform: (transform: Omit<ObjectTransformV1, "rotationDeg">) => void;
   previewObjectDelta: (delta: Point) => void;
-  previewObjectResize: (widthPt: number, anchor: ResizeAnchor) => void;
+  previewObjectResize: (delta: Point, draggedCorner: ResizeAnchor) => void;
   commitObjectTransform: () => void;
   setDisplay: (objectId: string, display: DisplayTransformV1) => void;
   selectObject: (objectId: string | undefined) => void;
@@ -169,7 +170,7 @@ export function createEditorSession(initialDocument: FigureDocumentV1) {
         },
       });
     },
-    previewObjectResize: (widthPt, anchor) => {
+    previewObjectResize: (delta, draggedCorner) => {
       const gesture = get().objectGesture;
       if (!gesture) return;
       const origin = get().document.objects.find(
@@ -179,7 +180,7 @@ export function createEditorSession(initialDocument: FigureDocumentV1) {
       set({
         objectGesture: {
           ...gesture,
-          transform: proportionallyResizeTransform(origin, widthPt, anchor),
+          transform: resizeFromDraggedCorner(origin, draggedCorner, delta),
         },
       });
     },

@@ -106,7 +106,7 @@ export function renderDisplayRgba(
     rgba[target] = sample(0);
     rgba[target + 1] = sample(region.channels === 1 ? 0 : 1);
     rgba[target + 2] = sample(region.channels === 1 ? 0 : 2);
-    rgba[target + 3] = 255;
+    rgba[target + 3] = region.channels === 4 ? (region.data[source + 3] ?? 0) : 255;
   }
   return rgba;
 }

@@ -53,4 +53,41 @@ describe("PNG export", () => {
       137, 80, 78, 71, 13, 10, 26, 10,
     ]);
   });
+
+  it("retains transparent RGBA source alpha in the composed PNG", async () => {
+    const document = createDefaultFigureDocument("artboard-1");
+    document.objects.push({
+      id: "transparent",
+      type: "image-view",
+      artboardId: "artboard-1",
+      transform: { xPt: 0, yPt: 0, widthPt: 612, heightPt: 792, rotationDeg: 0 },
+      zIndex: 0,
+      locked: false,
+      hidden: false,
+      view: {
+        sourceAssetId: "rgba",
+        viewport: { x: 0, y: 0, width: 1, height: 1 },
+        display: { brightness: 0, contrast: 1, gamma: 1, invert: false },
+      },
+    });
+    const sourceExporter = createArtboardPngExporter("artboard-1", {
+      describe: async () => ({ widthPx: 1, heightPx: 1, bitDepth: 8, channels: 4 }),
+      getRegion: async () => ({
+        data: new Uint8Array([255, 0, 0, 0]),
+        sourceRect: { x: 0, y: 0, width: 1, height: 1 },
+        widthPx: 1,
+        heightPx: 1,
+        bitDepth: 8,
+        channels: 4,
+        pyramidLevel: 0,
+      }),
+    });
+
+    const png = new Uint8Array(
+      await (await sourceExporter(document, { widthPx: 1, heightPx: 1 })).arrayBuffer(),
+    );
+
+    expect(Array.from(png.slice(0, 8))).toEqual([137, 80, 78, 71, 13, 10, 26, 10]);
+    expect(png.byteLength).toBeGreaterThan(60);
+  });
 });

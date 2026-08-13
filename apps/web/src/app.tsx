@@ -9,6 +9,14 @@ import { useStore } from "zustand";
 import { FigLabClient } from "./api/client";
 import { createArtboardPngExporter, downloadBlob, exportPng } from "./api/export";
 import { AutosaveController, type SaveStatus } from "./editor/autosave";
+import { bindAutosave } from "./editor/autosave-binding";
+import {
+  type ArtboardScreenTransform,
+  artboardScreenTransform,
+  imageContainRect,
+  normalizedPointInImage,
+  type ScreenRect,
+} from "./editor/geometry";
 import { BrowserRasterRepository, type SupportedRasterMime } from "./editor/raster-sources";
 import { createEditorSession, type Point } from "./editor/session-store";
 import { PixiArtboard } from "./pixi-artboard";
@@ -206,13 +214,7 @@ export function FigLabEditor({
       ),
     [client, project.id],
   );
-  useEffect(
-    () =>
-      session.subscribe((next, previous) => {
-        if (next.document !== previous.document && next.history.length > 0) autosave.schedule();
-      }),
-    [autosave, session],
-  );
+  useEffect(() => bindAutosave(session, autosave), [autosave, session]);
   useEffect(() => () => rasterSources.dispose(), [rasterSources]);
 
   const navigateBack = useCallback(async () => {
@@ -383,9 +385,9 @@ export function FigLabEditor({
               if (state.objectGesture?.objectId !== id) session.getState().beginObjectGesture(id);
               session.getState().previewObjectDelta(delta);
             }}
-            onResize={(id, width, anchor) => {
+            onResize={(id, delta, anchor) => {
               if (state.objectGesture?.objectId !== id) session.getState().beginObjectGesture(id);
-              session.getState().previewObjectResize(width, anchor);
+              session.getState().previewObjectResize(delta, anchor);
             }}
             onSelect={(id) => session.getState().selectObject(id)}
             rasterSources={rasterSources}
@@ -463,16 +465,34 @@ function OriginalInspector({
 }) {
   const [draft, setDraft] = useState<{ start: Point; end: Point }>();
   const draftRef = useRef<{ start: Point; end: Point } | undefined>(undefined);
+  const host = useRef<HTMLDivElement>(null);
+  const [imageRect, setImageRect] = useState<ScreenRect>();
+  useEffect(() => {
+    const target = host.current;
+    if (!target || !asset) return;
+    const update = () =>
+      setImageRect(
+        imageContainRect(
+          { width: target.clientWidth, height: target.clientHeight },
+          { width: asset.widthPx, height: asset.heightPx },
+        ),
+      );
+    update();
+    const observer = new ResizeObserver(update);
+    observer.observe(target);
+    return () => observer.disconnect();
+  }, [asset]);
   const updateDraft = (value: { start: Point; end: Point } | undefined) => {
     draftRef.current = value;
     setDraft(value);
   };
   const point = (event: React.PointerEvent<HTMLDivElement>) => {
     const rect = event.currentTarget.getBoundingClientRect();
-    return {
-      x: Math.min(1, Math.max(0, (event.clientX - rect.left) / rect.width)),
-      y: Math.min(1, Math.max(0, (event.clientY - rect.top) / rect.height)),
-    };
+    if (!imageRect) return { x: 0, y: 0 };
+    return normalizedPointInImage(
+      { x: event.clientX - rect.left, y: event.clientY - rect.top },
+      imageRect,
+    );
   };
   const viewport = draft ? rectFromPoints(draft.start, draft.end) : highlightedViewport;
   return (
@@ -484,6 +504,7 @@ function OriginalInspector({
       <div
         className="source-canvas"
         data-testid="source-canvas"
+        ref={host}
         onPointerDown={(event) => {
           const start = point(event);
           updateDraft({ start, end: start });
@@ -510,7 +531,7 @@ function OriginalInspector({
             aria-label="Crop selection"
             className="crop-overlay"
             role="img"
-            style={viewportStyle(viewport)}
+            style={viewportStyle(viewport, imageRect)}
           >
             <i />
             <i />
@@ -539,18 +560,39 @@ function ArtboardEditor({
   rasterSources: BrowserRasterRepository;
   onSelect: (id: string) => void;
   onMove: (id: string, delta: Point) => void;
-  onResize: (id: string, width: number, anchor: ResizeAnchor) => void;
+  onResize: (id: string, delta: Point, anchor: ResizeAnchor) => void;
   onCommit: () => void;
 }) {
+  const host = useRef<HTMLDivElement>(null);
+  const board = document.artboards[0];
+  const [screenTransform, setScreenTransform] = useState<ArtboardScreenTransform>();
+  useEffect(() => {
+    const target = host.current;
+    if (!target || !board) return;
+    const update = () =>
+      setScreenTransform(
+        artboardScreenTransform(
+          target.clientWidth,
+          target.clientHeight,
+          board.widthPt,
+          board.heightPt,
+        ),
+      );
+    update();
+    const observer = new ResizeObserver(update);
+    observer.observe(target);
+    return () => observer.disconnect();
+  }, [board]);
   const starts = useRef(
-    new Map<number, { x: number; y: number; width: number; id: string; resize?: ResizeAnchor }>(),
+    new Map<number, { x: number; y: number; id: string; resize?: ResizeAnchor }>(),
   );
   return (
-    <div className="artboard-wrap">
+    <div className="artboard-wrap" ref={host}>
       <PixiArtboard
         document={document}
         {...(gesture ? { preview: gesture } : {})}
         rasterSources={rasterSources}
+        {...(screenTransform ? { screenTransform } : {})}
       />
       <div className="selection-layer">
         {document.objects.map((object) => {
@@ -561,7 +603,6 @@ function ArtboardEditor({
             starts.current.set(event.pointerId, {
               x: event.clientX,
               y: event.clientY,
-              width: object.transform.widthPt,
               id: object.id,
               ...(resize ? { resize } : {}),
             });
@@ -570,17 +611,10 @@ function ArtboardEditor({
           const move = (event: React.PointerEvent) => {
             const start = starts.current.get(event.pointerId);
             if (!start) return;
-            if (start.resize)
-              onResize(
-                start.id,
-                Math.max(
-                  1,
-                  start.width +
-                    (event.clientX - start.x) * (start.resize.endsWith("right") ? 1 : -1),
-                ),
-                start.resize,
-              );
-            else onMove(start.id, { x: event.clientX - start.x, y: event.clientY - start.y });
+            const screenDelta = { x: event.clientX - start.x, y: event.clientY - start.y };
+            const delta = screenTransform?.screenDeltaToPoints(screenDelta) ?? screenDelta;
+            if (start.resize) onResize(start.id, delta, start.resize);
+            else onMove(start.id, delta);
           };
           const end = (event: React.PointerEvent) => {
             if (!starts.current.delete(event.pointerId)) return;
@@ -590,7 +624,7 @@ function ArtboardEditor({
             <div
               className={`artboard-selection ${object.id === selectedId ? "selected" : ""}`}
               key={object.id}
-              style={transformStyle(transform)}
+              style={transformStyle(transform, screenTransform)}
             >
               <button
                 aria-label={`Move ${object.id}`}
@@ -736,19 +770,24 @@ function rectFromPoints(start: Point, end: Point): NormalizedRect {
     height: Number(Math.abs(end.y - start.y).toFixed(6)),
   };
 }
-function viewportStyle(viewport: NormalizedRect) {
+function viewportStyle(viewport: NormalizedRect, imageRect?: ScreenRect) {
+  if (!imageRect) return { display: "none" };
   return {
-    left: `${viewport.x * 100}%`,
-    top: `${viewport.y * 100}%`,
-    width: `${viewport.width * 100}%`,
-    height: `${viewport.height * 100}%`,
+    left: imageRect.left + viewport.x * imageRect.width,
+    top: imageRect.top + viewport.y * imageRect.height,
+    width: viewport.width * imageRect.width,
+    height: viewport.height * imageRect.height,
   };
 }
-function transformStyle(transform: ImageViewObjectV1["transform"]) {
+function transformStyle(
+  transform: ImageViewObjectV1["transform"],
+  screen?: ArtboardScreenTransform,
+) {
+  if (!screen) return { display: "none" };
   return {
-    left: `${transform.xPt / 6.12}%`,
-    top: `${transform.yPt / 7.92}%`,
-    width: `${transform.widthPt / 6.12}%`,
-    height: `${transform.heightPt / 7.92}%`,
+    left: screen.leftPx + transform.xPt * screen.scale,
+    top: screen.topPx + transform.yPt * screen.scale,
+    width: transform.widthPt * screen.scale,
+    height: transform.heightPt * screen.scale,
   };
 }

@@ -116,7 +116,7 @@ export class FigLabClient {
     const put = await this.fetcher(prepared.upload.url, {
       method: prepared.upload.method,
       headers: prepared.upload.headers,
-      body: original,
+      body: await original.arrayBuffer(),
     });
     if (!put.ok) throw new ApiError(put.status, await readBody(put));
     onStage?.("uploaded");

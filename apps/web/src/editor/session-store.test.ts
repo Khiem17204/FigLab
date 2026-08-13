@@ -63,11 +63,11 @@ describe("editor session crop commands", () => {
   it("previews a proportional corner resize and commits one history entry", () => {
     const session = sessionWithView();
     session.getState().beginObjectGesture("view-1");
-    session.getState().previewObjectResize(320, "bottom-right");
+    session.getState().previewObjectResize({ x: 80, y: 60 }, "bottom-right");
 
     expect(session.getState().objectGesture?.transform).toEqual({
-      xPt: -32,
-      yPt: -12,
+      xPt: 48,
+      yPt: 48,
       widthPt: 320,
       heightPt: 240,
       rotationDeg: 0,

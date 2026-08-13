@@ -54,8 +54,8 @@ describe("FigLabClient direct uploads", () => {
     expect(fetcher.mock.calls[1]?.[1]).toMatchObject({
       method: "PUT",
       headers: { "x-amz-checksum-sha256": "signed" },
-      body: original,
     });
+    expect(fetcher.mock.calls[1]?.[1]?.body).toBeInstanceOf(ArrayBuffer);
   });
 
   it("polls pending verification until ready and emits the verifying stage", async () => {

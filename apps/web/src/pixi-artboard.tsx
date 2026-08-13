@@ -2,36 +2,40 @@ import { normalizedToPixelRect } from "@figlab/editor-core";
 import type { FigureDocumentV1, ObjectTransformV1 } from "@figlab/figure-schema";
 import { Application, Assets, Graphics, Sprite, type Texture } from "pixi.js";
 import { useEffect, useRef } from "react";
-
+import { type ArtboardScreenTransform, artboardScreenTransform } from "./editor/geometry";
 import type { BrowserRasterRepository } from "./editor/raster-sources";
 
 export function PixiArtboard({
   document,
   preview,
   rasterSources,
+  screenTransform,
 }: {
   document: FigureDocumentV1;
   preview?: { objectId: string; transform: ObjectTransformV1 };
   rasterSources: BrowserRasterRepository;
+  screenTransform?: ArtboardScreenTransform;
 }) {
   const host = useRef<HTMLDivElement>(null);
   useEffect(() => {
     let disposed = false;
+    let initialized = false;
     const target = host.current;
     if (!target) return;
     const app = new Application();
     void app.init({ background: "#cbd5e1", resizeTo: target, antialias: true }).then(async () => {
-      if (disposed || !host.current) return;
+      initialized = true;
+      if (disposed || !host.current) {
+        app.destroy(true, { children: true, texture: false });
+        return;
+      }
       host.current.replaceChildren(app.canvas);
       const board = document.artboards[0];
       if (!board) return;
-      const scale = Math.min(
-        app.screen.width / board.widthPt,
-        app.screen.height / board.heightPt,
-        1,
-      );
-      const left = Math.max(0, (app.screen.width - board.widthPt * scale) / 2);
-      const top = Math.max(0, (app.screen.height - board.heightPt * scale) / 2);
+      const screen =
+        screenTransform ??
+        artboardScreenTransform(app.screen.width, app.screen.height, board.widthPt, board.heightPt);
+      const { scale, leftPx: left, topPx: top } = screen;
       const artboard = new Graphics()
         .rect(0, 0, board.widthPt * scale, board.heightPt * scale)
         .fill({ color: board.backgroundHex })
@@ -62,8 +66,8 @@ export function PixiArtboard({
     });
     return () => {
       disposed = true;
-      app.destroy(true, { children: true, texture: false });
+      if (initialized) app.destroy(true, { children: true, texture: false });
     };
-  }, [document, preview, rasterSources]);
+  }, [document, preview, rasterSources, screenTransform]);
   return <div aria-label="Pixi raster artboard" className="pixi-artboard" ref={host} role="img" />;
 }
