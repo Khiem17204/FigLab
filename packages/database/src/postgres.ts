@@ -35,12 +35,12 @@ export class PostgresFigLabRepository implements FigLabRepository {
     this.db = drizzle(pool, { schema });
   }
 
-  async bootstrapSingleUser(): Promise<Principal> {
+  async bootstrapSingleUser(email = "local-admin@figlab.invalid"): Promise<Principal> {
     return this.transaction(async (client) => {
       const now = new Date();
       await client.query(
         "INSERT INTO users(id,email,created_at,updated_at) VALUES($1,$2,$3,$3) ON CONFLICT(email) DO UPDATE SET updated_at=users.updated_at",
-        [LOCAL_USER_ID, "local-admin@figlab.invalid", now],
+        [LOCAL_USER_ID, email, now],
       );
       await client.query(
         "INSERT INTO workspaces(id,name,created_at,updated_at) VALUES($1,$2,$3,$3) ON CONFLICT(id) DO NOTHING",
@@ -52,7 +52,7 @@ export class PostgresFigLabRepository implements FigLabRepository {
       );
       return {
         id: LOCAL_USER_ID,
-        email: "local-admin@figlab.invalid",
+        email,
         workspaceId: LOCAL_WORKSPACE_ID,
       };
     });

@@ -120,7 +120,7 @@ export interface Authorizer {
 }
 
 export interface FigLabRepository {
-  bootstrapSingleUser(): Promise<Principal>;
+  bootstrapSingleUser(email?: string): Promise<Principal>;
   createProject(workspaceId: string, name: string): Promise<ProjectRecord>;
   listProjects(workspaceId: string): Promise<ProjectRecord[]>;
   getProject(projectId: string): Promise<ProjectRecord>;
@@ -187,11 +187,11 @@ export class InMemoryFigLabRepository implements FigLabRepository {
   private readonly queuedJobs: { name: string; payload: Record<string, unknown> }[] = [];
   private principal?: Principal;
 
-  async bootstrapSingleUser(): Promise<Principal> {
+  async bootstrapSingleUser(email = "local-admin@figlab.invalid"): Promise<Principal> {
     if (!this.principal)
       this.principal = {
         id: "00000000-0000-4000-8000-000000000001",
-        email: "local-admin@figlab.invalid",
+        email,
         workspaceId: "00000000-0000-4000-8000-000000000002",
       };
     return { ...this.principal };

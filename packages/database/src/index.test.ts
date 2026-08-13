@@ -4,6 +4,14 @@ import { InMemoryFigLabRepository, PostgresFigLabRepository } from "./index.js";
 import { workspaceMembers } from "./schema.js";
 
 describe("InMemoryFigLabRepository", () => {
+  it("bootstraps the configured single-user email", async () => {
+    const repository = new InMemoryFigLabRepository();
+
+    const principal = await repository.bootstrapSingleUser("scientist@example.test");
+
+    expect(principal.email).toBe("scientist@example.test");
+  });
+
   it("bootstraps one stable owner and preserves a newer document when a stale save arrives", async () => {
     const repository = new InMemoryFigLabRepository();
     const first = await repository.bootstrapSingleUser();

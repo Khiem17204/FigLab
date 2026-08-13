@@ -1,9 +1,19 @@
 import { InMemoryFigLabRepository } from "@figlab/database";
 import { FakeObjectStore } from "@figlab/storage";
 import { describe, expect, it } from "vitest";
-import { assertSingleUserConfiguration, buildApp } from "./index.js";
+import { assertSingleUserConfiguration, bootstrapSingleUserFromEnv, buildApp } from "./index.js";
 
 describe("buildApp", () => {
+  it("threads SINGLE_USER_EMAIL into single-user bootstrap", async () => {
+    const repository = new InMemoryFigLabRepository();
+
+    const principal = await bootstrapSingleUserFromEnv(repository, {
+      SINGLE_USER_EMAIL: "scientist@example.test",
+    });
+
+    expect(principal.email).toBe("scientist@example.test");
+  });
+
   it("creates a schema-v1 project document and returns a typed stale-save conflict", async () => {
     const repository = new InMemoryFigLabRepository();
     const principal = await repository.bootstrapSingleUser();

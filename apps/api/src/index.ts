@@ -65,6 +65,7 @@ const exportSchema = Type.Object({
   checksumSha256: Type.String(),
   createdAt: Type.String(),
 });
+const DEFAULT_SINGLE_USER_EMAIL = "local-admin@figlab.invalid";
 
 export interface AppDependencies {
   repository: FigLabRepository;
@@ -361,7 +362,7 @@ export async function startServerFromEnv(
   const allowInsecureSingleUserRemote = environment.ALLOW_INSECURE_SINGLE_USER_REMOTE === "true";
   assertSingleUserConfiguration(publicAppUrl, allowInsecureSingleUserRemote);
   const { repository, close } = createPostgresRepository(required(environment, "DATABASE_URL"));
-  const principal = await repository.bootstrapSingleUser();
+  const principal = await bootstrapSingleUserFromEnv(repository, environment);
   const store = new S3ObjectStore({
     bucket: required(environment, "OBJECT_STORE_BUCKET"),
     region: environment.OBJECT_STORE_REGION ?? "us-east-1",
@@ -390,6 +391,13 @@ export async function startServerFromEnv(
     port: Number(environment.API_PORT ?? 3000),
   });
   return app;
+}
+
+export function bootstrapSingleUserFromEnv(
+  repository: FigLabRepository,
+  environment: NodeJS.ProcessEnv = process.env,
+): Promise<Principal> {
+  return repository.bootstrapSingleUser(environment.SINGLE_USER_EMAIL || DEFAULT_SINGLE_USER_EMAIL);
 }
 
 function required(environment: NodeJS.ProcessEnv, name: string): string {
