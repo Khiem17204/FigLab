@@ -9,16 +9,16 @@
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "test:integration": "vitest run --passWithNoTests",
-    "test:unit": "vitest run",
+    "test:unit": "vitest run --root ../.. packages/image-processing/src",
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
     "@figlab/api-contract": "workspace:*",
     "@figlab/figure-schema": "workspace:*",
-    "geotiff": "3.0.5",
-    "pngjs": "7.0.0"
+    "geotiff": "3.0.5"
   },
   "devDependencies": {
-    "@types/pngjs": "6.0.5"
+    "@types/pngjs": "6.0.5",
+    "pngjs": "7.0.0"
   }
 }
