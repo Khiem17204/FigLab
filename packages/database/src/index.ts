@@ -94,6 +94,12 @@ export class ConflictError extends Error {
     this.name = "ConflictError";
   }
 }
+export class UploadExpiredError extends Error {
+  constructor() {
+    super("Upload reservation has expired");
+    this.name = "UploadExpiredError";
+  }
+}
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 export function assertResourceId(value: string): void {
   if (!UUID_PATTERN.test(value)) throw new NotFoundError();
@@ -334,7 +340,13 @@ export class InMemoryFigLabRepository implements FigLabRepository {
   async completeUpload(id: string): Promise<AssetRecord> {
     const upload = await this.getUpload(id);
     const asset = await this.getAsset(upload.assetId);
+    if (upload.status === "expired") throw new UploadExpiredError();
     if (upload.status === "reserved") {
+      if (new Date(upload.expiresAt).getTime() <= Date.now()) {
+        upload.status = "expired";
+        this.uploads.set(id, upload);
+        throw new UploadExpiredError();
+      }
       upload.status = "verifying";
       this.uploads.set(id, upload);
       this.enqueue("verify_asset", { assetId: asset.id });

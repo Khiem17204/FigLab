@@ -58,6 +58,34 @@ describe("verifyAsset", () => {
     expect(await store.stat("object")).toBeUndefined();
   });
 
+  it("rejects images over the configured decoded-pixel limit", async () => {
+    const repository = new InMemoryFigLabRepository();
+    const principal = await repository.bootstrapSingleUser();
+    const project = await repository.createProject(principal.workspaceId, "Cells");
+    const store = new FakeObjectStore();
+    const bytes = new Uint8Array(
+      await sharp({ create: { width: 2, height: 3, channels: 3, background: "#ff0000" } })
+        .png()
+        .toBuffer(),
+    );
+    const upload = await repository.createUpload({
+      projectId: project.id,
+      filename: "image.png",
+      mimeType: "image/png",
+      contentLength: bytes.byteLength,
+      checksumSha256: createHash("sha256").update(bytes).digest("hex"),
+      storageKey: "limited-object",
+    });
+    await store.putForTest("limited-object", bytes, "image/png");
+
+    await verifyAsset(repository, store, upload.assetId, 5);
+
+    expect(await repository.getAsset(upload.assetId)).toMatchObject({
+      status: "rejected",
+      rejectionReason: "Image exceeds the configured 5-pixel limit",
+    });
+  });
+
   it("routes durable Graphile jobs to verification and deletion handlers", () => {
     const tasks = createTaskList(new InMemoryFigLabRepository(), new FakeObjectStore());
     expect(Object.keys(tasks).sort()).toEqual(["delete_project", "verify_asset"]);
@@ -93,6 +121,18 @@ describe("verifyAsset", () => {
       heightPx: 1,
       bitDepth: 16,
       channelCount: 1,
+    });
+  });
+
+  it("applies the configured decoded-pixel limit to TIFF", async () => {
+    const bytes = grayscaleTiff({ width: 2, height: 1, bitDepth: 8, samples: [0, 255] });
+    const { repository, store, assetId } = await uploadedTiff(bytes, "limited");
+
+    await verifyAsset(repository, store, assetId, 1);
+
+    expect(await repository.getAsset(assetId)).toMatchObject({
+      status: "rejected",
+      rejectionReason: "Image exceeds the configured 1-pixel limit",
     });
   });
 

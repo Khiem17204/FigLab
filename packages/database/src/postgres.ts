@@ -12,7 +12,7 @@ import type {
   ProjectRecord,
   UploadRecord,
 } from "./index.js";
-import { assertResourceId, NotFoundError } from "./index.js";
+import { assertResourceId, NotFoundError, UploadExpiredError } from "./index.js";
 import * as schema from "./schema.js";
 
 const LOCAL_USER_ID = "00000000-0000-4000-8000-000000000001";
@@ -241,17 +241,32 @@ export class PostgresFigLabRepository implements FigLabRepository {
   }
   async completeUpload(id: string): Promise<AssetRecord> {
     assertResourceId(id);
-    return this.transaction(async (client) => {
-      const updated = await client.query(
-        "UPDATE upload_sessions SET status='verifying' WHERE id=$1 AND status='reserved' RETURNING id",
+    const result = await this.transaction(async (client) => {
+      const uploadResult = await client.query(
+        "SELECT status,expires_at FROM upload_sessions WHERE id=$1 FOR UPDATE",
         [id],
       );
+      const upload = first(uploadResult.rows) as { status: string; expires_at: Date };
+      if (upload.status === "expired") return { kind: "expired" as const };
+      if (upload.status === "reserved" && upload.expires_at.getTime() <= Date.now()) {
+        await client.query("UPDATE upload_sessions SET status='expired' WHERE id=$1", [id]);
+        return { kind: "expired" as const };
+      }
+      const updated =
+        upload.status === "reserved"
+          ? await client.query(
+              "UPDATE upload_sessions SET status='verifying' WHERE id=$1 AND status='reserved' RETURNING id",
+              [id],
+            )
+          : undefined;
       const assetResult = await client.query("SELECT * FROM assets WHERE upload_id=$1", [id]);
       const asset = assetRow(first(assetResult.rows));
-      if ((updated.rowCount ?? 0) > 0)
+      if ((updated?.rowCount ?? 0) > 0)
         await addJob(client, "verify_asset", { assetId: asset.id }, `verify_asset:${asset.id}`);
-      return asset;
+      return { kind: "complete" as const, asset };
     });
+    if (result.kind === "expired") throw new UploadExpiredError();
+    return result.asset;
   }
   async updateAsset(
     id: string,

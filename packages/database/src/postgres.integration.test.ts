@@ -47,6 +47,7 @@ describe.skipIf(!databaseUrl)("PostgresFigLabRepository", () => {
       storageKey: "key",
     });
     await repository.completeUpload(upload.id);
+    await repository.completeUpload(upload.id);
     const jobs = await pool.query("SELECT identifier FROM graphile_worker.jobs");
     expect(jobs.rows).toEqual([{ identifier: "verify_asset" }]);
   });
@@ -55,5 +56,28 @@ describe.skipIf(!databaseUrl)("PostgresFigLabRepository", () => {
     await expect(repository.getProject("not-a-uuid")).rejects.toMatchObject({
       name: "NotFoundError",
     });
+  });
+
+  it("persists expiry without enqueueing verification", async () => {
+    await pool.query("DELETE FROM graphile_worker.jobs");
+    const principal = await repository.bootstrapSingleUser();
+    const project = await repository.createProject(principal.workspaceId, "Expired upload");
+    const upload = await repository.createUpload({
+      projectId: project.id,
+      filename: "expired.png",
+      mimeType: "image/png",
+      contentLength: 1,
+      checksumSha256: "a".repeat(64),
+      storageKey: `expired-${project.id}`,
+      expiresAt: new Date(Date.now() - 1_000).toISOString(),
+    });
+
+    await expect(repository.completeUpload(upload.id)).rejects.toMatchObject({
+      name: "UploadExpiredError",
+    });
+    await expect(repository.completeUpload(upload.id)).rejects.toMatchObject({
+      name: "UploadExpiredError",
+    });
+    expect((await pool.query("SELECT identifier FROM graphile_worker.jobs")).rows).toEqual([]);
   });
 });

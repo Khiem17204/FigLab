@@ -6,6 +6,8 @@ import {
   apiRoutes,
   CreateProjectRequestSchema,
   DownloadUrlResponseSchema,
+  ErrorEnvelopeSchema,
+  MAX_UPLOAD_BYTES,
   PrepareUploadRequestSchema,
   ProjectDocumentResponseSchema,
   ProjectListResponseSchema,
@@ -25,8 +27,9 @@ import {
   NotFoundError,
   type Principal,
   SingleUserAuthorizer,
+  UploadExpiredError,
 } from "@figlab/database";
-import { decodeFigureDocument } from "@figlab/figure-schema";
+import { decodeFigureDocument, FigureDocumentDecodeError } from "@figlab/figure-schema";
 import { type ObjectStore, S3ObjectStore } from "@figlab/storage";
 import { Type } from "@sinclair/typebox";
 import Fastify, { type FastifyInstance } from "fastify";
@@ -69,6 +72,7 @@ export interface AppDependencies {
   principal: Principal;
   authorizer?: Authorizer;
   uploadTtlSeconds?: number;
+  maxUploadBytes?: number;
   publicAppUrl?: string;
   allowInsecureSingleUserRemote?: boolean;
 }
@@ -103,6 +107,14 @@ export async function buildApp(dependencies: AppDependencies): Promise<FastifyIn
   app.setErrorHandler((error, request, reply) => {
     if (error instanceof NotFoundError)
       return reply.status(404).send({ code: "NOT_FOUND", message: "Resource not found" });
+    if (error instanceof UploadExpiredError)
+      return reply.status(400).send({ code: "UPLOAD_EXPIRED", message: error.message });
+    if (error instanceof FigureDocumentDecodeError)
+      return reply.status(400).send({
+        code: "BAD_REQUEST",
+        message: error.message,
+        ...(error.details.length > 0 ? { details: error.details } : {}),
+      });
     if (typeof error === "object" && error !== null && "validation" in error)
       return reply.status(400).send({
         code: request.url.includes("/uploads") ? "UPLOAD_INVALID" : "BAD_REQUEST",
@@ -174,6 +186,7 @@ export async function buildApp(dependencies: AppDependencies): Promise<FastifyIn
         body: SaveDocumentRequestSchema,
         response: {
           200: SaveDocumentResponseSchema,
+          400: ErrorEnvelopeSchema,
           409: Type.Object({
             code: Type.Literal("REVISION_CONFLICT"),
             message: Type.String(),
@@ -219,7 +232,7 @@ export async function buildApp(dependencies: AppDependencies): Promise<FastifyIn
         checksumSha256: string;
       };
       await projectFor(id);
-      if (!isValidUpload(body))
+      if (!isValidUpload(body, dependencies.maxUploadBytes ?? MAX_UPLOAD_BYTES))
         return reply
           .status(400)
           .send({ code: "UPLOAD_INVALID", message: "Unsupported upload claim" });
@@ -252,7 +265,10 @@ export async function buildApp(dependencies: AppDependencies): Promise<FastifyIn
         params: uploadParams,
         response: {
           202: completionSchema,
-          400: Type.Object({ code: Type.Literal("UPLOAD_INVALID"), message: Type.String() }),
+          400: Type.Object({
+            code: Type.Union([Type.Literal("UPLOAD_INVALID"), Type.Literal("UPLOAD_EXPIRED")]),
+            message: Type.String(),
+          }),
         },
       },
     },
@@ -261,6 +277,11 @@ export async function buildApp(dependencies: AppDependencies): Promise<FastifyIn
         resourceId((request.params as { uploadId: string }).uploadId),
       );
       await projectFor(upload.projectId);
+      if (
+        upload.status === "expired" ||
+        (upload.status === "reserved" && new Date(upload.expiresAt).getTime() <= Date.now())
+      )
+        await dependencies.repository.completeUpload(upload.id);
       const asset = await dependencies.repository.getAsset(upload.assetId);
       const stat = await dependencies.store.stat(asset.storageKey);
       if (!stat || stat.contentLength !== upload.contentLength)
@@ -357,6 +378,11 @@ export async function startServerFromEnv(
     publicAppUrl,
     allowInsecureSingleUserRemote,
     uploadTtlSeconds: Number(environment.UPLOAD_URL_TTL_SECONDS ?? 600),
+    maxUploadBytes: configuredPositiveInteger(
+      environment.MAX_UPLOAD_BYTES,
+      MAX_UPLOAD_BYTES,
+      "MAX_UPLOAD_BYTES",
+    ),
   });
   app.addHook("onClose", close);
   await app.listen({
@@ -402,15 +428,30 @@ function sourceAssetIds(document: {
     .filter((object) => object.type === "image-view" && object.view)
     .map((object) => object.view?.sourceAssetId ?? "");
 }
-function isValidUpload(input: {
-  contentType: string;
-  contentLength: number;
-  checksumSha256: string;
-}): boolean {
+function isValidUpload(
+  input: {
+    contentType: string;
+    contentLength: number;
+    checksumSha256: string;
+  },
+  maxUploadBytes: number,
+): boolean {
   return (
     ["image/png", "image/jpeg", "image/tiff"].includes(input.contentType) &&
     input.contentLength > 0 &&
-    input.contentLength <= 104_857_600 &&
+    input.contentLength <= maxUploadBytes &&
     /^[a-f0-9]{64}$/.test(input.checksumSha256)
   );
+}
+
+function configuredPositiveInteger(
+  value: string | undefined,
+  fallback: number,
+  name: string,
+): number {
+  if (value === undefined) return fallback;
+  const parsed = Number(value);
+  if (!Number.isSafeInteger(parsed) || parsed <= 0)
+    throw new Error(`${name} must be a positive integer`);
+  return parsed;
 }

@@ -40,6 +40,96 @@ describe("buildApp", () => {
     await app.close();
   });
 
+  it("renames a project and marks deletion for durable background cleanup", async () => {
+    const repository = new InMemoryFigLabRepository();
+    const principal = await repository.bootstrapSingleUser();
+    const project = await repository.createProject(principal.workspaceId, "Cells");
+    const app = await buildApp({ repository, store: new FakeObjectStore(), principal });
+
+    const renamed = await app.inject({
+      method: "PUT",
+      url: `/v1/projects/${project.id}`,
+      payload: { name: "Tissue panel" },
+    });
+    expect(renamed.statusCode).toBe(200);
+    expect(renamed.json()).toMatchObject({
+      id: project.id,
+      name: "Tissue panel",
+      status: "active",
+    });
+
+    const deleted = await app.inject({ method: "DELETE", url: `/v1/projects/${project.id}` });
+    expect(deleted.statusCode).toBe(202);
+    expect(deleted.json()).toMatchObject({
+      id: project.id,
+      name: "Tissue panel",
+      status: "deleting",
+    });
+    expect((await app.inject({ method: "GET", url: "/v1/projects" })).json()).toEqual({
+      projects: [],
+    });
+    expect(await repository.dequeue()).toEqual({
+      name: "delete_project",
+      payload: { projectId: project.id },
+    });
+    await app.close();
+  });
+
+  it("returns a typed bad-request envelope for semantically invalid figure documents", async () => {
+    const repository = new InMemoryFigLabRepository();
+    const principal = await repository.bootstrapSingleUser();
+    const project = await repository.createProject(principal.workspaceId, "Cells");
+    const current = await repository.getDocument(project.id);
+    const document = structuredClone(current.document) as {
+      objects: Record<string, unknown>[];
+    };
+    document.objects.push({
+      id: "view-1",
+      type: "image-view",
+      artboardId: (current.document as { artboards: { id: string }[] }).artboards[0]?.id,
+      transform: { xPt: 0, yPt: 0, widthPt: 100, heightPt: 100, rotationDeg: 0 },
+      zIndex: 0,
+      locked: false,
+      hidden: false,
+      view: {
+        sourceAssetId: "asset-1",
+        viewport: { x: 0.8, y: 0.2, width: 0.3, height: 0.5 },
+        display: { brightness: 0, contrast: 1, gamma: 1, invert: false },
+      },
+    });
+    const app = await buildApp({ repository, store: new FakeObjectStore(), principal });
+
+    const response = await app.inject({
+      method: "PUT",
+      url: `/v1/projects/${project.id}/document`,
+      payload: { baseRevision: 0, document },
+    });
+
+    expect(response.statusCode).toBe(400);
+    expect(response.json()).toMatchObject({
+      code: "BAD_REQUEST",
+      message: "Object view-1 has a viewport outside the source image",
+    });
+    await app.close();
+  });
+
+  it("returns a typed bad-request envelope for a future figure document version", async () => {
+    const repository = new InMemoryFigLabRepository();
+    const principal = await repository.bootstrapSingleUser();
+    const project = await repository.createProject(principal.workspaceId, "Cells");
+    const app = await buildApp({ repository, store: new FakeObjectStore(), principal });
+
+    const response = await app.inject({
+      method: "PUT",
+      url: `/v1/projects/${project.id}/document`,
+      payload: { baseRevision: 0, document: { schemaVersion: 2 } },
+    });
+
+    expect(response.statusCode).toBe(400);
+    expect(response.json()).toEqual({ code: "BAD_REQUEST", message: "Invalid request" });
+    await app.close();
+  });
+
   it("rejects invalid upload claims before reserving immutable storage", async () => {
     const repository = new InMemoryFigLabRepository();
     const principal = await repository.bootstrapSingleUser();
@@ -55,6 +145,33 @@ describe("buildApp", () => {
         checksumSha256: "not-a-sha",
       },
     });
+    expect(response.statusCode).toBe(400);
+    expect(response.json().code).toBe("UPLOAD_INVALID");
+    await app.close();
+  });
+
+  it("applies a configured maximum upload size", async () => {
+    const repository = new InMemoryFigLabRepository();
+    const principal = await repository.bootstrapSingleUser();
+    const project = await repository.createProject(principal.workspaceId, "Cells");
+    const app = await buildApp({
+      repository,
+      store: new FakeObjectStore(),
+      principal,
+      maxUploadBytes: 10,
+    });
+
+    const response = await app.inject({
+      method: "POST",
+      url: `/v1/projects/${project.id}/uploads`,
+      payload: {
+        filename: "cells.png",
+        contentType: "image/png",
+        contentLength: 11,
+        checksumSha256: "a".repeat(64),
+      },
+    });
+
     expect(response.statusCode).toBe(400);
     expect(response.json().code).toBe("UPLOAD_INVALID");
     await app.close();
@@ -98,6 +215,77 @@ describe("buildApp", () => {
     });
     const remaining = new Date(response.json().upload.expiresAt).getTime() - Date.now();
     expect(remaining).toBeLessThanOrEqual(600_000);
+    await app.close();
+  });
+
+  it("returns UPLOAD_EXPIRED without enqueueing verification for an expired reservation", async () => {
+    const repository = new InMemoryFigLabRepository();
+    const principal = await repository.bootstrapSingleUser();
+    const project = await repository.createProject(principal.workspaceId, "Cells");
+    const store = new FakeObjectStore();
+    const upload = await repository.createUpload({
+      projectId: project.id,
+      filename: "cells.png",
+      mimeType: "image/png",
+      contentLength: 1,
+      checksumSha256: "a".repeat(64),
+      storageKey: "expired-upload",
+      expiresAt: new Date(Date.now() - 1_000).toISOString(),
+    });
+    await store.putForTest("expired-upload", new Uint8Array([1]), "image/png");
+    const app = await buildApp({ repository, store, principal });
+
+    const response = await app.inject({
+      method: "POST",
+      url: `/v1/uploads/${upload.id}/complete`,
+    });
+
+    expect(response.statusCode).toBe(400);
+    expect(response.json()).toEqual({
+      code: "UPLOAD_EXPIRED",
+      message: "Upload reservation has expired",
+    });
+    const retry = await app.inject({
+      method: "POST",
+      url: `/v1/uploads/${upload.id}/complete`,
+    });
+    expect(retry.statusCode).toBe(400);
+    expect(retry.json().code).toBe("UPLOAD_EXPIRED");
+    expect(await repository.dequeue()).toBeUndefined();
+    await app.close();
+  });
+
+  it("keeps successful upload completion idempotent", async () => {
+    const repository = new InMemoryFigLabRepository();
+    const principal = await repository.bootstrapSingleUser();
+    const project = await repository.createProject(principal.workspaceId, "Cells");
+    const store = new FakeObjectStore();
+    const upload = await repository.createUpload({
+      projectId: project.id,
+      filename: "cells.png",
+      mimeType: "image/png",
+      contentLength: 1,
+      checksumSha256: "a".repeat(64),
+      storageKey: "valid-upload",
+    });
+    await store.putForTest("valid-upload", new Uint8Array([1]), "image/png");
+    const app = await buildApp({ repository, store, principal });
+
+    const first = await app.inject({
+      method: "POST",
+      url: `/v1/uploads/${upload.id}/complete`,
+    });
+    const retry = await app.inject({
+      method: "POST",
+      url: `/v1/uploads/${upload.id}/complete`,
+    });
+
+    expect([first.statusCode, retry.statusCode]).toEqual([202, 202]);
+    expect(await repository.dequeue()).toEqual({
+      name: "verify_asset",
+      payload: { assetId: upload.assetId },
+    });
+    expect(await repository.dequeue()).toBeUndefined();
     await app.close();
   });
 

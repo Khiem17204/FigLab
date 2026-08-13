@@ -42,7 +42,11 @@ export class FakeObjectStore implements ObjectStore {
     return {
       url: `fake://private/${encodeURIComponent(input.key)}`,
       method: "PUT",
-      headers: { "content-type": input.contentType, "content-length": String(input.contentLength) },
+      headers: {
+        "content-type": input.contentType,
+        "content-length": String(input.contentLength),
+        "if-none-match": "*",
+      },
       expiresAt: expiry(seconds),
     };
   }
@@ -108,11 +112,16 @@ export class S3ObjectStore implements ObjectStore {
       Key: input.key,
       ContentType: input.contentType,
       ContentLength: input.contentLength,
+      IfNoneMatch: "*",
     });
     return {
       url: await getSignedUrl(this.public, command, { expiresIn: seconds }),
       method: "PUT",
-      headers: { "content-type": input.contentType, "content-length": String(input.contentLength) },
+      headers: {
+        "content-type": input.contentType,
+        "content-length": String(input.contentLength),
+        "if-none-match": "*",
+      },
       expiresAt: expiry(seconds),
     };
   }

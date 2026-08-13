@@ -11,7 +11,11 @@ describe("FakeObjectStore", () => {
     });
     expect(signed).toMatchObject({
       method: "PUT",
-      headers: { "content-type": "image/png", "content-length": "42" },
+      headers: {
+        "content-type": "image/png",
+        "content-length": "42",
+        "if-none-match": "*",
+      },
     });
     expect(new Date(signed.expiresAt).getTime() - Date.now()).toBeGreaterThan(599_000);
   });

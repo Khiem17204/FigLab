@@ -6,12 +6,13 @@ import { type ObjectStore, S3ObjectStore } from "@figlab/storage";
 import { type Runner, run, type TaskList } from "graphile-worker";
 import sharp from "sharp";
 
-const MAX_IMAGE_PIXELS = 100_000_000;
+const DEFAULT_MAX_IMAGE_PIXELS = 100_000_000;
 
 export async function verifyAsset(
   repository: FigLabRepository,
   store: ObjectStore,
   assetId: string,
+  maxImagePixels = DEFAULT_MAX_IMAGE_PIXELS,
 ): Promise<void> {
   const asset = await repository.getAsset(assetId);
   const bytes = await streamBytes(await store.read(asset.storageKey));
@@ -22,6 +23,8 @@ export async function verifyAsset(
   try {
     if (asset.mimeType === "image/tiff") {
       const description = await decodeTiffAuthoritatively(bytes);
+      if (description.widthPx * description.heightPx > maxImagePixels)
+        return reject(repository, assetId, pixelLimitMessage(maxImagePixels));
       await repository.updateAsset(assetId, {
         status: "ready",
         widthPx: description.widthPx,
@@ -35,8 +38,8 @@ export async function verifyAsset(
     const metadata = await sharp(bytes, { animated: false, pages: 1 }).metadata();
     if (!metadata.format || !matchesMime(asset.mimeType, metadata.format))
       return reject(repository, assetId, "Image signature does not match declared MIME type");
-    if (!metadata.width || !metadata.height || metadata.width * metadata.height > MAX_IMAGE_PIXELS)
-      return reject(repository, assetId, "Image exceeds the 100M-pixel limit");
+    if (!metadata.width || !metadata.height || metadata.width * metadata.height > maxImagePixels)
+      return reject(repository, assetId, pixelLimitMessage(maxImagePixels));
     const bitDepth = metadata.depth === "ushort" ? 16 : metadata.depth === "uchar" ? 8 : undefined;
     const channelCount = metadata.channels;
     if (!bitDepth || (channelCount !== 1 && channelCount !== 3 && channelCount !== 4))
@@ -64,11 +67,15 @@ export async function deleteProject(
   await repository.deleteProjectData(projectId);
 }
 
-export function createTaskList(repository: FigLabRepository, store: ObjectStore): TaskList {
+export function createTaskList(
+  repository: FigLabRepository,
+  store: ObjectStore,
+  maxImagePixels = DEFAULT_MAX_IMAGE_PIXELS,
+): TaskList {
   return {
     verify_asset: async (payload) => {
       const assetId = requiredPayloadId(payload, "assetId");
-      await verifyAsset(repository, store, assetId);
+      await verifyAsset(repository, store, assetId, maxImagePixels);
     },
     delete_project: async (payload) => {
       const projectId = requiredPayloadId(payload, "projectId");
@@ -93,7 +100,15 @@ export async function startJobsFromEnv(
   });
   const runner = await run(
     { connectionString: databaseUrl, concurrency: Number(environment.JOB_CONCURRENCY ?? 2) },
-    createTaskList(repository, store),
+    createTaskList(
+      repository,
+      store,
+      configuredPositiveInteger(
+        environment.MAX_IMAGE_PIXELS,
+        DEFAULT_MAX_IMAGE_PIXELS,
+        "MAX_IMAGE_PIXELS",
+      ),
+    ),
   );
   runner.events.once("stop", () => void close());
   return runner;
@@ -163,6 +178,22 @@ function required(environment: NodeJS.ProcessEnv, name: string): string {
   const value = environment[name];
   if (!value) throw new Error(`${name} is required`);
   return value;
+}
+
+function pixelLimitMessage(maxImagePixels: number): string {
+  return `Image exceeds the configured ${maxImagePixels}-pixel limit`;
+}
+
+function configuredPositiveInteger(
+  value: string | undefined,
+  fallback: number,
+  name: string,
+): number {
+  if (value === undefined) return fallback;
+  const parsed = Number(value);
+  if (!Number.isSafeInteger(parsed) || parsed <= 0)
+    throw new Error(`${name} must be a positive integer`);
+  return parsed;
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
