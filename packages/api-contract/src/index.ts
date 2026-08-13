@@ -1,5 +1,10 @@
 import { FigureDocumentV1Schema } from "@figlab/figure-schema";
 import { type Static, Type } from "@sinclair/typebox";
+import { Value } from "@sinclair/typebox/value";
+
+export const MAX_UPLOAD_BYTES = 104_857_600;
+export const MAX_EXPORT_EDGE_PX = 16_384;
+export const MAX_EXPORT_PIXELS = 100_000_000;
 
 export const apiRoutes = {
   health: "/health",
@@ -103,7 +108,7 @@ export const PrepareUploadRequestSchema = Type.Object(
   {
     filename: Type.String({ minLength: 1, maxLength: 255 }),
     contentType: Type.String({ minLength: 1, maxLength: 255 }),
-    contentLength: Type.Integer({ minimum: 1 }),
+    contentLength: Type.Integer({ minimum: 1, maximum: MAX_UPLOAD_BYTES }),
     checksumSha256: Type.String({ pattern: "^[a-f0-9]{64}$" }),
   },
   { additionalProperties: false },
@@ -182,12 +187,18 @@ export const RecordExportRequestSchema = Type.Object(
   {
     format: Type.Literal("png"),
     revision: Type.Integer({ minimum: 0 }),
-    widthPx: Type.Integer({ minimum: 1, maximum: 16_384 }),
-    heightPx: Type.Integer({ minimum: 1, maximum: 16_384 }),
+    widthPx: Type.Integer({ minimum: 1, maximum: MAX_EXPORT_EDGE_PX }),
+    heightPx: Type.Integer({ minimum: 1, maximum: MAX_EXPORT_EDGE_PX }),
     checksumSha256: Type.String({ pattern: "^[a-f0-9]{64}$" }),
   },
   { additionalProperties: false },
 );
+
+export const validateRecordExportRequest = (request: unknown): request is RecordExportRequest => {
+  if (!Value.Check(RecordExportRequestSchema, request)) return false;
+
+  return request.widthPx * request.heightPx <= MAX_EXPORT_PIXELS;
+};
 
 export type ErrorEnvelope = Static<typeof ErrorEnvelopeSchema>;
 export type RevisionConflict = Static<typeof RevisionConflictSchema>;

@@ -1,0 +1,16 @@
+{
+  "schemaVersion": 1,
+  "artboards": [
+    {
+      "id": "artboard-1",
+      "name": "Figure 1",
+      "widthPt": 612,
+      "heightPt": 792,
+      "backgroundHex": "#FFFFFF"
+    }
+  ],
+  "objects": [],
+  "groups": [],
+  "constraints": [],
+  "styles": []
+}

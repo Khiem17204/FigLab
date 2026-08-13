@@ -1,0 +1,107 @@
+openapi: 3.1.0
+info:
+  title: FigLab API
+  version: 0.1.0
+  license:
+    name: AGPL-3.0-only
+paths:
+  /health:
+    get:
+      operationId: health
+      responses:
+        '200':
+          description: Service is healthy.
+  /v1/projects:
+    get:
+      operationId: listProjects
+      responses:
+        '200':
+          description: Projects listed.
+    post:
+      operationId: createProject
+      responses:
+        '201':
+          description: Project created.
+  /v1/projects/{projectId}:
+    get:
+      operationId: getProject
+      parameters:
+        - $ref: '#/components/parameters/projectId'
+      responses:
+        '200':
+          description: Project returned.
+  /v1/projects/{projectId}/document:
+    get:
+      operationId: getProjectDocument
+      parameters:
+        - $ref: '#/components/parameters/projectId'
+      responses:
+        '200':
+          description: Document returned.
+    put:
+      operationId: saveProjectDocument
+      parameters:
+        - $ref: '#/components/parameters/projectId'
+      responses:
+        '200':
+          description: Document saved.
+  /v1/projects/{projectId}/uploads:
+    post:
+      operationId: prepareUpload
+      parameters:
+        - $ref: '#/components/parameters/projectId'
+      responses:
+        '201':
+          description: Upload prepared.
+  /v1/uploads/{uploadId}/complete:
+    post:
+      operationId: completeUpload
+      parameters:
+        - $ref: '#/components/parameters/uploadId'
+      responses:
+        '202':
+          description: Upload queued for verification.
+  /v1/assets/{assetId}:
+    get:
+      operationId: getAsset
+      parameters:
+        - $ref: '#/components/parameters/assetId'
+      responses:
+        '200':
+          description: Asset returned.
+  /v1/assets/{assetId}/download-url:
+    post:
+      operationId: createAssetDownloadUrl
+      parameters:
+        - $ref: '#/components/parameters/assetId'
+      responses:
+        '201':
+          description: Download URL created.
+  /v1/projects/{projectId}/exports:
+    post:
+      operationId: recordExport
+      parameters:
+        - $ref: '#/components/parameters/projectId'
+      responses:
+        '201':
+          description: Export recorded.
+components:
+  parameters:
+    assetId:
+      in: path
+      name: assetId
+      required: true
+      schema:
+        type: string
+    projectId:
+      in: path
+      name: projectId
+      required: true
+      schema:
+        type: string
+    uploadId:
+      in: path
+      name: uploadId
+      required: true
+      schema:
+        type: string

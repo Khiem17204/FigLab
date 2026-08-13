@@ -1,5 +1,6 @@
 import { Value } from "@sinclair/typebox/value";
 import { describe, expect, it } from "vitest";
+import * as apiContract from "./index.js";
 import {
   AssetDescriptorSchema,
   apiRoutes,
@@ -59,6 +60,48 @@ describe("public API contracts", () => {
     expect(Value.Check(PrepareUploadRequestSchema, { ...request, checksumSha256: "ABC" })).toBe(
       false,
     );
+  });
+
+  it("rejects upload requests larger than 100 MiB", () => {
+    const request = {
+      filename: "source.tif",
+      contentType: "image/tiff",
+      contentLength: 104_857_600,
+      checksumSha256: "a".repeat(64),
+    };
+
+    expect(Value.Check(PrepareUploadRequestSchema, request)).toBe(true);
+    expect(
+      Value.Check(PrepareUploadRequestSchema, { ...request, contentLength: 104_857_601 }),
+    ).toBe(false);
+  });
+
+  it("rejects exports over 100 million pixels even when each edge is allowed", () => {
+    const validateRecordExportRequest = (
+      apiContract as {
+        validateRecordExportRequest?: (request: unknown) => boolean;
+      }
+    ).validateRecordExportRequest;
+
+    expect(validateRecordExportRequest).toBeTypeOf("function");
+    expect(
+      validateRecordExportRequest?.({
+        format: "png",
+        revision: 0,
+        widthPx: 10_000,
+        heightPx: 10_000,
+        checksumSha256: "c".repeat(64),
+      }),
+    ).toBe(true);
+    expect(
+      validateRecordExportRequest?.({
+        format: "png",
+        revision: 0,
+        widthPx: 10_001,
+        heightPx: 10_000,
+        checksumSha256: "c".repeat(64),
+      }),
+    ).toBe(false);
   });
 
   it("uses the typed revision-conflict error envelope", () => {
