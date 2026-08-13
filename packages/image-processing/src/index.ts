@@ -56,7 +56,7 @@ export type TiffMetadata = {
   isTiled: boolean;
   bigTiff: boolean;
   hasOmeMetadata: boolean;
-  sampleFormat: number;
+  sampleFormats: number[];
   photometricInterpretation: number;
   bitsPerSample: number[];
   samplesPerPixel: number;
@@ -81,7 +81,12 @@ export function validateTiffMetadata(metadata: TiffMetadata): RasterDescription 
   }
   if (metadata.width * metadata.height > MAX_RASTER_PIXELS)
     fail("image exceeds 100,000,000 pixels");
-  if (metadata.sampleFormat !== 1) fail("only unsigned samples are supported");
+  if (
+    metadata.sampleFormats.length !== metadata.samplesPerPixel ||
+    !metadata.sampleFormats.every((sampleFormat) => sampleFormat === 1)
+  ) {
+    fail("only unsigned samples are supported");
+  }
   if (metadata.samplesPerPixel !== 1 && metadata.samplesPerPixel !== 3)
     fail("only grayscale or RGB is supported");
   if (metadata.photometricInterpretation !== 1 && metadata.photometricInterpretation !== 2)
@@ -122,7 +127,9 @@ export async function decodeTiff(bytes: ArrayBuffer): Promise<RasterRegion> {
     isTiled: image.isTiled,
     bigTiff: isBigTiff(bytes),
     hasOmeMetadata: hasOmeMetadata(imageDescription),
-    sampleFormat: image.getSampleFormat(),
+    sampleFormats: Array.from({ length: image.getSamplesPerPixel() }, (_, index) =>
+      image.getSampleFormat(index),
+    ),
     photometricInterpretation: numberTag(directory.getValue("PhotometricInterpretation")),
     bitsPerSample: Array.from({ length: image.getSamplesPerPixel() }, (_, index) =>
       image.getBitsPerSample(index),

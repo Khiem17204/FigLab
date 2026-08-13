@@ -51,7 +51,7 @@ describe("TIFF validation", () => {
         isTiled: false,
         bigTiff: false,
         hasOmeMetadata: false,
-        sampleFormat: 1,
+        sampleFormats: [1, 1, 1],
         photometricInterpretation: 2,
         bitsPerSample: [16, 16, 16],
         samplesPerPixel: 3,
@@ -60,10 +60,36 @@ describe("TIFF validation", () => {
     ).toEqual({ widthPx: 20, heightPx: 10, bitDepth: 16, channels: 3 });
   });
 
+  it("rejects RGB TIFF metadata when any channel uses signed samples", () => {
+    const metadata = {
+      ...supportedMetadata(),
+      samplesPerPixel: 3,
+      photometricInterpretation: 2,
+      bitsPerSample: [8, 8, 8],
+      sampleFormats: [1, 2, 1],
+    };
+
+    expect(() => validateTiffMetadata(metadata)).toThrow(/unsigned samples/);
+  });
+
+  it("rejects an RGB TIFF whose second channel uses signed samples", async () => {
+    const bytes = writeArrayBuffer(new Uint8Array([1, 2, 3]), {
+      width: 1,
+      height: 1,
+      BitsPerSample: [8, 8, 8],
+      SamplesPerPixel: 3,
+      PhotometricInterpretation: 2,
+      Compression: 1,
+      SampleFormat: [1, 2, 1],
+    });
+
+    await expect(decodeTiff(bytes)).rejects.toThrow(/unsigned samples/);
+  });
+
   it.each([
     ["tiled", { isTiled: true }],
     ["multi-page", { imageCount: 2 }],
-    ["signed", { sampleFormat: 2 }],
+    ["signed", { sampleFormats: [2] }],
     ["palette", { photometricInterpretation: 3 }],
     ["unsupported compression", { compression: 7 }],
     ["too many pixels", { width: 10001, height: 10000 }],
@@ -139,7 +165,7 @@ function supportedMetadata() {
     isTiled: false,
     bigTiff: false,
     hasOmeMetadata: false,
-    sampleFormat: 1,
+    sampleFormats: [1],
     photometricInterpretation: 1,
     bitsPerSample: [8],
     samplesPerPixel: 1,
