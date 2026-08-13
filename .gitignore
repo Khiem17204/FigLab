@@ -1,0 +1,11 @@
+.worktrees/
+.superpowers/
+node_modules/
+.turbo/
+coverage/
+dist/
+playwright-report/
+test-results/
+.env
+!.env.example
+
