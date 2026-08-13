@@ -364,13 +364,11 @@ function compositeImageView(
         region.channels === 1
           ? red
           : displayedSample(sampleAt(region, sampleIndex + 2), region.bitDepth, display);
-      canvas[targetIndex] = red;
-      canvas[targetIndex + 1] = green;
-      canvas[targetIndex + 2] = blue;
-      canvas[targetIndex + 3] =
+      const alpha =
         region.channels === 4
           ? sourceAlphaSample(sampleAt(region, sampleIndex + 3), region.bitDepth)
           : 255;
+      compositeSourceOver(canvas, targetIndex, red, green, blue, alpha);
     }
   }
 }
@@ -388,6 +386,68 @@ function displayedSample(sample: number, bitDepth: 8 | 16, display: DisplayTrans
 
 function sourceAlphaSample(sample: number, bitDepth: 8 | 16): number {
   return Math.round((sample / (bitDepth === 8 ? 255 : 65_535)) * 255);
+}
+
+function compositeSourceOver(
+  destination: Uint8Array,
+  index: number,
+  sourceRed: number,
+  sourceGreen: number,
+  sourceBlue: number,
+  sourceAlpha: number,
+): void {
+  const sourceAlphaUnit = sourceAlpha / 255;
+  const destinationAlphaUnit = sampleAtCanvas(destination, index + 3) / 255;
+  const destinationContribution = destinationAlphaUnit * (1 - sourceAlphaUnit);
+  const outputAlphaUnit = sourceAlphaUnit + destinationContribution;
+  if (outputAlphaUnit === 0) {
+    destination[index] = 0;
+    destination[index + 1] = 0;
+    destination[index + 2] = 0;
+    destination[index + 3] = 0;
+    return;
+  }
+
+  destination[index] = blendChannel(
+    sourceRed,
+    sampleAtCanvas(destination, index),
+    sourceAlphaUnit,
+    destinationContribution,
+    outputAlphaUnit,
+  );
+  destination[index + 1] = blendChannel(
+    sourceGreen,
+    sampleAtCanvas(destination, index + 1),
+    sourceAlphaUnit,
+    destinationContribution,
+    outputAlphaUnit,
+  );
+  destination[index + 2] = blendChannel(
+    sourceBlue,
+    sampleAtCanvas(destination, index + 2),
+    sourceAlphaUnit,
+    destinationContribution,
+    outputAlphaUnit,
+  );
+  destination[index + 3] = Math.round(outputAlphaUnit * 255);
+}
+
+function blendChannel(
+  source: number,
+  destination: number,
+  sourceAlphaUnit: number,
+  destinationContribution: number,
+  outputAlphaUnit: number,
+): number {
+  return Math.round(
+    (source * sourceAlphaUnit + destination * destinationContribution) / outputAlphaUnit,
+  );
+}
+
+function sampleAtCanvas(canvas: Uint8Array, index: number): number {
+  const sample = canvas[index];
+  if (sample === undefined) throw new Error("Canvas index is outside the export dimensions");
+  return sample;
 }
 
 function normalizedToPixelRect(
