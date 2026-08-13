@@ -36,6 +36,140 @@ export type BrowserRasterDecoder = {
   decode(bytes: ArrayBuffer, mimeType: "image/png" | "image/jpeg"): Promise<RasterRegion>;
 };
 
+export function tiffReadOptions(sourceRect: SourcePixelRect): {
+  window: [number, number, number, number];
+  interleave: true;
+} {
+  return {
+    window: [
+      sourceRect.x,
+      sourceRect.y,
+      sourceRect.x + sourceRect.width,
+      sourceRect.y + sourceRect.height,
+    ],
+    interleave: true,
+  };
+}
+
+export type TiffWorkerRequest =
+  | { requestId: number; kind: "open"; assetId: string; bytes: ArrayBuffer }
+  | {
+      requestId: number;
+      kind: "read";
+      assetId: string;
+      sourceRect: SourcePixelRect;
+      pyramidLevel: number;
+    }
+  | { requestId: number; kind: "preview"; assetId: string; maxEdge: number }
+  | { requestId: number; kind: "remove"; assetId: string };
+
+export type TiffWorkerResponse =
+  | { requestId: number; kind: "opened"; assetId: string; description: RasterDescription }
+  | { requestId: number; kind: "region"; assetId: string; region: RasterRegion }
+  | { requestId: number; kind: "removed"; assetId: string }
+  | { requestId: number; kind: "error"; message: string };
+
+type TiffReadOptions = ReturnType<typeof tiffReadOptions> & { width?: number; height?: number };
+export type TiffWindowSource = {
+  description: RasterDescription;
+  readRasters(options: TiffReadOptions): Promise<Uint8Array | Uint16Array>;
+};
+export type TiffWindowSourceOpener = (bytes: ArrayBuffer) => Promise<TiffWindowSource>;
+export type TiffWorkerHandlerResult = {
+  response: TiffWorkerResponse;
+  transfer: Transferable[];
+};
+
+export function createTiffWorkerHandler(open: TiffWindowSourceOpener = openTiffWindowSource): {
+  handle(request: TiffWorkerRequest): Promise<TiffWorkerHandlerResult>;
+} {
+  const sources = new Map<string, TiffWindowSource>();
+  return {
+    async handle(request) {
+      try {
+        if (request.kind === "open") {
+          const source = await open(request.bytes);
+          sources.set(request.assetId, source);
+          return {
+            response: {
+              requestId: request.requestId,
+              kind: "opened",
+              assetId: request.assetId,
+              description: source.description,
+            },
+            transfer: [],
+          };
+        }
+        if (request.kind === "remove") {
+          sources.delete(request.assetId);
+          return {
+            response: {
+              requestId: request.requestId,
+              kind: "removed",
+              assetId: request.assetId,
+            },
+            transfer: [],
+          };
+        }
+        const source = sources.get(request.assetId);
+        if (!source) throw new Error(`TIFF source ${request.assetId} is not open`);
+        const sourceRect =
+          request.kind === "preview"
+            ? {
+                x: 0,
+                y: 0,
+                width: source.description.widthPx,
+                height: source.description.heightPx,
+              }
+            : request.sourceRect;
+        if (request.kind === "read" && request.pyramidLevel !== 0)
+          throw new Error("TIFF pyramids are not supported");
+        assertSourceRect(sourceRect, source.description);
+        const previewScale =
+          request.kind === "preview"
+            ? Math.min(1, request.maxEdge / Math.max(sourceRect.width, sourceRect.height))
+            : 1;
+        const widthPx = Math.max(1, Math.round(sourceRect.width * previewScale));
+        const heightPx = Math.max(1, Math.round(sourceRect.height * previewScale));
+        const options: TiffReadOptions = tiffReadOptions(sourceRect);
+        if (request.kind === "preview") {
+          options.width = widthPx;
+          options.height = heightPx;
+        }
+        const decoded = await source.readRasters(options);
+        const data = transferableRasterData(decoded);
+        assertTiffRasterData(data, source.description.bitDepth);
+        return {
+          response: {
+            requestId: request.requestId,
+            kind: "region",
+            assetId: request.assetId,
+            region: {
+              data,
+              sourceRect,
+              widthPx,
+              heightPx,
+              bitDepth: source.description.bitDepth,
+              channels: source.description.channels,
+              pyramidLevel: 0,
+            },
+          },
+          transfer: [data.buffer],
+        };
+      } catch (error) {
+        return {
+          response: {
+            requestId: request.requestId,
+            kind: "error",
+            message: error instanceof Error ? error.message : "TIFF worker failed",
+          },
+          transfer: [],
+        };
+      }
+    },
+  };
+}
+
 export function applyDisplayTransform(
   sample: number,
   bitDepth: 8 | 16,
@@ -115,6 +249,27 @@ export function validateTiffMetadata(metadata: TiffMetadata): RasterDescription 
 }
 
 export async function decodeTiff(bytes: ArrayBuffer): Promise<RasterRegion> {
+  const source = await openTiffWindowSource(bytes);
+  const sourceRect = {
+    x: 0,
+    y: 0,
+    width: source.description.widthPx,
+    height: source.description.heightPx,
+  };
+  const data = await source.readRasters(tiffReadOptions(sourceRect));
+  assertTiffRasterData(data, source.description.bitDepth);
+  return {
+    data,
+    sourceRect,
+    widthPx: source.description.widthPx,
+    heightPx: source.description.heightPx,
+    bitDepth: source.description.bitDepth,
+    channels: source.description.channels,
+    pyramidLevel: 0,
+  };
+}
+
+async function openTiffWindowSource(bytes: ArrayBuffer): Promise<TiffWindowSource> {
   const tiff = await fromArrayBuffer(bytes);
   const imageCount = await tiff.getImageCount();
   const image = await tiff.getImage();
@@ -137,21 +292,41 @@ export async function decodeTiff(bytes: ArrayBuffer): Promise<RasterRegion> {
     samplesPerPixel: image.getSamplesPerPixel(),
     compression: numberTag(directory.getValue("Compression")),
   });
-  const data = await image.readRasters({ interleave: true });
-  if (description.bitDepth === 8 && !(data instanceof Uint8Array))
-    throw new Error("Unsupported TIFF: decoder returned non-8-bit samples");
-  if (description.bitDepth === 16 && !(data instanceof Uint16Array))
-    throw new Error("Unsupported TIFF: decoder returned non-16-bit samples");
-  const rasterData = data as Uint8Array | Uint16Array;
   return {
-    data: rasterData,
-    sourceRect: { x: 0, y: 0, width: description.widthPx, height: description.heightPx },
-    widthPx: description.widthPx,
-    heightPx: description.heightPx,
-    bitDepth: description.bitDepth,
-    channels: description.channels,
-    pyramidLevel: 0,
+    description,
+    async readRasters(options) {
+      return image.readRasters(options) as Promise<Uint8Array | Uint16Array>;
+    },
   };
+}
+
+function assertTiffRasterData(data: Uint8Array | Uint16Array, bitDepth: 8 | 16): void {
+  if (bitDepth === 8 && !(data instanceof Uint8Array))
+    throw new Error("Unsupported TIFF: decoder returned non-8-bit samples");
+  if (bitDepth === 16 && !(data instanceof Uint16Array))
+    throw new Error("Unsupported TIFF: decoder returned non-16-bit samples");
+}
+
+function assertSourceRect(sourceRect: SourcePixelRect, description: RasterDescription): void {
+  if (
+    !Number.isSafeInteger(sourceRect.x) ||
+    !Number.isSafeInteger(sourceRect.y) ||
+    !Number.isSafeInteger(sourceRect.width) ||
+    !Number.isSafeInteger(sourceRect.height) ||
+    sourceRect.x < 0 ||
+    sourceRect.y < 0 ||
+    sourceRect.width < 1 ||
+    sourceRect.height < 1 ||
+    sourceRect.x + sourceRect.width > description.widthPx ||
+    sourceRect.y + sourceRect.height > description.heightPx
+  ) {
+    throw new Error("TIFF source region is outside the image");
+  }
+}
+
+function transferableRasterData(data: Uint8Array | Uint16Array): Uint8Array | Uint16Array {
+  if (data.buffer instanceof ArrayBuffer) return data;
+  return data instanceof Uint8Array ? new Uint8Array(data) : new Uint16Array(data);
 }
 
 function isBigTiff(bytes: ArrayBuffer): boolean {

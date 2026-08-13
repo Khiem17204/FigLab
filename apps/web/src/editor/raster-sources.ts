@@ -2,12 +2,12 @@ import type { DisplayTransformV1 } from "@figlab/figure-schema";
 import {
   applyDisplayTransform,
   decodeBrowserRaster,
-  decodeTiff,
   type RasterDescription,
   type RasterRegion,
   type RasterSourceResolver,
   type SourcePixelRect,
 } from "@figlab/image-processing";
+import { createTiffRasterWorkerClient, type TiffRasterClient } from "./tiff-worker-client";
 
 export type SupportedRasterMime = "image/png" | "image/jpeg" | "image/tiff";
 export type RasterDecode = (
@@ -17,18 +17,31 @@ export type RasterDecode = (
 
 export class BrowserRasterRepository implements RasterSourceResolver {
   private readonly regions = new Map<string, RasterRegion>();
+  private readonly tiffDescriptions = new Map<string, RasterDescription>();
   private readonly previewUrls = new Map<string, string>();
+  private tiffClient: TiffRasterClient | undefined;
 
-  constructor(private readonly decode: RasterDecode = decodeRasterInBrowser) {}
+  constructor(
+    private readonly decode: RasterDecode = decodeRasterInBrowser,
+    private readonly createTiffClient: () => TiffRasterClient = createTiffRasterWorkerClient,
+  ) {}
 
   async add(assetId: string, bytes: ArrayBuffer, mimeType: SupportedRasterMime): Promise<void> {
+    if (mimeType === "image/tiff") {
+      const client = this.requiredTiffClient();
+      const description = await client.open(assetId, bytes);
+      this.tiffDescriptions.set(assetId, description);
+      const preview = await client.preview(assetId);
+      this.previewUrls.set(assetId, await createTiffPreviewUrl(preview));
+      return;
+    }
     const region = await this.decode(bytes, mimeType);
     this.regions.set(assetId, region);
-    this.previewUrls.set(assetId, await createPreviewUrl(bytes, mimeType, region));
+    this.previewUrls.set(assetId, createPreviewUrl(bytes, mimeType));
   }
 
   has(assetId: string): boolean {
-    return this.regions.has(assetId);
+    return this.regions.has(assetId) || this.tiffDescriptions.has(assetId);
   }
 
   getPreviewUrl(assetId: string): string | undefined {
@@ -43,7 +56,9 @@ export class BrowserRasterRepository implements RasterSourceResolver {
     const cacheKey = `display:${assetId}:${JSON.stringify(sourceRect)}:${JSON.stringify(display)}`;
     const cached = this.previewUrls.get(cacheKey);
     if (cached) return cached;
-    const region = cropRegion(this.required(assetId), sourceRect);
+    const region = this.tiffDescriptions.has(assetId)
+      ? await this.requiredTiffClient().read(assetId, sourceRect, 0)
+      : cropRegion(this.required(assetId), sourceRect);
     const canvas = document.createElement("canvas");
     canvas.width = region.widthPx;
     canvas.height = region.heightPx;
@@ -65,6 +80,8 @@ export class BrowserRasterRepository implements RasterSourceResolver {
   }
 
   async describe(assetId: string): Promise<RasterDescription> {
+    const tiff = this.tiffDescriptions.get(assetId);
+    if (tiff) return { ...tiff };
     const region = this.required(assetId);
     return {
       widthPx: region.widthPx,
@@ -74,7 +91,14 @@ export class BrowserRasterRepository implements RasterSourceResolver {
     };
   }
 
-  async getRegion(assetId: string, sourceRect: SourcePixelRect): Promise<RasterRegion> {
+  async getRegion(
+    assetId: string,
+    sourceRect: SourcePixelRect,
+    pyramidLevel = 0,
+  ): Promise<RasterRegion> {
+    if (this.tiffDescriptions.has(assetId))
+      return this.requiredTiffClient().read(assetId, sourceRect, pyramidLevel);
+    if (pyramidLevel !== 0) throw new Error("Raster pyramids are not supported");
     return cropRegion(this.required(assetId), sourceRect);
   }
 
@@ -82,12 +106,20 @@ export class BrowserRasterRepository implements RasterSourceResolver {
     for (const url of this.previewUrls.values()) URL.revokeObjectURL(url);
     this.previewUrls.clear();
     this.regions.clear();
+    this.tiffDescriptions.clear();
+    this.tiffClient?.terminate();
+    this.tiffClient = undefined;
   }
 
   private required(assetId: string): RasterRegion {
     const region = this.regions.get(assetId);
     if (!region) throw new Error(`Raster source ${assetId} is not loaded`);
     return region;
+  }
+
+  private requiredTiffClient(): TiffRasterClient {
+    this.tiffClient ??= this.createTiffClient();
+    return this.tiffClient;
   }
 }
 
@@ -115,7 +147,7 @@ async function decodeRasterInBrowser(
   bytes: ArrayBuffer,
   mimeType: SupportedRasterMime,
 ): Promise<RasterRegion> {
-  if (mimeType === "image/tiff") return decodeTiff(bytes);
+  if (mimeType === "image/tiff") throw new Error("TIFF decoding requires its dedicated worker");
   return decodeBrowserRaster(new CanvasRasterDecoder(), bytes, mimeType);
 }
 
@@ -180,12 +212,11 @@ function cropRegion(source: RasterRegion, rect: SourcePixelRect): RasterRegion {
   };
 }
 
-async function createPreviewUrl(
-  bytes: ArrayBuffer,
-  mimeType: SupportedRasterMime,
-  region: RasterRegion,
-): Promise<string> {
-  if (mimeType !== "image/tiff") return URL.createObjectURL(new Blob([bytes], { type: mimeType }));
+function createPreviewUrl(bytes: ArrayBuffer, mimeType: SupportedRasterMime): string {
+  return URL.createObjectURL(new Blob([bytes], { type: mimeType }));
+}
+
+async function createTiffPreviewUrl(region: RasterRegion): Promise<string> {
   const canvas = document.createElement("canvas");
   canvas.width = region.widthPx;
   canvas.height = region.heightPx;

@@ -1,13 +1,15 @@
 import { createDefaultFigureDocument } from "@figlab/figure-schema";
 import { writeArrayBuffer } from "geotiff";
 import { PNG } from "pngjs";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
   applyDisplayTransform,
   composeArtboardPng,
+  createTiffWorkerHandler,
   decodeBrowserRaster,
   decodeTiff,
   type RasterSourceResolver,
+  tiffReadOptions,
   validateTiffMetadata,
 } from "./index.js";
 
@@ -44,6 +46,54 @@ describe("browser raster decoding", () => {
 });
 
 describe("TIFF validation", () => {
+  it("maps source rectangles to geotiff window reads", () => {
+    expect(tiffReadOptions({ x: 7, y: 11, width: 13, height: 17 })).toEqual({
+      window: [7, 11, 20, 28],
+      interleave: true,
+    });
+  });
+
+  it("reads a 16-bit TIFF window and marks its exact buffer transferable", async () => {
+    const samples = new Uint16Array(13 * 17);
+    samples.set([1, 32_768, 65_535]);
+    const readRasters = vi.fn(async () => samples);
+    const handler = createTiffWorkerHandler(async () => ({
+      description: { widthPx: 100, heightPx: 80, bitDepth: 16, channels: 1 },
+      readRasters,
+    }));
+    await handler.handle({
+      requestId: 1,
+      kind: "open",
+      assetId: "asset-1",
+      bytes: new ArrayBuffer(8),
+    });
+
+    const result = await handler.handle({
+      requestId: 2,
+      kind: "read",
+      assetId: "asset-1",
+      sourceRect: { x: 7, y: 11, width: 13, height: 17 },
+      pyramidLevel: 0,
+    });
+
+    expect(readRasters).toHaveBeenCalledWith({ window: [7, 11, 20, 28], interleave: true });
+    expect(result.response).toMatchObject({
+      kind: "region",
+      region: {
+        sourceRect: { x: 7, y: 11, width: 13, height: 17 },
+        widthPx: 13,
+        heightPx: 17,
+        bitDepth: 16,
+        channels: 1,
+        pyramidLevel: 0,
+      },
+    });
+    if (result.response.kind !== "region") throw new Error("expected TIFF worker region");
+    expect(result.response.region.data).toBeInstanceOf(Uint16Array);
+    expect(result.response.region.data).toBe(samples);
+    expect(result.transfer).toEqual([samples.buffer]);
+  });
+
   it("decodes an unsigned 16-bit grayscale TIFF without reducing its samples", async () => {
     const bytes = writeArrayBuffer(new Uint16Array([0, 32_768]), {
       width: 2,
@@ -59,6 +109,39 @@ describe("TIFF validation", () => {
 
     expect(region).toMatchObject({ widthPx: 2, heightPx: 1, bitDepth: 16, channels: 1 });
     expect([...region.data]).toEqual([0, 32_768]);
+  });
+
+  it("reads only the requested window from a real 16-bit TIFF source", async () => {
+    const bytes = writeArrayBuffer(new Uint16Array([1, 2, 3, 4, 5, 6]), {
+      width: 3,
+      height: 2,
+      BitsPerSample: [16],
+      SamplesPerPixel: 1,
+      PhotometricInterpretation: 1,
+      Compression: 1,
+      SampleFormat: [1],
+    });
+    const handler = createTiffWorkerHandler();
+    const opened = await handler.handle({
+      requestId: 1,
+      kind: "open",
+      assetId: "asset-real",
+      bytes,
+    });
+    expect(opened.response).toMatchObject({ kind: "opened" });
+
+    const result = await handler.handle({
+      requestId: 2,
+      kind: "read",
+      assetId: "asset-real",
+      sourceRect: { x: 1, y: 0, width: 2, height: 2 },
+      pyramidLevel: 0,
+    });
+
+    if (result.response.kind !== "region") throw new Error("expected TIFF worker region");
+    expect(result.response.region.data).toBeInstanceOf(Uint16Array);
+    expect([...result.response.region.data]).toEqual([2, 3, 5, 6]);
+    expect(result.transfer).toEqual([result.response.region.data.buffer]);
   });
 
   it("accepts a supported single strip 16-bit RGB image metadata", () => {
