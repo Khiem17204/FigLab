@@ -20,4 +20,21 @@ describe("autosave conflict recovery", () => {
     await autosave.saveNow();
     expect(save).toHaveBeenCalledTimes(1);
   });
+
+  it("resumes after reloading the latest server document", async () => {
+    const document = createDefaultFigureDocument("artboard-1");
+    const save = vi.fn().mockRejectedValueOnce({ status: 409 }).mockResolvedValue(undefined);
+    const autosave = new AutosaveController(
+      save,
+      () => document,
+      () => 3,
+    );
+    await autosave.saveNow();
+
+    autosave.resetAfterReload();
+    await autosave.saveNow();
+
+    expect(autosave.getStatus()).toBe("saved");
+    expect(save).toHaveBeenCalledTimes(2);
+  });
 });

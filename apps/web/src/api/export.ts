@@ -5,6 +5,7 @@ import {
   validateRecordExportRequest,
 } from "@figlab/api-contract";
 import type { FigureDocumentV1 } from "@figlab/figure-schema";
+import { composeArtboardPng, type RasterSourceResolver } from "@figlab/image-processing";
 
 import { sha256 } from "./client";
 
@@ -12,6 +13,22 @@ export type OriginalSourcePngExporter = (
   document: FigureDocumentV1,
   size: { widthPx: number; heightPx: number },
 ) => Promise<Blob>;
+
+export function createArtboardPngExporter(
+  artboardId: string,
+  resolver: RasterSourceResolver,
+): OriginalSourcePngExporter {
+  return async (document, size) => {
+    const png = await composeArtboardPng(
+      document,
+      artboardId,
+      size.widthPx,
+      size.heightPx,
+      resolver,
+    );
+    return new Blob([new Uint8Array(png).buffer as ArrayBuffer], { type: "image/png" });
+  };
+}
 
 export type ExportPngOptions = {
   document: FigureDocumentV1;

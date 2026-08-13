@@ -1,42 +1,59 @@
-import { createDefaultFigureDocument, type ImageViewObjectV1 } from "@figlab/figure-schema";
+import type { AssetDescriptor, Project, ProjectDocumentResponse } from "@figlab/api-contract";
+import { type ResizeAnchor, selectImageProvenance } from "@figlab/editor-core";
+import type { FigureDocumentV1, ImageViewObjectV1, NormalizedRect } from "@figlab/figure-schema";
 import { Button, Panel } from "@figlab/ui";
 import { QueryClient, QueryClientProvider, useMutation, useQuery } from "@tanstack/react-query";
-import { useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useStore } from "zustand";
 
 import { FigLabClient } from "./api/client";
-import { downloadBlob, exportPng } from "./api/export";
-import { cropFromPointer } from "./editor/crop";
+import { createArtboardPngExporter, downloadBlob, exportPng } from "./api/export";
+import { AutosaveController, type SaveStatus } from "./editor/autosave";
+import { BrowserRasterRepository, type SupportedRasterMime } from "./editor/raster-sources";
 import { createEditorSession, type Point } from "./editor/session-store";
 import { PixiArtboard } from "./pixi-artboard";
 import "./styles.css";
 
-const client = new FigLabClient();
-const DEFAULT_PROJECT = { id: "local-project", name: "Untitled Figure" };
+const defaultClient = new FigLabClient();
 
-export function FigLabApp() {
+export function FigLabApp({ client = defaultClient }: { client?: FigLabClient }) {
   const [queryClient] = useState(
     () => new QueryClient({ defaultOptions: { queries: { retry: false } } }),
   );
-  const [screen, setScreen] = useState<"dashboard" | "editor">("dashboard");
+  const [project, setProject] = useState<Project>();
   return (
     <QueryClientProvider client={queryClient}>
-      {screen === "dashboard" ? (
-        <Dashboard onOpen={() => setScreen("editor")} />
+      {project ? (
+        <EditorLoader client={client} onBack={() => setProject(undefined)} project={project} />
       ) : (
-        <FigLabEditor onBack={() => setScreen("dashboard")} />
+        <Dashboard client={client} onOpen={setProject} />
       )}
     </QueryClientProvider>
   );
 }
 
-function Dashboard({ onOpen }: { onOpen: () => void }) {
+function Dashboard({
+  client,
+  onOpen,
+}: {
+  client: FigLabClient;
+  onOpen: (project: Project) => void;
+}) {
   const projects = useQuery({ queryKey: ["projects"], queryFn: () => client.listProjects() });
-  const create = useMutation({
-    mutationFn: (name: string) => client.createProject(name),
-    onSuccess: onOpen,
-  });
   const [name, setName] = useState("");
+  const create = useMutation({
+    mutationFn: (projectName: string) => client.createProject(projectName),
+    onSuccess: (created) => onOpen(created),
+  });
+  const rename = useMutation({
+    mutationFn: ({ projectId, projectName }: { projectId: string; projectName: string }) =>
+      client.renameProject(projectId, projectName),
+    onSuccess: () => projects.refetch(),
+  });
+  const remove = useMutation({
+    mutationFn: (projectId: string) => client.deleteProject(projectId),
+    onSuccess: () => projects.refetch(),
+  });
   return (
     <main className="app-shell">
       <header className="app-header">
@@ -46,11 +63,6 @@ function Dashboard({ onOpen }: { onOpen: () => void }) {
       <div className="dashboard-layout">
         <nav aria-label="Project navigation" className="side-nav">
           <strong>Projects</strong>
-          <Button onClick={onOpen}>Open local workspace</Button>
-          <label className="upload-control">
-            Upload original
-            <input type="file" accept="image/png,image/jpeg,image/tiff" onChange={onOpen} />
-          </label>
         </nav>
         <section aria-labelledby="projects-heading" className="dashboard-content">
           <div className="section-heading">
@@ -66,26 +78,47 @@ function Dashboard({ onOpen }: { onOpen: () => void }) {
             >
               <input
                 aria-label="New project name"
-                value={name}
                 onChange={(event) => setName(event.target.value)}
                 placeholder="New project name"
+                value={name}
               />
-              <Button disabled={create.isPending}>Create project</Button>
+              <Button disabled={create.isPending} type="submit">
+                Create project
+              </Button>
             </form>
           </div>
           {projects.isLoading && <p role="status">Loading projects…</p>}
           {projects.isError && (
-            <p role="alert">Could not load projects. You can still open a local workspace.</p>
+            <p role="alert">Could not load projects. Retry when the server is available.</p>
           )}
           {projects.data?.length === 0 && (
             <p className="empty-state">No projects yet. Create one to begin a figure.</p>
           )}
           <div className="project-grid">
-            {projects.data?.map((project) => (
-              <Panel key={project.id}>
-                <h2>{project.name}</h2>
-                <p>Updated {new Date(project.updatedAt).toLocaleDateString()}</p>
-                <Button onClick={onOpen}>Open</Button>
+            {projects.data?.map((item) => (
+              <Panel key={item.id}>
+                <h2>{item.name}</h2>
+                <p>Updated {new Date(item.updatedAt).toLocaleDateString()}</p>
+                <Button aria-label={`Open ${item.name}`} onClick={() => onOpen(item)}>
+                  Open
+                </Button>
+                <Button
+                  aria-label={`Rename ${item.name}`}
+                  onClick={() => {
+                    const value = window.prompt("Rename project", item.name)?.trim();
+                    if (value) rename.mutate({ projectId: item.id, projectName: value });
+                  }}
+                >
+                  Rename
+                </Button>
+                <Button
+                  aria-label={`Delete ${item.name}`}
+                  onClick={() => {
+                    if (window.confirm(`Delete ${item.name}?`)) remove.mutate(item.id);
+                  }}
+                >
+                  Delete
+                </Button>
               </Panel>
             ))}
           </div>
@@ -95,144 +128,271 @@ function Dashboard({ onOpen }: { onOpen: () => void }) {
   );
 }
 
-export function FigLabEditor({ onBack }: { onBack: () => void }) {
-  const [session] = useState(() => createEditorSession(createDefaultFigureDocument("artboard-1")));
+function EditorLoader({
+  client,
+  project,
+  onBack,
+}: {
+  client: FigLabClient;
+  project: Project;
+  onBack: () => void;
+}) {
+  const loaded = useQuery({
+    queryKey: ["document", project.id],
+    queryFn: () => client.getDocument(project.id),
+  });
+  if (loaded.isLoading)
+    return (
+      <main className="loading-page">
+        <p role="status">Loading {project.name}…</p>
+      </main>
+    );
+  if (loaded.isError || !loaded.data)
+    return (
+      <main className="loading-page">
+        <p role="alert">Could not load this project.</p>
+        <Button onClick={onBack}>Projects</Button>
+      </main>
+    );
+  return (
+    <FigLabEditor
+      client={client}
+      initial={loaded.data}
+      onBack={onBack}
+      project={project}
+      reload={() => loaded.refetch()}
+    />
+  );
+}
+
+export function FigLabEditor({
+  client = defaultClient,
+  initial,
+  onBack,
+  project,
+  reload,
+}: {
+  client?: FigLabClient;
+  initial: ProjectDocumentResponse;
+  onBack: () => void;
+  project: Project;
+  reload: () => Promise<{ data: ProjectDocumentResponse | undefined }>;
+}) {
+  const [session] = useState(() => createEditorSession(initial.document));
   const state = useStore(session);
+  const [revision, setRevision] = useState(initial.revision);
+  const [assets, setAssets] = useState<AssetDescriptor[]>([]);
+  const [selectedAssetId, setSelectedAssetId] = useState(
+    initial.document.objects[0]?.view.sourceAssetId,
+  );
   const [uploadStatus, setUploadStatus] = useState(
     "Choose a PNG, JPEG, or TIFF original to upload.",
   );
   const [exportStatus, setExportStatus] = useState("");
-  const selected = state.document.objects.find((object) => object.id === state.selectedObjectId);
-  const pointer = (event: React.PointerEvent<HTMLDivElement>): Point => {
-    const rect = event.currentTarget.getBoundingClientRect();
-    return {
-      x: (event.clientX - rect.left) / rect.width,
-      y: (event.clientY - rect.top) / rect.height,
+  const [saveStatus, setSaveStatus] = useState<SaveStatus>("saved");
+  const [rasterSources] = useState(() => new BrowserRasterRepository());
+  const saveState = useRef({ document: initial.document, revision: initial.revision });
+  saveState.current = { document: state.document, revision };
+  const autosave = useMemo(
+    () =>
+      new AutosaveController(
+        async (baseRevision, document) => {
+          const response = await client.saveDocument(project.id, baseRevision, document);
+          setRevision(response.revision);
+        },
+        () => saveState.current.document,
+        () => saveState.current.revision,
+        setSaveStatus,
+      ),
+    [client, project.id],
+  );
+  useEffect(
+    () =>
+      session.subscribe((next, previous) => {
+        if (next.document !== previous.document && next.history.length > 0) autosave.schedule();
+      }),
+    [autosave, session],
+  );
+  useEffect(() => () => rasterSources.dispose(), [rasterSources]);
+
+  const navigateBack = useCallback(async () => {
+    await autosave.flushBeforeNavigation();
+    if (autosave.getStatus() !== "conflict") onBack();
+  }, [autosave, onBack]);
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => {
+      if (!(event.metaKey || event.ctrlKey) || event.key.toLowerCase() !== "z") return;
+      event.preventDefault();
+      if (event.shiftKey) session.getState().redo();
+      else session.getState().undo();
     };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [session]);
+  useEffect(() => {
+    let cancelled = false;
+    const referencedAssetIds = [
+      ...new Set(initial.document.objects.map((object) => object.view.sourceAssetId)),
+    ];
+    void Promise.all(
+      referencedAssetIds.map(async (assetId) => {
+        if (rasterSources.has(assetId)) return;
+        const asset = await client.getAsset(assetId);
+        if (asset.status !== "ready") return;
+        const download = await client.downloadAsset(assetId);
+        await rasterSources.add(assetId, download.bytes, asset.mimeType as SupportedRasterMime);
+        if (!cancelled)
+          setAssets((current) => [...current.filter((item) => item.id !== asset.id), asset]);
+      }),
+    ).catch((error: unknown) => {
+      if (!cancelled)
+        setUploadStatus(
+          error instanceof Error
+            ? `Could not load an original: ${error.message}`
+            : "Could not load an original.",
+        );
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [client, initial.document, rasterSources]);
+
+  const selected = state.document.objects.find((object) => object.id === state.selectedObjectId);
+  const selectedAsset = assets.find((asset) => asset.id === selectedAssetId);
+  const selectedPreviewUrl = selectedAssetId
+    ? rasterSources.getPreviewUrl(selectedAssetId)
+    : undefined;
+  const provenance = selected ? selectImageProvenance(state.document, selected.id) : undefined;
+  const highlightedViewport = provenance?.viewport;
+
+  const upload = async (file: File) => {
+    setUploadStatus("Computing SHA-256 and reserving upload…");
+    try {
+      const asset = await client.prepareAndUpload(project.id, file, file.name, (stage) =>
+        setUploadStatus(`Upload ${stage}`),
+      );
+      if (asset.status === "rejected") {
+        setUploadStatus(
+          `Upload rejected: ${asset.rejectionReason ?? "unsupported image"}. Choose the original again to retry.`,
+        );
+        return;
+      }
+      await rasterSources.add(
+        asset.id,
+        await file.arrayBuffer(),
+        asset.mimeType as SupportedRasterMime,
+      );
+      setAssets((current) => [...current.filter((item) => item.id !== asset.id), asset]);
+      setSelectedAssetId(asset.id);
+      setUploadStatus("Upload completed and verified.");
+    } catch (error) {
+      setUploadStatus(
+        error instanceof Error
+          ? `Upload failed: ${error.message}. Choose the original again to retry.`
+          : "Upload failed. Retry.",
+      );
+    }
   };
-  const sourceCrop =
-    state.cropDraft &&
-    cropFromPointer(state.cropDraft.start, state.cropDraft.end, { width: 1, height: 1 });
-  const siblings = selected
-    ? state.document.objects.filter(
-        (object) => object.view.sourceAssetId === selected.view.sourceAssetId,
-      )
-    : [];
+
+  const recoverLatest = async () => {
+    const result = await reload();
+    if (!result.data) return;
+    session.getState().replaceDocument(result.data.document);
+    setRevision(result.data.revision);
+    autosave.resetAfterReload();
+  };
+
   return (
     <main className="editor-shell">
       <header className="app-header editor-header">
-        <Button onClick={onBack}>Projects</Button>
-        <strong>{DEFAULT_PROJECT.name}</strong>
-        <span role="status">Saved locally</span>
-        <Button onClick={() => session.getState().undo()} disabled={!state.history.length}>
+        <Button onClick={() => void navigateBack()}>Projects</Button>
+        <h1>{project.name}</h1>
+        <span role="status">
+          {saveStatus === "conflict"
+            ? "Save conflict"
+            : saveStatus === "saving"
+              ? "Saving…"
+              : saveStatus === "error"
+                ? "Save error"
+                : "Saved"}
+        </span>
+        <Button disabled={!state.history.length} onClick={() => session.getState().undo()}>
           Undo
         </Button>
-        <Button onClick={() => session.getState().redo()} disabled={!state.future.length}>
+        <Button disabled={!state.future.length} onClick={() => session.getState().redo()}>
           Redo
         </Button>
-        <Button onClick={() => document.getElementById("png-export")?.scrollIntoView()}>
-          Export PNG
-        </Button>
       </header>
+      {saveStatus === "conflict" && (
+        <div className="conflict-banner" role="alert">
+          The project changed on the server. Your local work is retained.
+          <Button onClick={() => void recoverLatest()}>Reload latest</Button>
+          <Button
+            onClick={() => downloadBlob(autosave.downloadMyJson(), `${project.name}-local.json`)}
+          >
+            Download my JSON
+          </Button>
+        </div>
+      )}
       <div className="editor-layout">
-        <aside className="source-library" aria-label="Source library">
+        <aside aria-label="Source library" className="source-library">
           <h2>Source library</h2>
           <label className="upload-control">
             Upload original
             <input
-              type="file"
+              aria-label="Upload original"
               accept="image/png,image/jpeg,image/tiff"
-              onChange={async (event) => {
+              onChange={(event) => {
                 const file = event.currentTarget.files?.[0];
-                if (!file) return;
-                setUploadStatus("Computing SHA-256 and reserving upload…");
-                try {
-                  await client.prepareAndUpload(DEFAULT_PROJECT.id, file, file.name, (stage) =>
-                    setUploadStatus(`Upload ${stage}`),
-                  );
-                } catch {
-                  setUploadStatus("Upload failed. Retry with the original file.");
-                }
+                if (file) void upload(file);
               }}
+              type="file"
             />
           </label>
           <p role="status">{uploadStatus}</p>
-          <button type="button" className="source-item">
-            Original · local preview
-          </button>
-        </aside>
-        <section className="workspace" aria-label="Figure editor">
-          <div className="original-inspector">
-            <div>
-              <p className="eyebrow">Original inspector</p>
-              <h2>Drag to crop</h2>
-            </div>
-            <div
-              className="source-canvas"
-              onPointerDown={(event) => {
-                event.currentTarget.setPointerCapture(event.pointerId);
-                session.getState().beginCrop(pointer(event));
-              }}
-              onPointerMove={(event) => {
-                if (state.cropDraft) session.getState().previewCrop(pointer(event));
-              }}
-              onPointerUp={(event) => {
-                session.getState().previewCrop(pointer(event));
-                session.getState().commitCrop("local-source", `view-${crypto.randomUUID()}`);
-              }}
+          {assets.map((asset) => (
+            <button
+              className="source-item"
+              key={asset.id}
+              onClick={() => setSelectedAssetId(asset.id)}
+              type="button"
             >
-              <span>Original source raster</span>
-              {sourceCrop && (
-                <div
-                  aria-label="Crop selection"
-                  className="crop-overlay"
-                  role="img"
-                  style={{
-                    left: `${sourceCrop.x * 100}%`,
-                    top: `${sourceCrop.y * 100}%`,
-                    width: `${sourceCrop.width * 100}%`,
-                    height: `${sourceCrop.height * 100}%`,
-                  }}
-                >
-                  <i />
-                  <i />
-                  <i />
-                  <i />
-                </div>
-              )}
-            </div>
-          </div>
-          <div className="artboard-wrap">
-            <PixiArtboard document={state.document} />
-            <div className="selection-layer" aria-hidden="true">
-              {state.document.objects.map((object) => (
-                <button
-                  key={object.id}
-                  type="button"
-                  className={`artboard-selection ${object.id === selected?.id ? "selected" : ""}`}
-                  style={{
-                    left: `${object.transform.xPt / 6.12}%`,
-                    top: `${object.transform.yPt / 7.92}%`,
-                    width: `${object.transform.widthPt / 6.12}%`,
-                    height: `${object.transform.heightPt / 7.92}%`,
-                  }}
-                  onPointerDown={() => session.getState().beginObjectGesture(object.id)}
-                  onPointerMove={(event) => {
-                    if (event.buttons === 1) {
-                      session
-                        .getState()
-                        .previewObjectTransform(
-                          moveObject(object, event.movementX, event.movementY),
-                        );
-                    }
-                  }}
-                  onPointerUp={() => session.getState().commitObjectTransform()}
-                />
-              ))}
-            </div>
-          </div>
+              Original · {asset.filename}
+            </button>
+          ))}
+        </aside>
+        <section aria-label="Figure editor" className="workspace">
+          <OriginalInspector
+            {...(selectedAsset ? { asset: selectedAsset } : {})}
+            {...(highlightedViewport ? { highlightedViewport } : {})}
+            onCrop={(viewport) => {
+              if (!selectedAssetId) return;
+              session.getState().beginCrop({ x: viewport.x, y: viewport.y });
+              session
+                .getState()
+                .previewCrop({ x: viewport.x + viewport.width, y: viewport.y + viewport.height });
+              session.getState().commitCrop(selectedAssetId, `view-${crypto.randomUUID()}`);
+            }}
+            {...(selectedPreviewUrl ? { previewUrl: selectedPreviewUrl } : {})}
+          />
+          <ArtboardEditor
+            document={state.document}
+            {...(state.objectGesture ? { gesture: state.objectGesture } : {})}
+            onCommit={() => session.getState().commitObjectTransform()}
+            onMove={(id, delta) => {
+              if (state.objectGesture?.objectId !== id) session.getState().beginObjectGesture(id);
+              session.getState().previewObjectDelta(delta);
+            }}
+            onResize={(id, width, anchor) => {
+              if (state.objectGesture?.objectId !== id) session.getState().beginObjectGesture(id);
+              session.getState().previewObjectResize(width, anchor);
+            }}
+            onSelect={(id) => session.getState().selectObject(id)}
+            rasterSources={rasterSources}
+            {...(state.selectedObjectId ? { selectedId: state.selectedObjectId } : {})}
+          />
         </section>
-        <aside className="display-inspector" aria-label="Display inspector">
+        <aside aria-label="Display inspector" className="display-inspector">
           <h2>Display inspector</h2>
           {selected ? (
             <TransformControls
@@ -244,15 +404,17 @@ export function FigLabEditor({ onBack }: { onBack: () => void }) {
           )}
           <ExportControls
             onExport={async (widthPx, heightPx) => {
+              const artboardId = state.document.artboards[0]?.id;
+              if (!artboardId) return;
               setExportStatus("Preparing original-source PNG…");
               try {
                 await exportPng({
                   document: state.document,
-                  revision: 0,
+                  revision,
                   widthPx,
                   heightPx,
-                  sourceExporter: unavailableOriginalSourceExporter,
-                  record: (metadata) => client.recordExport(DEFAULT_PROJECT.id, metadata),
+                  sourceExporter: createArtboardPngExporter(artboardId, rasterSources),
+                  record: (metadata) => client.recordExport(project.id, metadata),
                   download: downloadBlob,
                 });
                 setExportStatus("PNG downloaded and provenance recorded.");
@@ -263,13 +425,20 @@ export function FigLabEditor({ onBack }: { onBack: () => void }) {
             status={exportStatus}
           />
           <h3>Provenance</h3>
-          {selected ? (
+          {provenance ? (
             <>
-              <Button onClick={() => session.getState().beginObjectGesture(selected.id)}>
+              <Button onClick={() => setSelectedAssetId(provenance.assetId)}>
                 Show in Original
               </Button>
               <p>
-                {siblings.length} panel{siblings.length === 1 ? "" : "s"} uses this source.
+                Source crop x {provenance.viewport.x}, y {provenance.viewport.y}, width{" "}
+                {provenance.viewport.width}, height {provenance.viewport.height}.
+              </p>
+              <p>
+                Sibling panels:{" "}
+                {provenance.siblingImageViewIds.length
+                  ? provenance.siblingImageViewIds.join(", ")
+                  : "none"}
               </p>
             </>
           ) : (
@@ -281,17 +450,186 @@ export function FigLabEditor({ onBack }: { onBack: () => void }) {
   );
 }
 
+function OriginalInspector({
+  asset,
+  previewUrl,
+  highlightedViewport,
+  onCrop,
+}: {
+  asset?: AssetDescriptor;
+  previewUrl?: string;
+  highlightedViewport?: NormalizedRect;
+  onCrop: (viewport: NormalizedRect) => void;
+}) {
+  const [draft, setDraft] = useState<{ start: Point; end: Point }>();
+  const draftRef = useRef<{ start: Point; end: Point } | undefined>(undefined);
+  const updateDraft = (value: { start: Point; end: Point } | undefined) => {
+    draftRef.current = value;
+    setDraft(value);
+  };
+  const point = (event: React.PointerEvent<HTMLDivElement>) => {
+    const rect = event.currentTarget.getBoundingClientRect();
+    return {
+      x: Math.min(1, Math.max(0, (event.clientX - rect.left) / rect.width)),
+      y: Math.min(1, Math.max(0, (event.clientY - rect.top) / rect.height)),
+    };
+  };
+  const viewport = draft ? rectFromPoints(draft.start, draft.end) : highlightedViewport;
+  return (
+    <div className="original-inspector">
+      <div>
+        <p className="eyebrow">Original inspector</p>
+        <h2>Drag to crop</h2>
+      </div>
+      <div
+        className="source-canvas"
+        data-testid="source-canvas"
+        onPointerDown={(event) => {
+          const start = point(event);
+          updateDraft({ start, end: start });
+        }}
+        onPointerMove={(event) => {
+          const active = draftRef.current;
+          if (active) updateDraft({ ...active, end: point(event) });
+        }}
+        onPointerUp={(event) => {
+          const active = draftRef.current;
+          if (!active) return;
+          const crop = rectFromPoints(active.start, point(event));
+          updateDraft(undefined);
+          if (crop.width > 0 && crop.height > 0) onCrop(crop);
+        }}
+      >
+        {previewUrl && asset ? (
+          <img alt={`Original ${asset.filename}`} src={previewUrl} />
+        ) : (
+          <span>Upload and select an original source raster</span>
+        )}
+        {viewport && (
+          <div
+            aria-label="Crop selection"
+            className="crop-overlay"
+            role="img"
+            style={viewportStyle(viewport)}
+          >
+            <i />
+            <i />
+            <i />
+            <i />
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function ArtboardEditor({
+  document,
+  gesture,
+  selectedId,
+  rasterSources,
+  onSelect,
+  onMove,
+  onResize,
+  onCommit,
+}: {
+  document: FigureDocumentV1;
+  gesture?: { objectId: string; transform: ImageViewObjectV1["transform"] };
+  selectedId?: string;
+  rasterSources: BrowserRasterRepository;
+  onSelect: (id: string) => void;
+  onMove: (id: string, delta: Point) => void;
+  onResize: (id: string, width: number, anchor: ResizeAnchor) => void;
+  onCommit: () => void;
+}) {
+  const starts = useRef(
+    new Map<number, { x: number; y: number; width: number; id: string; resize?: ResizeAnchor }>(),
+  );
+  return (
+    <div className="artboard-wrap">
+      <PixiArtboard
+        document={document}
+        {...(gesture ? { preview: gesture } : {})}
+        rasterSources={rasterSources}
+      />
+      <div className="selection-layer">
+        {document.objects.map((object) => {
+          const transform =
+            object.id === selectedId && gesture ? gesture.transform : object.transform;
+          const begin = (event: React.PointerEvent, resize?: ResizeAnchor) => {
+            event.currentTarget.setPointerCapture(event.pointerId);
+            starts.current.set(event.pointerId, {
+              x: event.clientX,
+              y: event.clientY,
+              width: object.transform.widthPt,
+              id: object.id,
+              ...(resize ? { resize } : {}),
+            });
+            onSelect(object.id);
+          };
+          const move = (event: React.PointerEvent) => {
+            const start = starts.current.get(event.pointerId);
+            if (!start) return;
+            if (start.resize)
+              onResize(
+                start.id,
+                Math.max(
+                  1,
+                  start.width +
+                    (event.clientX - start.x) * (start.resize.endsWith("right") ? 1 : -1),
+                ),
+                start.resize,
+              );
+            else onMove(start.id, { x: event.clientX - start.x, y: event.clientY - start.y });
+          };
+          const end = (event: React.PointerEvent) => {
+            if (!starts.current.delete(event.pointerId)) return;
+            onCommit();
+          };
+          return (
+            <div
+              className={`artboard-selection ${object.id === selectedId ? "selected" : ""}`}
+              key={object.id}
+              style={transformStyle(transform)}
+            >
+              <button
+                aria-label={`Move ${object.id}`}
+                className="move-handle"
+                onPointerDown={begin}
+                onPointerMove={move}
+                onPointerUp={end}
+                type="button"
+              />
+              {(["top-left", "top-right", "bottom-left", "bottom-right"] as const).map((anchor) => (
+                <button
+                  aria-label={`Resize ${object.id} from ${anchor.replace("-", " ")}`}
+                  className={`resize-handle ${anchor}`}
+                  key={anchor}
+                  onPointerDown={(event) => begin(event, anchor)}
+                  onPointerMove={move}
+                  onPointerUp={end}
+                  type="button"
+                />
+              ))}
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 function ExportControls({
   onExport,
   status,
 }: {
-  onExport: (widthPx: number, heightPx: number) => Promise<void>;
+  onExport: (width: number, height: number) => Promise<void>;
   status: string;
 }) {
   const [scale, setScale] = useState<"1" | "2" | "custom">("1");
-  const [customWidth, setCustomWidth] = useState("1200");
-  const widthPx = scale === "custom" ? Number(customWidth) : 600 * Number(scale);
-  const heightPx = Math.round(widthPx * (792 / 612));
+  const [custom, setCustom] = useState("1200");
+  const width = scale === "custom" ? Number(custom) : 600 * Number(scale);
+  const height = Math.round(width * (792 / 612));
   return (
     <section aria-labelledby="png-export" className="export-controls">
       <h3 id="png-export">PNG export</h3>
@@ -314,39 +652,31 @@ function ExportControls({
         2×
       </label>
       <label>
-        Custom width
         <input
-          aria-label="Custom width"
-          disabled={scale !== "custom"}
-          min="1"
-          onChange={(event) => setCustomWidth(event.target.value)}
-          type="number"
-          value={customWidth}
+          checked={scale === "custom"}
+          name="png-scale"
+          onChange={() => setScale("custom")}
+          type="radio"
         />
+        Custom width
       </label>
-      <Button onClick={() => setScale("custom")}>Use custom width</Button>
+      <input
+        aria-label="Custom width"
+        disabled={scale !== "custom"}
+        min="1"
+        onChange={(event) => setCustom(event.target.value)}
+        type="number"
+        value={custom}
+      />
       <Button
-        disabled={!Number.isFinite(widthPx) || widthPx < 1}
-        onClick={() => void onExport(widthPx, heightPx)}
+        disabled={!Number.isFinite(width) || width < 1}
+        onClick={() => void onExport(width, height)}
       >
         Export PNG
       </Button>
       {status && <p role="status">{status}</p>}
     </section>
   );
-}
-
-async function unavailableOriginalSourceExporter(): Promise<Blob> {
-  throw new Error("Original-source PNG export is waiting for the frozen image-processing adapter.");
-}
-
-function moveObject(object: ImageViewObjectV1, movementX: number, movementY: number) {
-  return {
-    xPt: object.transform.xPt + movementX,
-    yPt: object.transform.yPt + movementY,
-    widthPt: object.transform.widthPt,
-    heightPt: object.transform.heightPt,
-  };
 }
 
 function TransformControls({
@@ -368,12 +698,12 @@ function TransformControls({
       {label}
       <input
         aria-label={label}
-        type="range"
-        min={min}
         max={max}
-        step={step}
-        value={display[key]}
+        min={min}
         onChange={(event) => onChange({ ...display, [key]: Number(event.target.value) })}
+        step={step}
+        type="range"
+        value={display[key]}
       />
       <output>{display[key]}</output>
     </label>
@@ -386,12 +716,39 @@ function TransformControls({
       <label>
         <input
           aria-label="Invert"
-          type="checkbox"
           checked={display.invert}
           onChange={(event) => onChange({ ...display, invert: event.target.checked })}
+          type="checkbox"
         />
         Invert
       </label>
     </div>
   );
+}
+
+function rectFromPoints(start: Point, end: Point): NormalizedRect {
+  const x = Math.min(start.x, end.x);
+  const y = Math.min(start.y, end.y);
+  return {
+    x: Number(x.toFixed(6)),
+    y: Number(y.toFixed(6)),
+    width: Number(Math.abs(end.x - start.x).toFixed(6)),
+    height: Number(Math.abs(end.y - start.y).toFixed(6)),
+  };
+}
+function viewportStyle(viewport: NormalizedRect) {
+  return {
+    left: `${viewport.x * 100}%`,
+    top: `${viewport.y * 100}%`,
+    width: `${viewport.width * 100}%`,
+    height: `${viewport.height * 100}%`,
+  };
+}
+function transformStyle(transform: ImageViewObjectV1["transform"]) {
+  return {
+    left: `${transform.xPt / 6.12}%`,
+    top: `${transform.yPt / 7.92}%`,
+    width: `${transform.widthPt / 6.12}%`,
+    height: `${transform.heightPt / 7.92}%`,
+  };
 }

@@ -51,6 +51,11 @@ export class AutosaveController {
     return new Blob([JSON.stringify(this.localDocument, null, 2)], { type: "application/json" });
   }
 
+  resetAfterReload(): void {
+    this.localDocument = undefined;
+    this.setStatus("saved");
+  }
+
   private setStatus(status: SaveStatus): void {
     this.status = status;
     this.onStatus?.(status);

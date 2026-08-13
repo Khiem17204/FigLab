@@ -41,7 +41,10 @@ export async function sha256(blob: Blob): Promise<string> {
 }
 
 export class FigLabClient {
-  constructor(private readonly fetcher: Fetcher = fetch) {}
+  constructor(
+    private readonly fetcher: Fetcher = (...arguments_) => fetch(...arguments_),
+    private readonly pollIntervalMs = 500,
+  ) {}
 
   async listProjects(): Promise<Project[]> {
     return (await this.json<{ projects: Project[] }>(apiRoutes.projects)).projects;
@@ -78,12 +81,24 @@ export class FigLabClient {
     return this.json(path(apiRoutes.asset, { assetId }));
   }
 
+  async downloadAsset(assetId: string): Promise<{ bytes: ArrayBuffer; mimeType: string }> {
+    const instruction = await this.json<{ url: string; expiresAt: string }>(
+      path(apiRoutes.assetDownloadUrl, { assetId }),
+    );
+    const response = await this.fetcher(instruction.url);
+    if (!response.ok) throw new ApiError(response.status, await readBody(response));
+    return {
+      bytes: await response.arrayBuffer(),
+      mimeType: response.headers.get("content-type") ?? "application/octet-stream",
+    };
+  }
+
   async prepareAndUpload(
     projectId: string,
     original: Blob,
     filename: string,
     onStage?: (stage: UploadStage) => void,
-  ): Promise<UploadCompletion> {
+  ): Promise<AssetDescriptor> {
     const checksumSha256 = await sha256(original);
     const prepared = await this.json<PrepareUploadResponse>(
       path(apiRoutes.projectUploads, { projectId }),
@@ -111,9 +126,14 @@ export class FigLabClient {
         method: "POST",
       },
     );
-    if (completed.status === "rejected") onStage?.("rejected");
-    else onStage?.("completed");
-    return completed;
+    if (completed.status === "rejected") {
+      onStage?.("rejected");
+      return this.getAsset(prepared.assetId);
+    }
+    onStage?.("verifying");
+    const asset = await this.pollAsset(prepared.assetId);
+    onStage?.(asset.status === "rejected" ? "rejected" : "completed");
+    return asset;
   }
 
   recordExport(
@@ -143,12 +163,24 @@ export class FigLabClient {
     if (response.status === 204) return undefined as T;
     return (await response.json()) as T;
   }
+
+  private async pollAsset(assetId: string): Promise<AssetDescriptor> {
+    for (;;) {
+      const asset = await this.getAsset(assetId);
+      if (asset.status !== "pending-verification") return asset;
+      if (this.pollIntervalMs > 0) {
+        await new Promise<void>((resolve) => setTimeout(resolve, this.pollIntervalMs));
+      }
+    }
+  }
 }
 
 async function readBody(response: Response): Promise<unknown> {
+  const body = await response.text();
+  if (!body) return undefined;
   try {
-    return await response.json();
+    return JSON.parse(body) as unknown;
   } catch {
-    return await response.text();
+    return body;
   }
 }

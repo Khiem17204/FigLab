@@ -1,3 +1,4 @@
+import { MAX_HISTORY_SNAPSHOTS } from "@figlab/editor-core";
 import { createDefaultFigureDocument } from "@figlab/figure-schema";
 import { describe, expect, it } from "vitest";
 
@@ -48,6 +49,46 @@ describe("editor session crop commands", () => {
     expect(session.getState().history).toHaveLength(2);
   });
 
+  it("previews movement from the gesture origin instead of accumulating pointer events", () => {
+    const session = sessionWithView();
+    session.getState().beginObjectGesture("view-1");
+
+    session.getState().previewObjectDelta({ x: 20, y: 10 });
+    session.getState().previewObjectDelta({ x: 20, y: 10 });
+
+    expect(session.getState().objectGesture?.transform).toMatchObject({ xPt: 68, yPt: 58 });
+    expect(session.getState().document.objects[0]?.transform).toMatchObject({ xPt: 48, yPt: 48 });
+  });
+
+  it("previews a proportional corner resize and commits one history entry", () => {
+    const session = sessionWithView();
+    session.getState().beginObjectGesture("view-1");
+    session.getState().previewObjectResize(320, "bottom-right");
+
+    expect(session.getState().objectGesture?.transform).toEqual({
+      xPt: -32,
+      yPt: -12,
+      widthPt: 320,
+      heightPt: 240,
+      rotationDeg: 0,
+    });
+    session.getState().commitObjectTransform();
+    expect(session.getState().history).toHaveLength(2);
+  });
+
+  it("inherits the core history maximum", () => {
+    const session = sessionWithView();
+    for (let index = 0; index <= MAX_HISTORY_SNAPSHOTS; index += 1) {
+      session.getState().setDisplay("view-1", {
+        brightness: (index % 2) * 0.1,
+        contrast: 1,
+        gamma: 1,
+        invert: false,
+      });
+    }
+    expect(session.getState().history).toHaveLength(MAX_HISTORY_SNAPSHOTS);
+  });
+
   it("clamps display controls and restores the preceding command with undo", () => {
     const session = createEditorSession(createDefaultFigureDocument("artboard-1"));
     session.getState().beginCrop({ x: 0, y: 0 });
@@ -75,3 +116,11 @@ describe("editor session crop commands", () => {
     expect(session.getState().document.objects[0]?.view.display.invert).toBe(true);
   });
 });
+
+function sessionWithView() {
+  const session = createEditorSession(createDefaultFigureDocument("artboard-1"));
+  session.getState().beginCrop({ x: 0, y: 0 });
+  session.getState().previewCrop({ x: 0.5, y: 0.5 });
+  session.getState().commitCrop("asset-1", "view-1");
+  return session;
+}

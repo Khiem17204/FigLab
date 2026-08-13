@@ -1,3 +1,11 @@
+import {
+  createImageViewCommand,
+  MAX_HISTORY_SNAPSHOTS,
+  proportionallyResizeTransform,
+  type ResizeAnchor,
+  setDisplayCommand,
+  setObjectTransformsCommand,
+} from "@figlab/editor-core";
 import type {
   DisplayTransformV1,
   FigureDocumentV1,
@@ -27,8 +35,12 @@ export type EditorSessionState = EditorSnapshot & {
   commitCrop: (assetId: string, objectId: string) => void;
   beginObjectGesture: (objectId: string) => void;
   previewObjectTransform: (transform: Omit<ObjectTransformV1, "rotationDeg">) => void;
+  previewObjectDelta: (delta: Point) => void;
+  previewObjectResize: (widthPt: number, anchor: ResizeAnchor) => void;
   commitObjectTransform: () => void;
   setDisplay: (objectId: string, display: DisplayTransformV1) => void;
+  selectObject: (objectId: string | undefined) => void;
+  replaceDocument: (document: FigureDocumentV1) => void;
   undo: () => void;
   redo: () => void;
 };
@@ -69,15 +81,6 @@ const snapshot = (state: EditorSnapshot): EditorSnapshot => ({
   selectedObjectId: state.selectedObjectId,
 });
 
-const withObject = (
-  document: FigureDocumentV1,
-  objectId: string,
-  update: (object: ImageViewObjectV1) => ImageViewObjectV1,
-): FigureDocumentV1 => ({
-  ...document,
-  objects: document.objects.map((object) => (object.id === objectId ? update(object) : object)),
-});
-
 const clampDisplay = (display: DisplayTransformV1): DisplayTransformV1 => ({
   brightness: Math.min(1, Math.max(-1, display.brightness)),
   contrast: Math.min(4, Math.max(0, display.contrast)),
@@ -88,7 +91,7 @@ const clampDisplay = (display: DisplayTransformV1): DisplayTransformV1 => ({
 const pushHistory = (
   state: EditorSessionState,
 ): Pick<EditorSessionState, "history" | "future"> => ({
-  history: [...state.history, snapshot(state)].slice(-100),
+  history: [...state.history, snapshot(state)].slice(-MAX_HISTORY_SNAPSHOTS),
   future: [],
 });
 
@@ -125,7 +128,15 @@ export function createEditorSession(initialDocument: FigureDocumentV1) {
         view: { sourceAssetId: assetId, viewport, display: { ...defaultDisplay } },
       };
       set({
-        document: { ...state.document, objects: [...state.document.objects, object] },
+        document: createImageViewCommand({
+          id: object.id,
+          artboardId: object.artboardId,
+          transform: object.transform,
+          zIndex: object.zIndex,
+          sourceAssetId: object.view.sourceAssetId,
+          viewport: object.view.viewport,
+          display: object.view.display,
+        })(state.document),
         selectedObjectId: objectId,
         ...pushHistory(state),
         cropDraft: undefined,
@@ -144,15 +155,42 @@ export function createEditorSession(initialDocument: FigureDocumentV1) {
       if (gesture)
         set({ objectGesture: { ...gesture, transform: { ...transform, rotationDeg: 0 } } });
     },
+    previewObjectDelta: (delta) => {
+      const gesture = get().objectGesture;
+      if (!gesture) return;
+      const origin = get().document.objects.find(
+        (object) => object.id === gesture.objectId,
+      )?.transform;
+      if (!origin) return;
+      set({
+        objectGesture: {
+          ...gesture,
+          transform: { ...origin, xPt: origin.xPt + delta.x, yPt: origin.yPt + delta.y },
+        },
+      });
+    },
+    previewObjectResize: (widthPt, anchor) => {
+      const gesture = get().objectGesture;
+      if (!gesture) return;
+      const origin = get().document.objects.find(
+        (object) => object.id === gesture.objectId,
+      )?.transform;
+      if (!origin) return;
+      set({
+        objectGesture: {
+          ...gesture,
+          transform: proportionallyResizeTransform(origin, widthPt, anchor),
+        },
+      });
+    },
     commitObjectTransform: () => {
       const state = get();
       const gesture = state.objectGesture;
       if (!gesture) return;
       set({
-        document: withObject(state.document, gesture.objectId, (object) => ({
-          ...object,
-          transform: gesture.transform,
-        })),
+        document: setObjectTransformsCommand([[gesture.objectId, gesture.transform]])(
+          state.document,
+        ),
         ...pushHistory(state),
         objectGesture: undefined,
       });
@@ -161,13 +199,20 @@ export function createEditorSession(initialDocument: FigureDocumentV1) {
       const state = get();
       if (!state.document.objects.some((object) => object.id === objectId)) return;
       set({
-        document: withObject(state.document, objectId, (object) => ({
-          ...object,
-          view: { ...object.view, display: clampDisplay(display) },
-        })),
+        document: setDisplayCommand(objectId, clampDisplay(display))(state.document),
         ...pushHistory(state),
       });
     },
+    selectObject: (objectId) => set({ selectedObjectId: objectId }),
+    replaceDocument: (document) =>
+      set({
+        document: structuredClone(document),
+        selectedObjectId: undefined,
+        history: [],
+        future: [],
+        cropDraft: undefined,
+        objectGesture: undefined,
+      }),
     undo: () => {
       const state = get();
       const previous = state.history.at(-1);
@@ -186,7 +231,7 @@ export function createEditorSession(initialDocument: FigureDocumentV1) {
       if (!next) return;
       set({
         ...snapshot(next),
-        history: [...state.history, snapshot(state)].slice(-100),
+        history: [...state.history, snapshot(state)].slice(-MAX_HISTORY_SNAPSHOTS),
         future: state.future.slice(1),
         cropDraft: undefined,
         objectGesture: undefined,
