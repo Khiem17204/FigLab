@@ -17,7 +17,7 @@
     "test:compose": "node scripts/test-compose.mjs",
     "test:e2e": "corepack pnpm --filter @figlab/web test:e2e",
     "test:integration": "turbo run test:integration",
-    "test:unit": "turbo run test:unit",
+    "test:unit": "vitest run",
     "test:visual": "playwright test --grep @visual",
     "typecheck": "turbo run typecheck"
   },

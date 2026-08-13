@@ -3,6 +3,8 @@ openapi: 3.0.3
 info:
   title: FigLab API
   version: 0.1.0
+  license:
+    name: AGPL-3.0-only
 components:
   schemas: {}
 paths:
@@ -870,6 +872,50 @@ paths:
                   updatedAt:
                     minLength: 1
                     type: string
+        '400':
+          description: Default Response
+          content:
+            application/json:
+              schema:
+                additionalProperties: false
+                type: object
+                required:
+                - code
+                - message
+                properties:
+                  code:
+                    anyOf:
+                    - type: string
+                      enum:
+                      - BAD_REQUEST
+                    - type: string
+                      enum:
+                      - NOT_FOUND
+                    - type: string
+                      enum:
+                      - REVISION_CONFLICT
+                    - type: string
+                      enum:
+                      - UPLOAD_EXPIRED
+                    - type: string
+                      enum:
+                      - UPLOAD_INVALID
+                    - type: string
+                      enum:
+                      - ASSET_NOT_READY
+                    - type: string
+                      enum:
+                      - UNSUPPORTED_IMAGE
+                    - type: string
+                      enum:
+                      - INTERNAL_ERROR
+                  message:
+                    minLength: 1
+                    type: string
+                  details:
+                    type: array
+                    items:
+                      type: string
         '409':
           description: Default Response
           content:
@@ -1022,9 +1068,13 @@ paths:
                 - message
                 properties:
                   code:
-                    type: string
-                    enum:
-                    - UPLOAD_INVALID
+                    anyOf:
+                    - type: string
+                      enum:
+                      - UPLOAD_INVALID
+                    - type: string
+                      enum:
+                      - UPLOAD_EXPIRED
                   message:
                     type: string
   "/v1/assets/{assetId}":
@@ -1253,4 +1303,3 @@ paths:
                     - BAD_REQUEST
                   message:
                     type: string
-
