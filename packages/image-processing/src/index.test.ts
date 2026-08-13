@@ -175,7 +175,7 @@ describe("CPU PNG export", () => {
     expect([...decoded.data]).toEqual([255, 0, 0, 255, 0, 255, 0, 255]);
   });
 
-  it("transforms RGB while preserving source alpha from a transparent RGBA region", async () => {
+  it("transforms RGB while using source alpha to blend an RGBA region", async () => {
     const document = createDefaultFigureDocument("board");
     const artboard = document.artboards[0];
     if (artboard === undefined) throw new Error("default document must contain an artboard");
@@ -215,8 +215,40 @@ describe("CPU PNG export", () => {
     const decoded = PNG.sync.read(Buffer.from(bytes));
 
     expect([...decoded.data]).toEqual([
-      245, 235, 225, 0, 191, 127, 0, 64, 0, 255, 127, 128, 254, 253, 252, 255,
+      255, 255, 255, 255, 239, 223, 191, 255, 127, 255, 191, 255, 254, 253, 252, 255,
     ]);
+  });
+
+  it("source-over composites transparent and overlapping RGBA views in z order", async () => {
+    const document = createDefaultFigureDocument("board");
+    const artboard = document.artboards[0];
+    if (artboard === undefined) throw new Error("default document must contain an artboard");
+    document.artboards[0] = { ...artboard, widthPt: 3, heightPt: 1, backgroundHex: "#FFFFFF" };
+    const invertedDisplay = { brightness: 0, contrast: 1, gamma: 1, invert: true };
+    document.objects.push(
+      rgbaView("transparent", "transparent-asset", 0, 1, 0, invertedDisplay),
+      rgbaView("red", "red-asset", 1, 2, 1, invertedDisplay),
+      rgbaView("blue", "blue-asset", 2, 1, 2, invertedDisplay),
+    );
+    const regions = {
+      "transparent-asset": rgbaRegion(1, [0, 255, 255, 0]),
+      "red-asset": rgbaRegion(2, [0, 255, 255, 128, 0, 255, 255, 128]),
+      "blue-asset": rgbaRegion(1, [255, 255, 0, 128]),
+    };
+    const resolver: RasterSourceResolver = {
+      async describe(assetId) {
+        const region = regions[assetId as keyof typeof regions];
+        return { widthPx: region.widthPx, heightPx: 1, bitDepth: 8, channels: 4 };
+      },
+      async getRegion(assetId) {
+        return regions[assetId as keyof typeof regions];
+      },
+    };
+
+    const bytes = await composeArtboardPng(document, "board", 3, 1, resolver);
+    const decoded = PNG.sync.read(Buffer.from(bytes));
+
+    expect([...decoded.data]).toEqual([255, 255, 255, 255, 255, 127, 127, 255, 127, 63, 191, 255]);
   });
 
   it("rejects export dimensions over the fixed edge and pixel limits", async () => {
@@ -229,6 +261,42 @@ describe("CPU PNG export", () => {
     ).rejects.toThrow(/100,000,000/);
   });
 });
+
+function rgbaView(
+  id: string,
+  sourceAssetId: string,
+  xPt: number,
+  widthPt: number,
+  zIndex: number,
+  display: { brightness: number; contrast: number; gamma: number; invert: boolean },
+) {
+  return {
+    id,
+    type: "image-view" as const,
+    artboardId: "board",
+    transform: { xPt, yPt: 0, widthPt, heightPt: 1, rotationDeg: 0 as const },
+    zIndex,
+    locked: false,
+    hidden: false,
+    view: {
+      sourceAssetId,
+      viewport: { x: 0, y: 0, width: 1, height: 1 },
+      display,
+    },
+  };
+}
+
+function rgbaRegion(widthPx: number, data: number[]) {
+  return {
+    data: new Uint8Array(data),
+    sourceRect: { x: 0, y: 0, width: widthPx, height: 1 },
+    widthPx,
+    heightPx: 1,
+    bitDepth: 8 as const,
+    channels: 4 as const,
+    pyramidLevel: 0,
+  };
+}
 
 function supportedMetadata() {
   return {
