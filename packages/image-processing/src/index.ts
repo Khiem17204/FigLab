@@ -5,11 +5,12 @@ export const MAX_RASTER_PIXELS = 100_000_000;
 export const MAX_EXPORT_EDGE_PX = 16_384;
 export const MAX_EXPORT_PIXELS = 100_000_000;
 
+export type RasterChannelCount = 1 | 3 | 4;
 export type RasterDescription = {
   widthPx: number;
   heightPx: number;
   bitDepth: 8 | 16;
-  channels: 1 | 3;
+  channels: RasterChannelCount;
 };
 export type SourcePixelRect = { x: number; y: number; width: number; height: number };
 export type RasterRegion = {
@@ -18,7 +19,7 @@ export type RasterRegion = {
   widthPx: number;
   heightPx: number;
   bitDepth: 8 | 16;
-  channels: 1 | 3;
+  channels: RasterChannelCount;
   pyramidLevel: number;
 };
 
@@ -179,7 +180,7 @@ export async function decodeBrowserRaster(
   const region = await decoder.decode(bytes, mimeType);
   if (
     region.bitDepth !== 8 ||
-    (region.channels !== 1 && region.channels !== 3) ||
+    (region.channels !== 1 && region.channels !== 3 && region.channels !== 4) ||
     region.widthPx * region.heightPx > MAX_RASTER_PIXELS
   ) {
     throw new Error("Unsupported browser raster");
@@ -366,7 +367,10 @@ function compositeImageView(
       canvas[targetIndex] = red;
       canvas[targetIndex + 1] = green;
       canvas[targetIndex + 2] = blue;
-      canvas[targetIndex + 3] = 255;
+      canvas[targetIndex + 3] =
+        region.channels === 4
+          ? sourceAlphaSample(sampleAt(region, sampleIndex + 3), region.bitDepth)
+          : 255;
     }
   }
 }
@@ -380,6 +384,10 @@ function sampleAt(region: RasterRegion, index: number): number {
 
 function displayedSample(sample: number, bitDepth: 8 | 16, display: DisplayTransformV1): number {
   return Math.round(applyDisplayTransform(sample, bitDepth, display) * 255);
+}
+
+function sourceAlphaSample(sample: number, bitDepth: 8 | 16): number {
+  return Math.round((sample / (bitDepth === 8 ? 255 : 65_535)) * 255);
 }
 
 function normalizedToPixelRect(
