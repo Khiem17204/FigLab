@@ -44,7 +44,6 @@ export class FakeObjectStore implements ObjectStore {
       method: "PUT",
       headers: {
         "content-type": input.contentType,
-        "content-length": String(input.contentLength),
         "if-none-match": "*",
       },
       expiresAt: expiry(seconds),
@@ -96,6 +95,7 @@ export class S3ObjectStore implements ObjectStore {
       region: options.region,
       credentials: { accessKeyId: options.accessKeyId, secretAccessKey: options.secretAccessKey },
       forcePathStyle: options.forcePathStyle ?? true,
+      requestChecksumCalculation: "WHEN_REQUIRED" as const,
     };
     this.internal = new S3Client({ ...config, endpoint: options.internalEndpoint });
     this.public = new S3Client({ ...config, endpoint: options.publicEndpoint });
@@ -111,7 +111,6 @@ export class S3ObjectStore implements ObjectStore {
       Bucket: this.options.bucket,
       Key: input.key,
       ContentType: input.contentType,
-      ContentLength: input.contentLength,
       IfNoneMatch: "*",
     });
     return {
@@ -119,7 +118,6 @@ export class S3ObjectStore implements ObjectStore {
       method: "PUT",
       headers: {
         "content-type": input.contentType,
-        "content-length": String(input.contentLength),
         "if-none-match": "*",
       },
       expiresAt: expiry(seconds),
