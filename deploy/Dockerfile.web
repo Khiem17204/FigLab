@@ -1,0 +1,12 @@
+FROM node:24-bookworm-slim@sha256:3638d9a6fe4030bd716be989438248074489337ba3275657f93595428be4fc03 AS build
+
+WORKDIR /app
+RUN corepack enable
+COPY . .
+RUN corepack pnpm install --frozen-lockfile
+RUN corepack pnpm --filter "@figlab/web..." build
+
+FROM caddy:2.10.2-alpine@sha256:4c6e91c6ed0e2fa03efd5b44747b625fec79bc9cd06ac5235a779726618e530d
+
+COPY deploy/Caddyfile /etc/caddy/Caddyfile
+COPY --from=build /app/apps/web/dist /srv

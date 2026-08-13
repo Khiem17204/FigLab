@@ -1,0 +1,14 @@
+FROM node:24-bookworm-slim@sha256:3638d9a6fe4030bd716be989438248074489337ba3275657f93595428be4fc03 AS build
+
+WORKDIR /app
+RUN corepack enable
+COPY . .
+RUN corepack pnpm install --frozen-lockfile
+
+ARG FIGLAB_APP
+RUN corepack pnpm --filter "@figlab/${FIGLAB_APP}..." build
+
+ENV NODE_ENV=production
+ENV FIGLAB_APP=${FIGLAB_APP}
+USER node
+CMD ["sh", "-c", "node_modules/.bin/tsx apps/${FIGLAB_APP}/src/index.ts"]

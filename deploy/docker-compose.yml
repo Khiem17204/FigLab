@@ -2,30 +2,198 @@ name: figlab
 
 services:
   postgres:
-    image: postgres:17-alpine
+    image: postgres:17-alpine@sha256:742f40ea20b9ff2ff31db5458d127452988a2164df9e17441e191f3b72252193
     environment:
-      POSTGRES_DB: figlab
-      POSTGRES_USER: figlab
-      POSTGRES_PASSWORD: change-me
+      POSTGRES_DB: ${POSTGRES_DB:-figlab}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-change-me}
+      POSTGRES_USER: ${POSTGRES_USER:-figlab}
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U figlab -d figlab"]
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
       interval: 5s
       timeout: 3s
       retries: 12
+    restart: unless-stopped
     volumes:
       - postgres-data:/var/lib/postgresql/data
 
   minio:
-    image: minio/minio:RELEASE.2025-04-22T22-12-26Z
+    image: minio/minio:RELEASE.2025-04-22T22-12-26Z@sha256:a1ea29fa28355559ef137d71fc570e508a214ec84ff8083e39bc5428980b015e
     command: server /data --console-address :9001
     environment:
-      MINIO_ROOT_USER: figlab
-      MINIO_ROOT_PASSWORD: change-me
+      MINIO_ROOT_PASSWORD: ${OBJECT_STORE_SECRET_KEY:-change-me}
+      MINIO_ROOT_USER: ${OBJECT_STORE_ACCESS_KEY:-figlab}
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "--silent", "http://127.0.0.1:9000/minio/health/live"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
     ports:
-      - "9000:9000"
-      - "9001:9001"
+      - "${FIGLAB_BIND_ADDRESS:-127.0.0.1}:${FIGLAB_MINIO_PORT:-9000}:9000"
+      - "${FIGLAB_BIND_ADDRESS:-127.0.0.1}:${FIGLAB_MINIO_CONSOLE_PORT:-9001}:9001"
+    restart: unless-stopped
     volumes:
       - minio-data:/data
+
+  minio-init:
+    image: minio/mc:RELEASE.2025-04-16T18-13-26Z@sha256:aead63c77f9db9107f1696fb08ecb0faeda23729cde94b0f663edf4fe09728e3
+    depends_on:
+      minio:
+        condition: service_healthy
+    entrypoint: ["/bin/sh", "-c"]
+    environment:
+      MINIO_ROOT_PASSWORD: ${OBJECT_STORE_SECRET_KEY:-change-me}
+      MINIO_ROOT_USER: ${OBJECT_STORE_ACCESS_KEY:-figlab}
+      OBJECT_STORE_BUCKET: ${OBJECT_STORE_BUCKET:-figlab}
+      PUBLIC_APP_URL: ${PUBLIC_APP_URL:-http://localhost}
+    command:
+      - |
+        mc alias set figlab http://minio:9000 "$${MINIO_ROOT_USER}" "$${MINIO_ROOT_PASSWORD}"
+        mc mb --ignore-existing "figlab/$${OBJECT_STORE_BUCKET}"
+        mc anonymous set none "figlab/$${OBJECT_STORE_BUCKET}"
+        sed "s|__FIGLAB_PUBLIC_APP_URL__|$${PUBLIC_APP_URL}|g" /config/cors.xml > /tmp/cors.xml
+        mc cors set "figlab/$${OBJECT_STORE_BUCKET}" /tmp/cors.xml
+    restart: "no"
+    volumes:
+      - ./minio-cors.xml:/config/cors.xml:ro
+
+  api:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile.node
+      args:
+        FIGLAB_APP: api
+    depends_on:
+      app-migrate:
+        condition: service_completed_successfully
+      graphile-migrate:
+        condition: service_completed_successfully
+      minio-init:
+        condition: service_completed_successfully
+      postgres:
+        condition: service_healthy
+    environment:
+      ALLOW_INSECURE_SINGLE_USER_REMOTE: ${ALLOW_INSECURE_SINGLE_USER_REMOTE:-false}
+      API_HOST: 0.0.0.0
+      API_PORT: 3000
+      DATABASE_URL: ${DATABASE_URL:-postgres://figlab:change-me@postgres:5432/figlab}
+      MAX_UPLOAD_BYTES: ${MAX_UPLOAD_BYTES:-104857600}
+      NODE_ENV: production
+      OBJECT_STORE_ACCESS_KEY: ${OBJECT_STORE_ACCESS_KEY:-figlab}
+      OBJECT_STORE_BUCKET: ${OBJECT_STORE_BUCKET:-figlab}
+      OBJECT_STORE_FORCE_PATH_STYLE: ${OBJECT_STORE_FORCE_PATH_STYLE:-true}
+      OBJECT_STORE_INTERNAL_ENDPOINT: ${OBJECT_STORE_INTERNAL_ENDPOINT:-http://minio:9000}
+      OBJECT_STORE_PUBLIC_ENDPOINT: ${OBJECT_STORE_PUBLIC_ENDPOINT:-http://localhost:9000}
+      OBJECT_STORE_REGION: ${OBJECT_STORE_REGION:-us-east-1}
+      OBJECT_STORE_SECRET_KEY: ${OBJECT_STORE_SECRET_KEY:-change-me}
+      PUBLIC_APP_URL: ${PUBLIC_APP_URL:-http://localhost}
+      SINGLE_USER_EMAIL: ${SINGLE_USER_EMAIL:-local-admin@figlab.invalid}
+      UPLOAD_URL_TTL_SECONDS: ${UPLOAD_URL_TTL_SECONDS:-600}
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "node",
+          "-e",
+          "fetch('http://127.0.0.1:3000/health').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))",
+        ]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+      start_period: 10s
+    restart: unless-stopped
+
+  app-migrate:
+    image: postgres:17-alpine@sha256:742f40ea20b9ff2ff31db5458d127452988a2164df9e17441e191f3b72252193
+    depends_on:
+      postgres:
+        condition: service_healthy
+    command: ["/bin/sh", "/migrate.sh"]
+    environment:
+      DATABASE_URL: ${DATABASE_URL:-postgres://figlab:change-me@postgres:5432/figlab}
+    restart: "no"
+    volumes:
+      - ./migrate.sh:/migrate.sh:ro
+      - ../packages/database/migrations:/migrations:ro
+
+  graphile-migrate:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile.node
+      args:
+        FIGLAB_APP: jobs
+    depends_on:
+      app-migrate:
+        condition: service_completed_successfully
+      postgres:
+        condition: service_healthy
+    command:
+      [
+        "node_modules/.bin/tsx",
+        "-e",
+        "import { runMigrations } from 'graphile-worker'; runMigrations({ connectionString: process.env.DATABASE_URL }).catch(error => { console.error(error); process.exitCode = 1; });",
+      ]
+    environment:
+      DATABASE_URL: ${DATABASE_URL:-postgres://figlab:change-me@postgres:5432/figlab}
+      NODE_ENV: production
+    restart: "no"
+
+  jobs:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile.node
+      args:
+        FIGLAB_APP: jobs
+    depends_on:
+      app-migrate:
+        condition: service_completed_successfully
+      graphile-migrate:
+        condition: service_completed_successfully
+      minio-init:
+        condition: service_completed_successfully
+      postgres:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: ${DATABASE_URL:-postgres://figlab:change-me@postgres:5432/figlab}
+      JOB_CONCURRENCY: ${JOB_CONCURRENCY:-2}
+      MAX_IMAGE_PIXELS: ${MAX_IMAGE_PIXELS:-100000000}
+      NODE_ENV: production
+      OBJECT_STORE_ACCESS_KEY: ${OBJECT_STORE_ACCESS_KEY:-figlab}
+      OBJECT_STORE_BUCKET: ${OBJECT_STORE_BUCKET:-figlab}
+      OBJECT_STORE_FORCE_PATH_STYLE: ${OBJECT_STORE_FORCE_PATH_STYLE:-true}
+      OBJECT_STORE_INTERNAL_ENDPOINT: ${OBJECT_STORE_INTERNAL_ENDPOINT:-http://minio:9000}
+      OBJECT_STORE_PUBLIC_ENDPOINT: ${OBJECT_STORE_PUBLIC_ENDPOINT:-http://localhost:9000}
+      OBJECT_STORE_REGION: ${OBJECT_STORE_REGION:-us-east-1}
+      OBJECT_STORE_SECRET_KEY: ${OBJECT_STORE_SECRET_KEY:-change-me}
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "node",
+          "-e",
+          "fetch('http://minio:9000/minio/health/ready').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))",
+        ]
+      interval: 10s
+      timeout: 3s
+      retries: 12
+      start_period: 10s
+    restart: unless-stopped
+
+  caddy:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile.web
+    depends_on:
+      api:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--output-document=-", "http://127.0.0.1/health"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+      start_period: 5s
+    ports:
+      - "${FIGLAB_BIND_ADDRESS:-127.0.0.1}:${FIGLAB_HTTP_PORT:-80}:80"
+    restart: unless-stopped
 
 volumes:
   minio-data:

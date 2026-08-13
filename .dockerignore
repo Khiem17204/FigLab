@@ -1,0 +1,14 @@
+.git
+.github
+.superpowers
+.worktrees
+.env
+.env.*
+!.env.example
+**/.turbo
+**/dist
+**/node_modules
+coverage
+node_modules
+playwright-report
+test-results
