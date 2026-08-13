@@ -12,7 +12,7 @@ import type {
   ProjectRecord,
   UploadRecord,
 } from "./index.js";
-import { NotFoundError } from "./index.js";
+import { assertResourceId, NotFoundError } from "./index.js";
 import * as schema from "./schema.js";
 
 const LOCAL_USER_ID = "00000000-0000-4000-8000-000000000001";
@@ -58,6 +58,7 @@ export class PostgresFigLabRepository implements FigLabRepository {
     });
   }
   async createProject(workspaceId: string, name: string): Promise<ProjectRecord> {
+    assertResourceId(workspaceId);
     return this.transaction(async (client) => {
       const id = randomUUID();
       const now = new Date();
@@ -75,6 +76,7 @@ export class PostgresFigLabRepository implements FigLabRepository {
     });
   }
   async listProjects(workspaceId: string): Promise<ProjectRecord[]> {
+    assertResourceId(workspaceId);
     const rows = await this.db
       .select()
       .from(schema.projects)
@@ -92,6 +94,7 @@ export class PostgresFigLabRepository implements FigLabRepository {
     }));
   }
   async getProject(projectId: string): Promise<ProjectRecord> {
+    assertResourceId(projectId);
     const rows = await this.db
       .select()
       .from(schema.projects)
@@ -108,6 +111,7 @@ export class PostgresFigLabRepository implements FigLabRepository {
     };
   }
   async renameProject(projectId: string, name: string): Promise<ProjectRecord> {
+    assertResourceId(projectId);
     return this.transaction(async (client) => {
       const result = await client.query(
         "UPDATE projects SET name=$2,updated_at=now() WHERE id=$1 RETURNING *",
@@ -119,6 +123,7 @@ export class PostgresFigLabRepository implements FigLabRepository {
     });
   }
   async markProjectDeleting(projectId: string): Promise<ProjectRecord> {
+    assertResourceId(projectId);
     return this.transaction(async (client) => {
       const result = await client.query(
         "UPDATE projects SET status='deleting',updated_at=now() WHERE id=$1 RETURNING *",
@@ -130,6 +135,7 @@ export class PostgresFigLabRepository implements FigLabRepository {
     });
   }
   async getDocument(projectId: string): Promise<DocumentRecord> {
+    assertResourceId(projectId);
     const result = await this.pool.query("SELECT * FROM project_documents WHERE project_id=$1", [
       projectId,
     ]);
@@ -142,6 +148,7 @@ export class PostgresFigLabRepository implements FigLabRepository {
   ): Promise<
     { kind: "saved"; document: DocumentRecord } | { kind: "conflict"; currentRevision: number }
   > {
+    assertResourceId(projectId);
     return this.transaction(async (client) => {
       const prior = await client.query(
         "SELECT document FROM project_documents WHERE project_id=$1",
@@ -183,6 +190,8 @@ export class PostgresFigLabRepository implements FigLabRepository {
     expiresAt?: string;
     assetId?: string;
   }): Promise<UploadRecord> {
+    assertResourceId(input.projectId);
+    if (input.assetId !== undefined) assertResourceId(input.assetId);
     return this.transaction(async (client) => {
       const id = randomUUID();
       const assetId = input.assetId ?? randomUUID();
@@ -218,6 +227,7 @@ export class PostgresFigLabRepository implements FigLabRepository {
     });
   }
   async getUpload(id: string): Promise<UploadRecord> {
+    assertResourceId(id);
     const result = await this.pool.query(
       "SELECT u.*,a.id asset_id FROM upload_sessions u JOIN assets a ON a.upload_id=u.id WHERE u.id=$1",
       [id],
@@ -225,10 +235,12 @@ export class PostgresFigLabRepository implements FigLabRepository {
     return uploadRow(first(result.rows));
   }
   async getAsset(id: string): Promise<AssetRecord> {
+    assertResourceId(id);
     const result = await this.pool.query("SELECT * FROM assets WHERE id=$1", [id]);
     return assetRow(first(result.rows));
   }
   async completeUpload(id: string): Promise<AssetRecord> {
+    assertResourceId(id);
     return this.transaction(async (client) => {
       const updated = await client.query(
         "UPDATE upload_sessions SET status='verifying' WHERE id=$1 AND status='reserved' RETURNING id",
@@ -256,6 +268,7 @@ export class PostgresFigLabRepository implements FigLabRepository {
       >
     >,
   ): Promise<AssetRecord> {
+    assertResourceId(id);
     return this.transaction(async (client) => {
       const currentResult = await client.query("SELECT * FROM assets WHERE id=$1", [id]);
       const current = assetRow(first(currentResult.rows));
@@ -287,7 +300,9 @@ export class PostgresFigLabRepository implements FigLabRepository {
     });
   }
   async assertReadyAssets(projectId: string, ids: Iterable<string>): Promise<void> {
+    assertResourceId(projectId);
     const values = [...new Set(ids)];
+    for (const id of values) assertResourceId(id);
     if (values.length === 0) return;
     const result = await this.pool.query(
       "SELECT count(*)::int count FROM assets WHERE project_id=$1 AND status='ready' AND id=ANY($2::uuid[])",
@@ -296,6 +311,7 @@ export class PostgresFigLabRepository implements FigLabRepository {
     if (Number(first(result.rows).count) !== values.length) throw new NotFoundError();
   }
   async recordExport(input: Omit<ExportRecord, "id" | "createdAt">): Promise<ExportRecord> {
+    assertResourceId(input.projectId);
     return this.transaction(async (client) => {
       const revision = await client.query(
         "SELECT 1 FROM project_documents WHERE project_id=$1 AND revision=$2",
@@ -323,6 +339,7 @@ export class PostgresFigLabRepository implements FigLabRepository {
     });
   }
   async listAuditEvents(projectId: string): Promise<AuditEvent[]> {
+    assertResourceId(projectId);
     const result = await this.pool.query(
       "SELECT * FROM audit_events WHERE project_id=$1 ORDER BY created_at",
       [projectId],
@@ -330,10 +347,12 @@ export class PostgresFigLabRepository implements FigLabRepository {
     return result.rows.map(auditRow);
   }
   async listProjectAssets(projectId: string): Promise<AssetRecord[]> {
+    assertResourceId(projectId);
     const result = await this.pool.query("SELECT * FROM assets WHERE project_id=$1", [projectId]);
     return result.rows.map(assetRow);
   }
   async deleteProjectData(projectId: string): Promise<void> {
+    assertResourceId(projectId);
     await this.transaction(async (client) => {
       await client.query("DELETE FROM export_records WHERE project_id=$1", [projectId]);
       await client.query("DELETE FROM audit_events WHERE project_id=$1", [projectId]);

@@ -82,4 +82,99 @@ describe("verifyAsset", () => {
     await verifyAsset(repository, store, upload.assetId);
     expect((await repository.getAsset(upload.assetId)).rejectionReason).toMatch(/BigTIFF/);
   });
+
+  it("marks a supported real 16-bit grayscale TIFF ready from shared authoritative metadata", async () => {
+    const bytes = grayscaleTiff({ width: 2, height: 1, bitDepth: 16, samples: [0, 32_768] });
+    const { repository, store, assetId } = await uploadedTiff(bytes, "supported");
+    await verifyAsset(repository, store, assetId);
+    expect(await repository.getAsset(assetId)).toMatchObject({
+      status: "ready",
+      widthPx: 2,
+      heightPx: 1,
+      bitDepth: 16,
+      channelCount: 1,
+    });
+  });
+
+  it.each([
+    ["signed samples", { compression: 1, sampleFormat: 2 }, /unsigned samples/],
+    ["unsupported compression", { compression: 7, sampleFormat: 1 }, /compression/],
+  ])("rejects TIFF %s through the shared decoder", async (_name, override, reason) => {
+    const bytes = grayscaleTiff({ width: 1, height: 1, bitDepth: 8, samples: [1], ...override });
+    const { repository, store, assetId } = await uploadedTiff(bytes, _name);
+    await verifyAsset(repository, store, assetId);
+    expect((await repository.getAsset(assetId)).rejectionReason).toMatch(reason);
+  });
+
+  it("rejects a tiled TIFF through the shared decoder", async () => {
+    const bytes = new Uint8Array(
+      await sharp({ create: { width: 32, height: 32, channels: 3, background: "#808080" } })
+        .tiff({ tile: true, tileWidth: 16, tileHeight: 16, compression: "lzw" })
+        .toBuffer(),
+    );
+    const { repository, store, assetId } = await uploadedTiff(bytes, "tiled");
+    await verifyAsset(repository, store, assetId);
+    expect((await repository.getAsset(assetId)).rejectionReason).toMatch(/tiled/);
+  });
 });
+
+async function uploadedTiff(bytes: Uint8Array, suffix: string) {
+  const repository = new InMemoryFigLabRepository();
+  const principal = await repository.bootstrapSingleUser();
+  const project = await repository.createProject(principal.workspaceId, "Cells");
+  const store = new FakeObjectStore();
+  const storageKey = `tiff-${suffix}`;
+  const upload = await repository.createUpload({
+    projectId: project.id,
+    filename: `${suffix}.tif`,
+    mimeType: "image/tiff",
+    contentLength: bytes.byteLength,
+    checksumSha256: createHash("sha256").update(bytes).digest("hex"),
+    storageKey,
+  });
+  await store.putForTest(storageKey, bytes, "image/tiff");
+  return { repository, store, assetId: upload.assetId };
+}
+
+function grayscaleTiff(input: {
+  width: number;
+  height: number;
+  bitDepth: 8 | 16;
+  samples: number[];
+  compression?: number;
+  sampleFormat?: number;
+}): Uint8Array {
+  const entries: Array<[number, number, number, number]> = [
+    [256, 4, 1, input.width],
+    [257, 4, 1, input.height],
+    [258, 3, 1, input.bitDepth],
+    [259, 3, 1, input.compression ?? 1],
+    [262, 3, 1, 1],
+    [273, 4, 1, 0],
+    [277, 3, 1, 1],
+    [278, 4, 1, input.height],
+    [279, 4, 1, input.samples.length * (input.bitDepth / 8)],
+    [339, 3, 1, input.sampleFormat ?? 1],
+  ];
+  const pixelOffset = 8 + 2 + entries.length * 12 + 4;
+  entries[5] = [273, 4, 1, pixelOffset];
+  const bytes = new Uint8Array(pixelOffset + input.samples.length * (input.bitDepth / 8));
+  const view = new DataView(bytes.buffer);
+  view.setUint16(0, 0x4d4d);
+  view.setUint16(2, 42);
+  view.setUint32(4, 8);
+  view.setUint16(8, entries.length);
+  entries.forEach(([tag, type, count, value], index) => {
+    const offset = 10 + index * 12;
+    view.setUint16(offset, tag);
+    view.setUint16(offset + 2, type);
+    view.setUint32(offset + 4, count);
+    if (type === 3) view.setUint16(offset + 8, value);
+    else view.setUint32(offset + 8, value);
+  });
+  input.samples.forEach((sample, index) => {
+    if (input.bitDepth === 8) view.setUint8(pixelOffset + index, sample);
+    else view.setUint16(pixelOffset + index * 2, sample);
+  });
+  return bytes;
+}

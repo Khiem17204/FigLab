@@ -50,4 +50,10 @@ describe.skipIf(!databaseUrl)("PostgresFigLabRepository", () => {
     const jobs = await pool.query("SELECT identifier FROM graphile_worker.jobs");
     expect(jobs.rows).toEqual([{ identifier: "verify_asset" }]);
   });
+
+  it("maps malformed resource IDs to not-found before PostgreSQL UUID coercion", async () => {
+    await expect(repository.getProject("not-a-uuid")).rejects.toMatchObject({
+      name: "NotFoundError",
+    });
+  });
 });

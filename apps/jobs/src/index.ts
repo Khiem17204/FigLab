@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { pathToFileURL } from "node:url";
 import { createPostgresRepository, type FigLabRepository } from "@figlab/database";
+import { decodeTiff } from "@figlab/image-processing";
 import { type ObjectStore, S3ObjectStore } from "@figlab/storage";
 import { type Runner, run, type TaskList } from "graphile-worker";
 import sharp from "sharp";
@@ -105,22 +106,11 @@ async function decodeTiffAuthoritatively(bytes: Uint8Array): Promise<{
   channels: 1 | 3;
 }> {
   if (isBigTiff(bytes)) throw new Error("Unsupported TIFF: BigTIFF is not supported");
-  const imageProcessingModule = "@figlab/image-processing";
-  const imageProcessing = (await import(imageProcessingModule)) as unknown as {
-    decodeTiff(input: ArrayBuffer): Promise<{
-      widthPx: number;
-      heightPx: number;
-      bitDepth: 8 | 16;
-      channels: 1 | 3;
-    }>;
-  };
-  if (typeof imageProcessing.decodeTiff !== "function")
-    throw new Error("Unsupported TIFF: shared decoder is unavailable");
   const exact = bytes.buffer.slice(
     bytes.byteOffset,
     bytes.byteOffset + bytes.byteLength,
   ) as ArrayBuffer;
-  return imageProcessing.decodeTiff(exact);
+  return decodeTiff(exact);
 }
 
 function isBigTiff(bytes: Uint8Array): boolean {

@@ -112,4 +112,32 @@ describe("buildApp", () => {
       }),
     ).rejects.toThrow(/loopback/);
   });
+
+  it("accepts bracketed IPv6 loopback as a safe single-user origin", () => {
+    expect(() => assertSingleUserConfiguration("http://[::1]:3000")).not.toThrow();
+  });
+
+  it("returns not-found for malformed public resource IDs", async () => {
+    class RepositoryMustNotReceiveMalformedIds extends InMemoryFigLabRepository {
+      override async getProject(): Promise<never> {
+        throw new Error("repository received malformed ID");
+      }
+      override async getUpload(): Promise<never> {
+        throw new Error("repository received malformed ID");
+      }
+      override async getAsset(): Promise<never> {
+        throw new Error("repository received malformed ID");
+      }
+    }
+    const repository = new RepositoryMustNotReceiveMalformedIds();
+    const principal = await repository.bootstrapSingleUser();
+    const app = await buildApp({ repository, store: new FakeObjectStore(), principal });
+    const responses = await Promise.all([
+      app.inject({ method: "GET", url: "/v1/projects/not-a-uuid" }),
+      app.inject({ method: "POST", url: "/v1/uploads/not-a-uuid/complete" }),
+      app.inject({ method: "GET", url: "/v1/assets/not-a-uuid" }),
+    ]);
+    expect(responses.map((response) => response.statusCode)).toEqual([404, 404, 404]);
+    await app.close();
+  });
 });

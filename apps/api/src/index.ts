@@ -19,6 +19,7 @@ import {
 import {
   type AssetRecord,
   type Authorizer,
+  assertResourceId,
   createPostgresRepository,
   type FigLabRepository,
   NotFoundError,
@@ -77,7 +78,11 @@ export function assertSingleUserConfiguration(
 ): void {
   const host = new URL(publicAppUrl).hostname;
   const local =
-    host === "localhost" || host === "::1" || host === "127.0.0.1" || host.startsWith("127.");
+    host === "localhost" ||
+    host === "::1" ||
+    host === "[::1]" ||
+    host === "127.0.0.1" ||
+    host.startsWith("127.");
   if (!local && !allowInsecureRemote)
     throw new Error("Single-user mode requires a localhost or loopback PUBLIC_APP_URL");
 }
@@ -90,6 +95,7 @@ export async function buildApp(dependencies: AppDependencies): Promise<FastifyIn
   const authorizer = dependencies.authorizer ?? new SingleUserAuthorizer();
   await app.register(swagger, { openapi: { info: { title: "FigLab API", version: "0.1.0" } } });
   const projectFor = async (projectId: string) => {
+    assertResourceId(projectId);
     const project = await dependencies.repository.getProject(projectId);
     await authorizer.requireProject(dependencies.principal, project);
     return project;
@@ -252,7 +258,7 @@ export async function buildApp(dependencies: AppDependencies): Promise<FastifyIn
     },
     async (request, reply) => {
       const upload = await dependencies.repository.getUpload(
-        (request.params as { uploadId: string }).uploadId,
+        resourceId((request.params as { uploadId: string }).uploadId),
       );
       await projectFor(upload.projectId);
       const asset = await dependencies.repository.getAsset(upload.assetId);
@@ -377,12 +383,17 @@ async function assetFor(
   authorizer: Authorizer,
   id: string,
 ): Promise<AssetRecord> {
+  assertResourceId(id);
   const asset = await dependencies.repository.getAsset(id);
   await authorizer.requireProject(
     dependencies.principal,
     await dependencies.repository.getProject(asset.projectId),
   );
   return asset;
+}
+function resourceId(value: string): string {
+  assertResourceId(value);
+  return value;
 }
 function sourceAssetIds(document: {
   objects: { type: string; view?: { sourceAssetId: string } }[];
