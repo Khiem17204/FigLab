@@ -9,7 +9,7 @@
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "test:integration": "vitest run --passWithNoTests",
-    "test:unit": "vitest run",
+    "test:unit": "vitest run --root ../.. packages/editor-core/src",
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
