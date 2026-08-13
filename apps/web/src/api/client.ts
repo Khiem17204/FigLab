@@ -55,7 +55,7 @@ export class FigLabClient {
   }
 
   renameProject(projectId: string, name: string): Promise<Project> {
-    return this.json(path(apiRoutes.project, { projectId }), { method: "PATCH", body: { name } });
+    return this.json(path(apiRoutes.project, { projectId }), { method: "PUT", body: { name } });
   }
 
   async deleteProject(projectId: string): Promise<void> {
@@ -84,6 +84,7 @@ export class FigLabClient {
   async downloadAsset(assetId: string): Promise<{ bytes: ArrayBuffer; mimeType: string }> {
     const instruction = await this.json<{ url: string; expiresAt: string }>(
       path(apiRoutes.assetDownloadUrl, { assetId }),
+      { method: "POST" },
     );
     const response = await this.fetcher(instruction.url);
     if (!response.ok) throw new ApiError(response.status, await readBody(response));

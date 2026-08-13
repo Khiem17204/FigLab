@@ -40,7 +40,7 @@ test("opens the real project and exposes rename and delete actions", async ({ pa
   let renamedTo = "";
   let deleted = false;
   await page.route(new RegExp(`/v1/projects/${project.id}$`), async (route) => {
-    if (route.request().method() === "PATCH") {
+    if (route.request().method() === "PUT") {
       renamedTo = route.request().postDataJSON().name;
       await route.fulfill({ json: { ...project, name: renamedTo } });
     } else {
