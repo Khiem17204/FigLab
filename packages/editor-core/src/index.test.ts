@@ -5,6 +5,7 @@ import {
   createImageViewCommand,
   createSessionState,
   deleteObjectsCommand,
+  MAX_HISTORY_SNAPSHOTS,
   normalizedToPixelRect,
   proportionallyResizeTransform,
   redo,
@@ -92,13 +93,13 @@ describe("editor core commands", () => {
 
   it("caps undo history at one hundred snapshots and clears redo after a new gesture", () => {
     let state = createSessionState(createDefaultFigureDocument("board"));
-    for (let index = 0; index < 101; index += 1) {
+    for (let index = 0; index < MAX_HISTORY_SNAPSHOTS + 1; index += 1) {
       state = commitCommand(state, setObjectTransformsCommand([]));
     }
     const undone = undo(state);
     const recommitted = commitCommand(undone, setObjectTransformsCommand([]));
 
-    expect(state.undoStack).toHaveLength(100);
+    expect(state.undoStack).toHaveLength(MAX_HISTORY_SNAPSHOTS);
     expect(undone.redoStack).toHaveLength(1);
     expect(recommitted.redoStack).toHaveLength(0);
     expect(redo(recommitted)).toEqual(recommitted);

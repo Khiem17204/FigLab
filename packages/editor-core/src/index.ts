@@ -10,6 +10,7 @@ import {
 export type PixelRect = { x: number; y: number; width: number; height: number };
 export type EditorCommand = (document: FigureDocumentV1) => FigureDocumentV1;
 export type ResizeAnchor = "top-left" | "top-right" | "bottom-left" | "bottom-right";
+export const MAX_HISTORY_SNAPSHOTS = 100;
 
 export type EditorSessionState = {
   document: FigureDocumentV1;
@@ -107,7 +108,7 @@ export function commitCommand(
   const document = command(state.document);
   return {
     document,
-    undoStack: [...state.undoStack, state.document].slice(-100),
+    undoStack: [...state.undoStack, state.document].slice(-MAX_HISTORY_SNAPSHOTS),
     redoStack: [],
   };
 }
@@ -118,7 +119,7 @@ export function undo(state: EditorSessionState): EditorSessionState {
   return {
     document,
     undoStack: state.undoStack.slice(0, -1),
-    redoStack: [state.document, ...state.redoStack].slice(0, 100),
+    redoStack: [state.document, ...state.redoStack].slice(0, MAX_HISTORY_SNAPSHOTS),
   };
 }
 
@@ -127,7 +128,7 @@ export function redo(state: EditorSessionState): EditorSessionState {
   if (document === undefined) return state;
   return {
     document,
-    undoStack: [...state.undoStack, state.document].slice(-100),
+    undoStack: [...state.undoStack, state.document].slice(-MAX_HISTORY_SNAPSHOTS),
     redoStack: state.redoStack.slice(1),
   };
 }
