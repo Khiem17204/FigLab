@@ -1,4 +1,9 @@
-import { CreateBucketCommand, HeadBucketCommand, S3Client } from "@aws-sdk/client-s3";
+import {
+  CreateBucketCommand,
+  DeleteBucketPolicyCommand,
+  HeadBucketCommand,
+  S3Client,
+} from "@aws-sdk/client-s3";
 
 const required = (name: string): string => {
   const value = process.env[name];
@@ -25,4 +30,5 @@ try {
   if (status !== 404) throw error;
   await client.send(new CreateBucketCommand({ Bucket: bucket }));
 }
+await client.send(new DeleteBucketPolicyCommand({ Bucket: bucket }));
 client.destroy();

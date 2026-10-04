@@ -1,6 +1,12 @@
 import { spawnSync } from "node:child_process";
-import { createHash } from "node:crypto";
+import { createHash, randomBytes } from "node:crypto";
+import { createRequire } from "node:module";
 import { createServer } from "node:net";
+
+const requireStorageDependency = createRequire(
+  new URL("../packages/storage/package.json", import.meta.url),
+);
+const { PutBucketPolicyCommand, S3Client } = requireStorageDependency("@aws-sdk/client-s3");
 
 const composeFile = "deploy/docker-compose.yml";
 const requiredServices = [
@@ -13,9 +19,21 @@ const requiredServices = [
   "minio-init",
   "postgres",
 ];
+const databaseName = "figlab_smoke";
+const databaseUser = "figlab_smoke";
+const databasePassword = randomBytes(24).toString("hex");
+const baseEnvironment = {
+  ...process.env,
+  DATABASE_URL: `postgres://${databaseUser}:${databasePassword}@postgres:5432/${databaseName}`,
+  POSTGRES_DB: databaseName,
+  POSTGRES_USER: databaseUser,
+  POSTGRES_PASSWORD: databasePassword,
+  OBJECT_STORE_INTERNAL_ENDPOINT: "http://minio:9000",
+};
 
 const rendered = run(["compose", "-f", composeFile, "config", "--format", "json"], {
   capture: true,
+  environment: baseEnvironment,
 });
 const configuration = JSON.parse(rendered.stdout);
 for (const service of requiredServices) {
@@ -32,7 +50,7 @@ const consolePort = await availablePort();
 const projectName = `figlab-smoke-${process.pid}`;
 const publicOrigin = `http://127.0.0.1:${httpPort}`;
 const environment = {
-  ...process.env,
+  ...baseEnvironment,
   FIGLAB_BIND_ADDRESS: "127.0.0.1",
   FIGLAB_HTTP_PORT: String(httpPort),
   FIGLAB_MINIO_PORT: String(minioPort),
@@ -121,9 +139,65 @@ try {
   if (signedDownload.origin !== publicMinioOrigin) {
     throw new Error(`Presigned GET did not resolve directly to public MinIO: ${signedDownload}`);
   }
-  const downloaded = new Uint8Array(await (await fetch(download.url)).arrayBuffer());
+  const downloadCors = await fetch(download.url, {
+    method: "OPTIONS",
+    headers: { origin: publicOrigin, "access-control-request-method": "GET" },
+  });
+  if (
+    !downloadCors.ok ||
+    downloadCors.headers.get("access-control-allow-origin") !== publicOrigin
+  ) {
+    throw new Error("MinIO CORS preflight did not authorize the signed browser GET");
+  }
+  const downloadResponse = await fetch(download.url, { headers: { origin: publicOrigin } });
+  if (downloadResponse.headers.get("access-control-allow-origin") !== publicOrigin) {
+    throw new Error("Signed MinIO download did not include the browser CORS origin");
+  }
+  const downloaded = new Uint8Array(await downloadResponse.arrayBuffer());
   if (createHash("sha256").update(downloaded).digest("hex") !== checksumSha256) {
     throw new Error("Downloaded immutable original did not match the uploaded checksum");
+  }
+  const minioEnvironment = configuration.services.minio.environment;
+  const bucket = configuration.services["minio-init"].environment.OBJECT_STORE_BUCKET;
+  const adminStore = new S3Client({
+    region: configuration.services["minio-init"].environment.OBJECT_STORE_REGION,
+    endpoint: publicMinioOrigin,
+    credentials: {
+      accessKeyId: minioEnvironment.MINIO_ROOT_USER,
+      secretAccessKey: minioEnvironment.MINIO_ROOT_PASSWORD,
+    },
+    forcePathStyle: true,
+    requestChecksumCalculation: "WHEN_REQUIRED",
+  });
+  await adminStore.send(
+    new PutBucketPolicyCommand({
+      Bucket: bucket,
+      Policy: JSON.stringify({
+        Version: "2012-10-17",
+        Statement: [
+          {
+            Sid: "SmokePublicRead",
+            Effect: "Allow",
+            Principal: "*",
+            Action: "s3:GetObject",
+            Resource: `arn:aws:s3:::${bucket}/*`,
+          },
+        ],
+      }),
+    }),
+  );
+  adminStore.destroy();
+  const unsignedDownload = new URL(download.url);
+  unsignedDownload.search = "";
+  if (!(await fetch(unsignedDownload)).ok) {
+    throw new Error("Could not reproduce a public bucket policy before the privacy check");
+  }
+  run(["compose", "-p", projectName, "-f", composeFile, "run", "--rm", "--no-deps", "minio-init"], {
+    environment,
+    timeoutMs: 30_000,
+  });
+  if ((await fetch(unsignedDownload)).status !== 403) {
+    throw new Error("MinIO initialization did not remove the bucket's anonymous read policy");
   }
   const loaded = await requestJson(`${publicOrigin}/v1/projects/${project.id}/document`);
   const imageViewId = "00000000-0000-4000-8000-000000000010";
