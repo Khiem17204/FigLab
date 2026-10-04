@@ -1,10 +1,15 @@
 .worktrees/
 .superpowers/
+.DS_Store
 node_modules/
+.pnpm-store/
 .turbo/
 coverage/
 dist/
 playwright-report/
 test-results/
+*.tsbuildinfo
+*.log
 .env
+.env.*
 !.env.example

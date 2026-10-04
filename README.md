@@ -1,64 +1,213 @@
 # FigLab
 
-FigLab is a self-hosted scientific figure workspace for creating reproducible crops from immutable
-PNG, JPEG, and supported single-plane TIFF originals. This vertical slice includes project and
-document persistence, direct-to-MinIO uploads, asynchronous verification, normalized cropping,
-non-destructive display adjustments, undo/redo, provenance navigation, and original-pixel PNG
-export.
+FigLab is a self-hosted scientific figure workspace. Its first vertical slice creates projects,
+uploads immutable PNG/JPEG and supported TIFF originals, draws reproducible crops, applies
+non-destructive display adjustments, saves a versioned figure, shows each crop in its original,
+and exports a PNG from source pixels. The repository is licensed AGPL-3.0-only.
 
-## Run locally with Docker
+## Handoff snapshot (2026-10-04)
 
-Requirements: Docker with Compose v2.
+The domain, server, web, and deployment work is integrated into local `main`; no linked feature
+worktrees remain. The Compose stack was stopped with `down` for this handoff, leaving the
+`figlab_postgres-data` and `figlab_minio-data` volumes intact. This local `main` has not been
+pushed to `origin/main`. The dashboard starts with no projects in a fresh database.
+There is no `.env` file at this handoff; the last launch used Compose's loopback/local-PostgreSQL
+defaults. Copy `.env.example` before customizing the stack.
+
+This is a **local, single-user desktop-browser milestone**, not a public or multi-user release.
+The optional Supabase Compose override exists, but a live Supabase connection has not been tested
+because no project connection string was provided.
+
+At the last integrated verification run, lint, typecheck, build, 115 unit tests, PostgreSQL
+integration tests against a disposable database, three browser tests, one visual test, and the
+clean-volume Compose smoke passed. The browser-to-live-Compose test gap is described below.
+
+## Run locally
+
+Docker with Compose v2 is the supported deployment path:
 
 ```sh
 cp .env.example .env
 docker compose -f deploy/docker-compose.yml up --build -d --wait
 ```
 
-Open <http://localhost>. MinIO's administrative console is available only on
-<http://127.0.0.1:9001>. The default credentials in `.env.example` are intended for local use and
-must be changed before using FigLab on a trusted private network.
+Open <http://localhost>. Caddy serves the React app and proxies `/v1/*` and `/health` to Fastify.
+The MinIO API and console bind to loopback ports 9000 and 9001. The example credentials are for
+local development only. Do not expose this single-user stack on a public network.
 
-Single-user mode deliberately refuses a non-loopback `PUBLIC_APP_URL` unless
-`ALLOW_INSECURE_SINGLE_USER_REMOTE=true` is explicitly set. Authentication and multi-user
-collaboration are outside this milestone.
-
-Stop the stack without deleting projects:
+Stop it without deleting projects or originals:
 
 ```sh
 docker compose -f deploy/docker-compose.yml down
 ```
 
-## Use Supabase for development
+Do **not** add `-v` unless you deliberately want to delete the PostgreSQL and MinIO volumes.
+To check a running stack, use `docker compose -f deploy/docker-compose.yml ps` and
+`curl http://localhost/health`.
 
-FigLab stores projects in PostgreSQL through Drizzle and runs background jobs with Graphile Worker.
-You can use a dedicated Supabase project as that PostgreSQL database; FigLab still uses its local
-MinIO container for immutable image originals. Supabase Auth, Storage, and Data API are not part of
-this single-user release.
+## Architecture and ownership
 
-1. Create a dedicated Supabase project. In its Dashboard, turn off **Integrations → Data API**.
-   FigLab migrations also enable row-level security on its tables without browser-facing policies.
-2. Copy `.env.example` to `.env`. Replace `DATABASE_URL` with the connection string from the
-   Supabase **Connect** panel. Use a **direct connection** when available, or the **session pooler**
-   on port 5432 if your Docker host only has IPv4. Do not use the transaction pooler on port 6543:
-   Graphile Worker keeps a database session open for job notifications.
-3. Start the stack without its local PostgreSQL service:
+```text
+Browser -- project/document/metadata HTTP --> Caddy --> Fastify --> PostgreSQL
+Browser -- presigned original PUT/GET ----------------------------> MinIO
+PostgreSQL -- durable jobs --> Graphile Worker -- verify/delete --> MinIO + PostgreSQL
+```
 
-   ```sh
-   docker compose -f deploy/docker-compose.yml -f deploy/docker-compose.supabase.yml up --build -d --wait
-   ```
+| Component | Responsibility and source |
+| --- | --- |
+| `apps/web` | React 19/Vite 8 dashboard and editor; PixiJS 8 raster artboard, accessible DOM/SVG controls, Zustand editor session, browser raster resolver, autosave, and PNG download. |
+| `apps/api` | Fastify 5 HTTP boundary. TypeBox defines request/response schemas and validates requests; it handles projects, documents, upload reservations, asset status, signed URLs, and export metadata. It does not proxy image bytes. |
+| `apps/jobs` | Graphile Worker tasks `verify_asset` and `delete_project`. Verification reads MinIO originals, checks checksum and image metadata, then changes asset status. |
+| `packages/figure-schema` | Strict persisted document v1, semantic validation, typed decode errors, and an explicit migration entry point. |
+| `packages/editor-core` | Pure crop, transform, history, and provenance commands; no browser or database dependency. |
+| `packages/image-processing` | Raster source interface, TIFF validation/window reads, shared display math, and CPU PNG composition. |
+| `packages/database` | Drizzle table definitions and `pg`-based PostgreSQL repository, plus in-memory test repository and `Principal`/`Authorizer` interfaces. |
+| `packages/storage` | `ObjectStore` interface, S3-compatible MinIO implementation, and fake test store. |
+| `packages/api-contract` | Shared HTTP routes, TypeBox DTOs, typed errors, and fixed limits. `openapi/openapi-v1.yaml` is the published contract snapshot. |
+| `deploy` | Caddy, Dockerfiles, pinned images, local PostgreSQL/MinIO Compose stack, and optional Supabase database override. |
 
-Open <http://localhost>. Stop it with the same two `-f` arguments and `down` (without `-v` to keep
-MinIO data). Keep `DATABASE_URL` in the ignored `.env` file, and use a separate disposable local
-database for integration tests: those tests reset FigLab tables.
+Node 24, pnpm 10, strict TypeScript, Turborepo, Biome, Vitest, and Playwright are the repository
+toolchain. Versions are locked in `pnpm-lock.yaml`; Compose images are digest-pinned. The MinIO
+container is built from a pinned upstream source commit in `deploy/Dockerfile.minio`. The
+default local database uses PostgreSQL 17. There is no Redis or separate message broker: Graphile
+Worker uses PostgreSQL for durable jobs.
 
-Supabase's [connection guide](https://supabase.com/docs/guides/database/connecting-to-postgres)
-explains direct and session URLs. Its [Data API security guide](https://supabase.com/docs/guides/api/securing-your-api)
-explains why the Data API should be disabled for apps that do not use it.
+The key decisions and their reasons are:
 
-## Development
+| Decision | Why and consequence |
+| --- | --- |
+| Keep schema, editor commands, and image processing in pure packages. | The scientific crop and display rules can be tested independently and shared by preview and export. |
+| Store immutable originals in MinIO; upload directly with signed URLs. | Image bytes avoid the API bottleneck, while each crop keeps an auditable link to one original. The API stores metadata, never source bytes. |
+| Use PostgreSQL for documents **and** Graphile jobs. | Saves, audit events, and work enqueue can be durable without operating another queue service. Supabase can later supply the same database. |
+| Save a versioned JSON document with optimistic revisions. | Crop state is portable and reproducible; a stale tab cannot silently overwrite a newer save. Conflicts require explicit recovery. |
+| Export in the browser from original samples. | Preview quality cannot silently become export quality, and no rendered PNG needs server storage. The browser must download and decode originals again. |
+| Keep `Principal`, `Authorizer`, and `ObjectStore` interfaces. | Authentication and storage backends can change behind these boundaries; only single-user and MinIO implementations are complete today. |
+| Separate MinIO internal and public endpoints. | Containers use Docker networking, while presigned URLs must resolve in the user's browser. Caddy serves the app/API, not image bytes. |
 
-Requirements: Node.js 24 and pnpm 10 through Corepack.
+### Scientific document and editing decisions
+
+- `FigureDocumentV1` stores `schemaVersion: 1`, artboards, image-view objects, and empty
+  `groups`, `constraints`, and `styles`. The default is a white US Letter portrait artboard,
+  `612 × 792 pt`, with 72 points per inch.
+- Every image view references an immutable `sourceAssetId`, a top-left-origin viewport normalized
+  to `[0,1]`, and declarative brightness `[-1,1]`, contrast `[0,4]`, gamma `[0.1,10]`, and invert.
+  Panel position and size are in artboard points. Rotation is represented as `0` but not editable
+  in v1; resizing preserves the crop's aspect ratio.
+- Crop conversion uses `floor` for source-pixel left/top and `ceil` for right/bottom. A crop at a
+  source edge therefore includes its boundary pixels. Schema validation rejects malformed,
+  out-of-bounds, duplicate-ID, and future-version documents.
+- The document never contains raster bytes, storage keys, signed URLs, browser blobs, preview
+  pixels, Pixi objects, selection, undo history, or pan/zoom. These remain transient client state.
+  Pointer movement previews a change; pointer-up commits one editor command. Undo/redo retains at
+  most 100 document snapshots.
+- PostgreSQL stores the current JSON document in `project_documents` and saves revisions in
+  `project_versions`. Saves use `baseRevision` compare-and-swap. A stale save returns
+  `409 REVISION_CONFLICT` with `currentRevision`; the browser keeps local edits and offers reload
+  or a JSON download. Autosave debounces for 1,000 ms.
+- Audit events are derived on the server from document differences, not trusted as client claims.
+  They cover crop creation/change, display changes, transforms/removal, upload, and export. Audit
+  events are persisted but do not yet have a public read endpoint.
+
+### Asset and storage decisions
+
+- `AssetDescriptor` lives outside the figure JSON and records verified MIME type, SHA-256,
+  dimensions, bit depth, channel count, and metadata. Asset states are `pending-verification`,
+  `ready`, or `rejected`; only ready assets may be saved into a project document.
+- The API allocates a fresh asset ID and immutable key
+  `workspaces/{workspaceId}/projects/{projectId}/assets/{assetId}/original`. It returns a
+  600-second presigned PUT with `If-None-Match: *`; the browser sends original bytes directly to
+  MinIO. A separate public endpoint makes signed URLs browser-resolvable, while containers use
+  the internal MinIO endpoint. The bucket remains private; CORS permits the configured app origin.
+- The browser computes SHA-256 before reservation. Completion checks object length and is
+  idempotent; a Graphile job independently reads the object, recomputes SHA-256, checks the image
+  signature/metadata, and marks it ready or rejected. Invalid bytes are not made editable.
+  The API limit is 100 MiB and the decoded-image limit is 100 million pixels by default.
+- PNG/JPEG are decoded through browser image APIs for preview. TIFF uses a dedicated Web Worker
+  and `geotiff.js` windowed raster reads, preserving unsigned 16-bit samples until final PNG
+  rendering. TIFF v1 accepts one-plane, strip-based grayscale/RGB, 8- or 16-bit unsigned samples,
+  with none/LZW/Deflate compression. It explicitly rejects tiled, multipage, OME, BigTIFF,
+  palette/CMYK, signed/floating-point, and unsupported-compression inputs. Pyramids are not part
+  of v1. The browser currently fetches the whole TIFF object before issuing in-worker windowed
+  reads; remote range streaming is not implemented.
+- Project deletion first marks the project `deleting`, then a retryable worker task removes
+  source objects and database rows. The `ObjectStore` interface allows another adapter later,
+  but MinIO is the only complete production adapter today.
+
+### Preview, export, and provenance decisions
+
+- Pixi renders preview textures on the artboard; DOM/SVG controls handle accessible selection,
+  crop, move, resize, and inspector interactions. Preview caches are disposable.
+- Display processing has one numeric contract: normalize an 8- or 16-bit sample, apply contrast
+  around `0.5`, add brightness, clamp to `[0,1]`, raise to `1/gamma`, then invert if requested.
+- Browser PNG export re-reads the original source regions through `RasterSourceResolver`, applies
+  that processing, and CPU-composites visible panels in z-order at the chosen artboard pixel
+  dimensions. It writes an 8-bit PNG; 16-bit TIFF values are retained until this final render.
+  Export is limited to 16,384 pixels per edge and 100 million output pixels.
+- The PNG is downloaded by the browser, not uploaded to Fastify. The API records only format,
+  exact saved document revision, output dimensions, and SHA-256. Export flushes autosave first;
+  a conflict or failed save keeps the local work recoverable and blocks a misleading export.
+- “Show in Original” uses the selected image view's asset ID and normalized viewport. Other views
+  with the same asset ID are its provenance siblings; crops never become new source assets.
+
+### Database, security, and deployment decisions
+
+- Local startup creates one stable administrator, workspace, and membership in PostgreSQL. Access
+  checks use `Principal` and `Authorizer` interfaces so a future auth provider can replace the
+  single-user implementation without rewriting project services. Password/OAuth authentication
+  and collaboration are **not implemented**.
+- SQL migrations live in `packages/database/migrations`; Drizzle defines the tables, while the
+  current repository executes SQL via `pg`. Graphile Worker has its own migration step. FigLab's
+  public tables have row-level security enabled, but there are no browser-facing RLS policies or
+  Supabase Data API usage. Database access goes through the server's connection role.
+- Single-user startup refuses a non-loopback `PUBLIC_APP_URL` unless
+  `ALLOW_INSECURE_SINGLE_USER_REMOTE=true` is explicitly set. That override removes a safety
+  guard; it does **not** add authentication. Keep the default deployment bound to `127.0.0.1`.
+- Caddy serves the built SPA and proxies API paths. The default Compose stack has health checks
+  for PostgreSQL, MinIO, Fastify, jobs, and Caddy. `down` preserves named volumes; `down -v`
+  destroys them. Do not use the latter on data you need.
+
+## HTTP contract
+
+The canonical DTOs and error codes are in `packages/api-contract/src/index.ts`; the OpenAPI
+snapshot is `openapi/openapi-v1.yaml`. Key routes:
+
+| Method and path | Purpose |
+| --- | --- |
+| `GET/POST /v1/projects` | List and create projects. |
+| `GET/PUT/DELETE /v1/projects/:projectId` | Open, rename, or queue deletion. |
+| `GET/PUT /v1/projects/:projectId/document` | Read or compare-and-swap save a figure document. |
+| `POST /v1/projects/:projectId/uploads` | Reserve an immutable asset and obtain a presigned PUT. |
+| `POST /v1/uploads/:uploadId/complete` | Finalize upload and enqueue verification. |
+| `GET /v1/assets/:assetId` | Read verified asset status and descriptor. |
+| `POST /v1/assets/:assetId/download-url` | Obtain an authorized, short-lived MinIO GET URL. |
+| `POST /v1/projects/:projectId/exports` | Record browser-export metadata, not PNG bytes. |
+
+Errors use typed envelopes such as `BAD_REQUEST`, `UPLOAD_INVALID`, `UPLOAD_EXPIRED`,
+`ASSET_NOT_READY`, `NOT_FOUND`, and `REVISION_CONFLICT`. The API checks that referenced assets
+belong to the project and are ready before saving the document.
+
+## Optional Supabase development database
+
+Supabase can host the same PostgreSQL database; it does **not** replace this release's MinIO,
+Graphile Worker, local-admin mode, or server API. Use a **dedicated** Supabase project, turn off
+its **Integrations → Data API**, and place a direct or session-pooler `DATABASE_URL` from its
+Connect panel in the ignored `.env` file. Do not use the transaction pooler: Graphile Worker keeps
+a database session open for job notifications. Use the session pooler on port 5432 if the Docker
+host cannot reach the direct IPv6 endpoint.
+
+```sh
+docker compose -f deploy/docker-compose.yml -f deploy/docker-compose.supabase.yml up --build -d --wait
+```
+
+The override omits local PostgreSQL; MinIO stays local. Stop with the same two `-f` arguments and
+`down` (without `-v`). This path is configured but **not yet live-tested against a Supabase
+project**. Never point the destructive database integration tests at a production or shared
+Supabase database. See Supabase's [connection guide](https://supabase.com/docs/guides/database/connecting-to-postgres)
+and [Data API security guide](https://supabase.com/docs/guides/api/securing-your-api).
+
+## Development and verification
+
+Install Node 24 and use the locked pnpm 10 version through Corepack:
 
 ```sh
 corepack enable
@@ -73,16 +222,29 @@ corepack pnpm test:visual
 corepack pnpm test:compose
 ```
 
-The Compose smoke test uses isolated volumes and dynamically allocated host ports, verifies the
-complete API/jobs/storage path, and removes its temporary stack afterward.
+`test:integration` skips the PostgreSQL-specific suite unless `TEST_DATABASE_URL` points to a
+**disposable** PostgreSQL database. That suite drops FigLab tables and the Graphile schema before
+recreating fixtures. Browser Playwright tests mock HTTP routes; `test:compose` separately verifies
+the real API/jobs/MinIO path on isolated volumes and dynamic host ports, then removes its test
+stack. The visual test covers the shell; numeric crop and display behavior has unit fixtures.
+There is not yet a single browser-to-live-Compose Playwright test.
 
-## Scientific data model
+Runtime-configurable Compose values include `MAX_UPLOAD_BYTES`, `MAX_IMAGE_PIXELS`, and
+`UPLOAD_URL_TTL_SECONDS`. The export/history/autosave values shown in `.env.example` currently
+document fixed code constants rather than wired runtime settings; changing those environment
+lines alone does not change behavior. The shared upload DTO also hard-caps requests at 100 MiB.
 
-Figure documents store normalized source viewports and display transforms, never source bytes,
-signed URLs, previews, or editor runtime state. Originals use one immutable key per asset. Browser
-exports re-read the original source, map crop edges with floor/ceil source-pixel rules, preserve
-supported 16-bit TIFF samples through processing, and record export metadata without uploading the
-rendered PNG.
+## Scope boundaries and next-agent reading order
 
-The versioned design and implementation checklist are in
-[`docs/superpowers/`](docs/superpowers/). FigLab is licensed under AGPL-3.0-only.
+This milestone does not include public deployment, real authentication, Supabase Auth or Storage,
+other object-store adapters, generic text/shapes, blot-specific tools, TIFF/PDF export,
+microscopy pyramids, offline projects, densitometry, or collaboration. It targets desktop Chrome,
+Firefox, Safari, and Edge; the editor is not mobile-optimized. The current browser test matrix is
+narrower than that target.
+
+For further work, read this README, then the [approved design](docs/superpowers/specs/2026-08-12-figlab-scientific-slice-design.md),
+[implementation checklist](docs/superpowers/plans/2026-08-12-figlab-scientific-slice.md),
+[API snapshot](openapi/openapi-v1.yaml), and the source files named in the ownership table.
+Treat the code and shared contract as the current implementation; the older design describes
+intent where it differs. Preserve the immutable-source, normalized-viewport, revision-conflict,
+and original-pixel-export invariants when extending the system.
