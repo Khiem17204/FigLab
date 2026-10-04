@@ -11,4 +11,4 @@ RUN corepack pnpm --filter "@figlab/${FIGLAB_APP}..." build
 ENV NODE_ENV=production
 ENV FIGLAB_APP=${FIGLAB_APP}
 USER node
-CMD ["sh", "-c", "node_modules/.bin/tsx apps/${FIGLAB_APP}/src/index.ts"]
+CMD ["sh", "-c", "apps/${FIGLAB_APP}/node_modules/.bin/tsx apps/${FIGLAB_APP}/src/index.ts"]

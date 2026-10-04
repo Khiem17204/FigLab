@@ -2,9 +2,13 @@
 	encode zstd gzip
 
 	@api path /health /v1/*
-	reverse_proxy @api api:3000
+	handle @api {
+		reverse_proxy api:3000
+	}
 
-	root * /srv
-	try_files {path} /index.html
-	file_server
+	handle {
+		root * /srv
+		try_files {path} /index.html
+		file_server
+	}
 }

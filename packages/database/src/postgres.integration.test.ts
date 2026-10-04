@@ -15,9 +15,15 @@ describe.skipIf(!databaseUrl)("PostgresFigLabRepository", () => {
     );
     await pool.query("DROP SCHEMA IF EXISTS graphile_worker CASCADE");
     await pool.query(
-      "DROP TABLE IF EXISTS export_records,audit_events,assets,upload_sessions,project_versions,project_documents,projects,workspace_members,workspaces,users CASCADE",
+      "DROP TABLE IF EXISTS figlab_schema_migrations,export_records,audit_events,assets,upload_sessions,project_versions,project_documents,projects,workspace_members,workspaces,users CASCADE",
     );
+    await pool.query("CREATE TABLE figlab_schema_migrations(name text PRIMARY KEY)");
     await pool.query(migration);
+    const rowSecurityMigration = await readFile(
+      new URL("../migrations/0001_enable_rls.sql", import.meta.url),
+      "utf8",
+    );
+    await pool.query(rowSecurityMigration);
     await pool.query("CREATE SCHEMA graphile_worker");
     await pool.query(
       "CREATE TABLE graphile_worker.jobs(identifier text, payload jsonb, job_key text UNIQUE)",
@@ -27,6 +33,27 @@ describe.skipIf(!databaseUrl)("PostgresFigLabRepository", () => {
     );
   });
   afterAll(() => pool.end());
+
+  it("keeps every FigLab table behind row-level security", async () => {
+    const tableNames = [
+      "assets",
+      "audit_events",
+      "export_records",
+      "figlab_schema_migrations",
+      "project_documents",
+      "project_versions",
+      "projects",
+      "upload_sessions",
+      "users",
+      "workspace_members",
+      "workspaces",
+    ];
+    const result = await pool.query(
+      "SELECT tablename, rowsecurity FROM pg_tables WHERE schemaname='public' AND tablename = ANY($1) ORDER BY tablename",
+      [tableNames],
+    );
+    expect(result.rows).toEqual(tableNames.map((tablename) => ({ tablename, rowsecurity: true })));
+  });
 
   it("persists idempotent bootstrap, atomic revision CAS, and durable verification enqueue", async () => {
     const principal = await repository.bootstrapSingleUser();

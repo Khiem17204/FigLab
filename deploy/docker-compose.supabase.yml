@@ -1,0 +1,28 @@
+# Use with docker-compose.yml after setting DATABASE_URL in .env.
+services:
+  postgres:
+    profiles: [local-postgres]
+
+  app-migrate:
+    depends_on:
+      postgres: !reset null
+    environment:
+      DATABASE_URL: ${DATABASE_URL:?Set DATABASE_URL to a Supabase direct or session connection URL}
+
+  graphile-migrate:
+    depends_on:
+      postgres: !reset null
+    environment:
+      DATABASE_URL: ${DATABASE_URL:?Set DATABASE_URL to a Supabase direct or session connection URL}
+
+  api:
+    depends_on:
+      postgres: !reset null
+    environment:
+      DATABASE_URL: ${DATABASE_URL:?Set DATABASE_URL to a Supabase direct or session connection URL}
+
+  jobs:
+    depends_on:
+      postgres: !reset null
+    environment:
+      DATABASE_URL: ${DATABASE_URL:?Set DATABASE_URL to a Supabase direct or session connection URL}

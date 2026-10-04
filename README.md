@@ -29,6 +29,33 @@ Stop the stack without deleting projects:
 docker compose -f deploy/docker-compose.yml down
 ```
 
+## Use Supabase for development
+
+FigLab stores projects in PostgreSQL through Drizzle and runs background jobs with Graphile Worker.
+You can use a dedicated Supabase project as that PostgreSQL database; FigLab still uses its local
+MinIO container for immutable image originals. Supabase Auth, Storage, and Data API are not part of
+this single-user release.
+
+1. Create a dedicated Supabase project. In its Dashboard, turn off **Integrations → Data API**.
+   FigLab migrations also enable row-level security on its tables without browser-facing policies.
+2. Copy `.env.example` to `.env`. Replace `DATABASE_URL` with the connection string from the
+   Supabase **Connect** panel. Use a **direct connection** when available, or the **session pooler**
+   on port 5432 if your Docker host only has IPv4. Do not use the transaction pooler on port 6543:
+   Graphile Worker keeps a database session open for job notifications.
+3. Start the stack without its local PostgreSQL service:
+
+   ```sh
+   docker compose -f deploy/docker-compose.yml -f deploy/docker-compose.supabase.yml up --build -d --wait
+   ```
+
+Open <http://localhost>. Stop it with the same two `-f` arguments and `down` (without `-v` to keep
+MinIO data). Keep `DATABASE_URL` in the ignored `.env` file, and use a separate disposable local
+database for integration tests: those tests reset FigLab tables.
+
+Supabase's [connection guide](https://supabase.com/docs/guides/database/connecting-to-postgres)
+explains direct and session URLs. Its [Data API security guide](https://supabase.com/docs/guides/api/securing-your-api)
+explains why the Data API should be disabled for apps that do not use it.
+
 ## Development
 
 Requirements: Node.js 24 and pnpm 10 through Corepack.
