@@ -326,13 +326,15 @@ function run(arguments_, options = {}) {
 }
 
 function renderSharedPng(input) {
-  const result = spawnSync("node_modules/.bin/tsx", ["scripts/compose-export.ts"], {
+  const result = spawnSync("apps/jobs/node_modules/.bin/tsx", ["scripts/compose-export.ts"], {
     cwd: process.cwd(),
     encoding: "utf8",
     input: JSON.stringify(input),
     timeout: 30_000,
   });
-  if (result.status !== 0) throw new Error(result.stderr || "Shared CPU PNG export failed");
+  if (result.status !== 0) {
+    throw new Error(result.stderr || result.error?.message || "Shared CPU PNG export failed");
+  }
   return JSON.parse(result.stdout);
 }
 
