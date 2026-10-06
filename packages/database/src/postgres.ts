@@ -5,6 +5,7 @@ import { Pool, type PoolClient, type QueryResultRow } from "pg";
 import type {
   AssetRecord,
   AuditEvent,
+  AuthUserIdentity,
   DocumentRecord,
   ExportRecord,
   FigLabRepository,
@@ -60,6 +61,34 @@ export class PostgresFigLabRepository implements FigLabRepository {
         email,
         workspaceId: LOCAL_WORKSPACE_ID,
       };
+    });
+  }
+  async ensureAuthUser(identity: AuthUserIdentity): Promise<Principal> {
+    assertResourceId(identity.id);
+    return this.transaction(async (client) => {
+      // Serialize first sign-in per user so concurrent requests cannot create two workspaces.
+      await client.query("SELECT pg_advisory_xact_lock(hashtext($1))", [identity.id]);
+      const now = new Date();
+      await client.query(
+        "INSERT INTO users(id,email,created_at,updated_at) VALUES($1,$2,$3,$3) ON CONFLICT(id) DO UPDATE SET email=EXCLUDED.email, updated_at=CASE WHEN users.email=EXCLUDED.email THEN users.updated_at ELSE EXCLUDED.updated_at END",
+        [identity.id, identity.email, now],
+      );
+      const membership = await client.query<{ workspace_id: string }>(
+        "SELECT workspace_id FROM workspace_members WHERE user_id=$1 AND role='owner' ORDER BY created_at LIMIT 1",
+        [identity.id],
+      );
+      const existing = membership.rows[0]?.workspace_id;
+      if (existing) return { id: identity.id, email: identity.email, workspaceId: existing };
+      const workspaceId = randomUUID();
+      await client.query(
+        "INSERT INTO workspaces(id,name,created_at,updated_at) VALUES($1,$2,$3,$3)",
+        [workspaceId, "Personal workspace", now],
+      );
+      await client.query(
+        "INSERT INTO workspace_members(id,workspace_id,user_id,role,created_at,updated_at) VALUES($1,$2,$3,'owner',$4,$4)",
+        [randomUUID(), workspaceId, identity.id, now],
+      );
+      return { id: identity.id, email: identity.email, workspaceId };
     });
   }
   async createProject(workspaceId: string, name: string): Promise<ProjectRecord> {
@@ -412,11 +441,42 @@ export class PostgresFigLabRepository implements FigLabRepository {
   }
 }
 
-export function createPostgresRepository(connectionString: string): {
+export interface PgPoolOptions {
+  maxConnections?: number;
+  /** PEM CA that must have signed the server certificate (for example Supabase's root CA). */
+  caCert?: string;
+}
+
+/**
+ * Creates a pool for the given URL. With `caCert`, TLS is required and the server certificate
+ * and host name are verified against that CA; `sslmode`/`sslrootcert` URL parameters are ignored.
+ */
+export function createPgPool(connectionString: string, options: PgPoolOptions = {}): Pool {
+  let url = connectionString;
+  if (options.caCert) {
+    const parsed = new URL(connectionString);
+    for (const parameter of ["sslmode", "sslrootcert", "sslcert", "sslkey", "uselibpqcompat"])
+      parsed.searchParams.delete(parameter);
+    url = parsed.toString();
+  }
+  const pool = new Pool({
+    connectionString: url,
+    ...(options.maxConnections ? { max: options.maxConnections } : {}),
+    ...(options.caCert ? { ssl: { ca: options.caCert, rejectUnauthorized: true } } : {}),
+  });
+  // An idle client can be dropped by a pooler; log it instead of crashing the process.
+  pool.on("error", (error) => console.error("PostgreSQL pool error", error));
+  return pool;
+}
+
+export function createPostgresRepository(
+  connectionString: string,
+  options: PgPoolOptions = {},
+): {
   repository: PostgresFigLabRepository;
   close: () => Promise<void>;
 } {
-  const pool = new Pool({ connectionString });
+  const pool = createPgPool(connectionString, options);
   return { repository: new PostgresFigLabRepository(pool), close: () => pool.end() };
 }
 

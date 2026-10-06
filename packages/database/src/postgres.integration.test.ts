@@ -24,6 +24,9 @@ describe.skipIf(!databaseUrl)("PostgresFigLabRepository", () => {
       "utf8",
     );
     await pool.query(rowSecurityMigration);
+    await pool.query(
+      await readFile(new URL("../migrations/0002_member_user_index.sql", import.meta.url), "utf8"),
+    );
     await pool.query("CREATE SCHEMA graphile_worker");
     await pool.query(
       "CREATE TABLE graphile_worker.jobs(identifier text, payload jsonb, job_key text UNIQUE)",
@@ -53,6 +56,21 @@ describe.skipIf(!databaseUrl)("PostgresFigLabRepository", () => {
       [tableNames],
     );
     expect(result.rows).toEqual(tableNames.map((tablename) => ({ tablename, rowsecurity: true })));
+  });
+
+  it("provisions exactly one personal workspace for concurrent first sign-ins", async () => {
+    const identity = { id: "6f0d2b8e-1c55-4e7f-9a7c-0c1b2d3e4f50", email: "auth@example.test" };
+    const principals = await Promise.all(
+      Array.from({ length: 5 }, () => repository.ensureAuthUser(identity)),
+    );
+    expect(new Set(principals.map((principal) => principal.workspaceId)).size).toBe(1);
+    const renamed = await repository.ensureAuthUser({ ...identity, email: "renamed@example.test" });
+    expect(renamed.workspaceId).toBe(principals[0]?.workspaceId);
+    const memberships = await pool.query(
+      "SELECT count(*)::int AS count FROM workspace_members WHERE user_id=$1",
+      [identity.id],
+    );
+    expect(memberships.rows[0]).toEqual({ count: 1 });
   });
 
   it("persists idempotent bootstrap, atomic revision CAS, and durable verification enqueue", async () => {

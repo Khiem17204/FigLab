@@ -5,3 +5,10 @@ packages:
 onlyBuiltDependencies:
   - '@biomejs/biome'
   - esbuild
+
+# Netlify Functions run on Linux x64 (glibc); keep sharp's prebuilt binary for that platform
+# installed even when deploying from macOS.
+supportedArchitectures:
+  os: [current, linux]
+  cpu: [current, x64]
+  libc: [current, glibc]

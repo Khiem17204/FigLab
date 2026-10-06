@@ -21,7 +21,8 @@
     "@figlab/figure-schema": "workspace:*",
     "@figlab/storage": "workspace:*",
     "@sinclair/typebox": "0.34.52",
-    "fastify": "5.11.3"
+    "fastify": "5.11.3",
+    "jose": "6.2.12"
   },
   "devDependencies": {
     "tsx": "4.23.12"

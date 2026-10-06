@@ -2,6 +2,7 @@ import {
   type AssetDescriptor,
   type AssetStatus,
   apiRoutes,
+  type CurrentUserResponse,
   type PrepareUploadResponse,
   type Project,
   type ProjectDocumentResponse,
@@ -40,11 +41,23 @@ export async function sha256(blob: Blob): Promise<string> {
   return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, "0")).join("");
 }
 
+export interface FigLabClientAuth {
+  /** Returns the current access token for API calls; signed storage URLs never receive it. */
+  getAccessToken: () => Promise<string | undefined>;
+  /** Called when the API rejects the session, so the app can return to sign-in. */
+  onUnauthorized?: () => void;
+}
+
 export class FigLabClient {
   constructor(
     private readonly fetcher: Fetcher = (...arguments_) => fetch(...arguments_),
     private readonly pollIntervalMs = 500,
+    private readonly auth?: FigLabClientAuth,
   ) {}
+
+  me(): Promise<CurrentUserResponse> {
+    return this.json(apiRoutes.me);
+  }
 
   async listProjects(): Promise<Project[]> {
     return (await this.json<{ projects: Project[] }>(apiRoutes.projects)).projects;
@@ -154,12 +167,17 @@ export class FigLabClient {
   }
 
   private async json<T>(url: string, init: { method?: string; body?: unknown } = {}): Promise<T> {
+    const token = await this.auth?.getAccessToken();
+    const headers: Record<string, string> = {
+      ...(init.body === undefined ? {} : { "content-type": "application/json" }),
+      ...(token ? { authorization: `Bearer ${token}` } : {}),
+    };
     const response = await this.fetcher(url, {
       ...(init.method ? { method: init.method } : {}),
-      ...(init.body === undefined
-        ? {}
-        : { headers: { "content-type": "application/json" }, body: JSON.stringify(init.body) }),
+      ...(Object.keys(headers).length > 0 ? { headers } : {}),
+      ...(init.body === undefined ? {} : { body: JSON.stringify(init.body) }),
     });
+    if (response.status === 401) this.auth?.onUnauthorized?.();
     if (!response.ok) throw new ApiError(response.status, await readBody(response));
     if (response.status === 204) return undefined as T;
     return (await response.json()) as T;

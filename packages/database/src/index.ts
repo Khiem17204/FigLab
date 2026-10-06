@@ -23,10 +23,16 @@ export type AuditAction =
   | "EXPORT_CREATED"
   | "PROJECT_DELETED";
 
+export type PrincipalRole = "admin" | "member";
 export interface Principal {
   id: string;
   email: string;
   workspaceId: string;
+  role?: PrincipalRole;
+}
+export interface AuthUserIdentity {
+  id: string;
+  email: string;
 }
 export interface ProjectRecord {
   id: string;
@@ -127,6 +133,8 @@ export interface Authorizer {
 
 export interface FigLabRepository {
   bootstrapSingleUser(email?: string): Promise<Principal>;
+  /** Records an externally authenticated user and provisions their personal workspace once. */
+  ensureAuthUser(identity: AuthUserIdentity): Promise<Principal>;
   createProject(workspaceId: string, name: string): Promise<ProjectRecord>;
   listProjects(workspaceId: string): Promise<ProjectRecord[]>;
   getProject(projectId: string): Promise<ProjectRecord>;
@@ -192,6 +200,7 @@ export class InMemoryFigLabRepository implements FigLabRepository {
   private readonly exports: ExportRecord[] = [];
   private readonly queuedJobs: { name: string; payload: Record<string, unknown> }[] = [];
   private principal?: Principal;
+  private readonly authUsers = new Map<string, Principal>();
 
   async bootstrapSingleUser(email = "local-admin@figlab.invalid"): Promise<Principal> {
     if (!this.principal)
@@ -201,6 +210,17 @@ export class InMemoryFigLabRepository implements FigLabRepository {
         workspaceId: "00000000-0000-4000-8000-000000000002",
       };
     return { ...this.principal };
+  }
+  async ensureAuthUser(identity: AuthUserIdentity): Promise<Principal> {
+    assertResourceId(identity.id);
+    const existing = this.authUsers.get(identity.id);
+    const principal = {
+      id: identity.id,
+      email: identity.email,
+      workspaceId: existing?.workspaceId ?? randomUUID(),
+    };
+    this.authUsers.set(identity.id, principal);
+    return { ...principal };
   }
   async createProject(workspaceId: string, name: string): Promise<ProjectRecord> {
     const now = timestamp();
@@ -534,4 +554,9 @@ function sameValue(left: unknown, right: unknown): boolean {
   return isDeepStrictEqual(left, right);
 }
 
-export { createPostgresRepository, PostgresFigLabRepository } from "./postgres.js";
+export {
+  createPgPool,
+  createPostgresRepository,
+  type PgPoolOptions,
+  PostgresFigLabRepository,
+} from "./postgres.js";

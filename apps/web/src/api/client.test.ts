@@ -202,3 +202,21 @@ describe("FigLabClient direct uploads", () => {
     expect(result.mimeType).toBe("image/png");
   });
 });
+
+describe("FigLabClient authentication", () => {
+  it("sends the session token to API routes and reports a rejected session", async () => {
+    const fetcher = vi.fn<typeof fetch>(async () => new Response("{}", { status: 401 }));
+    const onUnauthorized = vi.fn();
+    const client = new FigLabClient(fetcher, 0, {
+      getAccessToken: async () => "access-token",
+      onUnauthorized,
+    });
+
+    await expect(client.listProjects()).rejects.toMatchObject({ status: 401 });
+
+    expect(fetcher).toHaveBeenCalledWith("/v1/projects", {
+      headers: { authorization: "Bearer access-token" },
+    });
+    expect(onUnauthorized).toHaveBeenCalledOnce();
+  });
+});

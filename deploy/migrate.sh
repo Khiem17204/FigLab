@@ -21,7 +21,7 @@ WHERE to_regclass('public.users') IS NOT NULL
 ON CONFLICT (name) DO NOTHING;
 SQL
 
-for migration_file in /migrations/*.sql; do
+for migration_file in "${MIGRATIONS_DIR:-/migrations}"/*.sql; do
   migration_name="$(basename "$migration_file")"
   already_applied="$(
     psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -Atc \

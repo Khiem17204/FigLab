@@ -6,6 +6,7 @@ import {
   S3Client,
 } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
+import { SupabaseObjectStore } from "./supabase.js";
 
 export interface SignedObjectUrl {
   url: string;
@@ -166,4 +167,32 @@ export class S3ObjectStore implements ObjectStore {
   async delete(key: string): Promise<void> {
     await this.internal.send(new DeleteObjectCommand({ Bucket: this.options.bucket, Key: key }));
   }
+}
+
+export { SupabaseObjectStore, type SupabaseObjectStoreOptions } from "./supabase.js";
+
+/** Chooses the object store from `STORAGE_DRIVER` (`s3`, the default, or `supabase`). */
+export function createObjectStoreFromEnv(environment: NodeJS.ProcessEnv): ObjectStore {
+  const required = (name: string) => {
+    const value = environment[name];
+    if (!value) throw new Error(`${name} is required`);
+    return value;
+  };
+  const driver = environment.STORAGE_DRIVER ?? "s3";
+  if (driver === "supabase")
+    return new SupabaseObjectStore({
+      supabaseUrl: required("SUPABASE_URL"),
+      secretKey: required("SUPABASE_SECRET_KEY"),
+      bucket: required("OBJECT_STORE_BUCKET"),
+    });
+  if (driver !== "s3") throw new Error(`Unsupported STORAGE_DRIVER: ${driver}`);
+  return new S3ObjectStore({
+    bucket: required("OBJECT_STORE_BUCKET"),
+    region: environment.OBJECT_STORE_REGION ?? "us-east-1",
+    internalEndpoint: required("OBJECT_STORE_INTERNAL_ENDPOINT"),
+    publicEndpoint: required("OBJECT_STORE_PUBLIC_ENDPOINT"),
+    accessKeyId: required("OBJECT_STORE_ACCESS_KEY"),
+    secretAccessKey: required("OBJECT_STORE_SECRET_KEY"),
+    forcePathStyle: environment.OBJECT_STORE_FORCE_PATH_STYLE !== "false",
+  });
 }

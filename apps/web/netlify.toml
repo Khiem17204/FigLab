@@ -1,0 +1,27 @@
+# Netlify site for FigLab. Set the site's package directory to apps/web and leave the base
+# directory at the repository root; paths below are relative to the repository root.
+[build]
+  # Netlify installs dependencies from pnpm-lock.yaml before running this.
+  command = "corepack pnpm --filter @figlab/web... build && node scripts/build-netlify-functions.mjs"
+  publish = "apps/web/dist"
+
+[build.environment]
+  NODE_VERSION = "24"
+
+[functions]
+  directory = "netlify/functions"
+
+# The job runner verifies images with sharp, whose native Linux build is staged here by
+# scripts/build-netlify-functions.mjs.
+[functions.jobs-background]
+  included_files = ["netlify/node_modules/**"]
+
+[[redirects]]
+  from = "/*"
+  to = "/index.html"
+  status = 200
+
+[[headers]]
+  for = "/assets/*"
+  [headers.values]
+    Cache-Control = "public, max-age=31536000, immutable"

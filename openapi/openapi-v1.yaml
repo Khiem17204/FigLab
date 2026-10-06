@@ -24,6 +24,31 @@ paths:
                     type: boolean
                     enum:
                     - true
+  "/v1/me":
+    get:
+      responses:
+        '200':
+          description: Default Response
+          content:
+            application/json:
+              schema:
+                additionalProperties: false
+                type: object
+                required:
+                - email
+                - role
+                properties:
+                  email:
+                    minLength: 1
+                    type: string
+                  role:
+                    anyOf:
+                    - type: string
+                      enum:
+                      - admin
+                    - type: string
+                      enum:
+                      - member
   "/v1/projects":
     get:
       responses:
@@ -888,6 +913,9 @@ paths:
                     - type: string
                       enum:
                       - BAD_REQUEST
+                    - type: string
+                      enum:
+                      - UNAUTHORIZED
                     - type: string
                       enum:
                       - NOT_FOUND

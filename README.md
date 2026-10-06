@@ -5,22 +5,27 @@ uploads immutable PNG/JPEG and supported TIFF originals, draws reproducible crop
 non-destructive display adjustments, saves a versioned figure, shows each crop in its original,
 and exports a PNG from source pixels. The repository is licensed AGPL-3.0-only.
 
-## Handoff snapshot (2026-10-04)
+It runs in two modes from the same code:
 
-The domain, server, web, and deployment work is integrated into local `main`; no linked feature
-worktrees remain. The Compose stack was stopped with `down` for this handoff, leaving the
-`figlab_postgres-data` and `figlab_minio-data` volumes intact. This local `main` has not been
-pushed to `origin/main`. The dashboard starts with no projects in a fresh database.
-There is no `.env` file at this handoff; the last launch used Compose's loopback/local-PostgreSQL
-defaults. Copy `.env.example` before customizing the stack.
+- **Local single-user** — Docker Compose with Caddy, Fastify, Graphile Worker, PostgreSQL, and
+  MinIO; no sign-in, loopback only.
+- **Hosted** — Supabase (Postgres, Auth, Storage) plus Netlify (static app and Functions), with
+  email/password accounts that must verify their email. See
+  [Hosted deployment](#hosted-deployment-supabase--netlify).
 
-This is a **local, single-user desktop-browser milestone**, not a public or multi-user release.
-The optional Supabase Compose override exists, but a live Supabase connection has not been tested
-because no project connection string was provided.
+## Handoff snapshot (2026-10-05)
 
-At the last integrated verification run, lint, typecheck, build, 115 unit tests, PostgreSQL
-integration tests against a disposable database, three browser tests, one visual test, and the
-clean-volume Compose smoke passed. The browser-to-live-Compose test gap is described below.
+Hosted support is on branch `feat/supabase-netlify`. The Supabase project **FigLab**
+(`fxfjsjxizojgtzzwputg`, us-west-2) is provisioned: the `figlab_app` role, FigLab and Graphile
+schemas, the private `figlab` bucket, and one confirmed admin account. The full live test suite
+(`tests/live`) passes against that project with the API and job runner served locally. The
+packaged Netlify functions were built offline and smoke-tested (the job runner on Linux x64). A
+Netlify site has **not** been created yet: it needs a Netlify login (see the deploy steps below).
+Local hosted secrets live in the ignored `.env.hosted`.
+
+The local single-user Compose milestone is unchanged: lint, typecheck, build, unit tests,
+PostgreSQL integration tests, browser tests, the visual test, and the clean-volume Compose smoke
+cover it.
 
 ## Run locally
 
@@ -53,18 +58,31 @@ Browser -- presigned original PUT/GET ----------------------------> MinIO
 PostgreSQL -- durable jobs --> Graphile Worker -- verify/delete --> MinIO + PostgreSQL
 ```
 
+Hosted mode keeps the same API, jobs, and storage contract on managed services:
+
+```text
+Browser -- sign-up/sign-in (supabase-js) -------------------------> Supabase Auth
+Browser -- /v1/* with Bearer JWT --> Netlify Function "api" (Fastify) --> Supabase Postgres
+Browser -- signed original PUT/GET -------------------------------> Supabase Storage (private)
+api -- enqueue + trigger --> Netlify background function --> Graphile runOnce --> verify/delete
+Netlify scheduled function (every 5 min) --> triggers the same drain as a backstop
+```
+
 | Component | Responsibility and source |
 | --- | --- |
-| `apps/web` | React 19/Vite 8 dashboard and editor; PixiJS 8 raster artboard, accessible DOM/SVG controls, Zustand editor session, browser raster resolver, autosave, and PNG download. |
-| `apps/api` | Fastify 5 HTTP boundary. TypeBox defines request/response schemas and validates requests; it handles projects, documents, upload reservations, asset status, signed URLs, and export metadata. It does not proxy image bytes. |
-| `apps/jobs` | Graphile Worker tasks `verify_asset` and `delete_project`. Verification reads MinIO originals, checks checksum and image metadata, then changes asset status. |
+| `apps/web` | React 19/Vite 8 dashboard and editor; PixiJS 8 raster artboard, accessible DOM/SVG controls, Zustand editor session, browser raster resolver, autosave, and PNG download. In hosted builds, `src/auth` adds the Supabase sign-in/sign-up gate; `netlify.toml` defines the Netlify site. |
+| `apps/api` | Fastify 5 HTTP boundary. TypeBox defines request/response schemas and validates requests; it handles projects, documents, upload reservations, asset status, signed URLs, and export metadata. It does not proxy image bytes. `src/auth.ts` resolves the caller per request (fixed single user, or a verified Supabase JWT); `src/fetch-adapter.ts` serves the app from fetch-style runtimes. |
+| `apps/jobs` | Graphile Worker tasks `verify_asset` and `delete_project`. Verification reads MinIO originals, checks checksum and image metadata, then changes asset status. Runs as a long-lived worker (Compose) or as `drainJobsOnce` (Netlify). |
 | `packages/figure-schema` | Strict persisted document v1, semantic validation, typed decode errors, and an explicit migration entry point. |
 | `packages/editor-core` | Pure crop, transform, history, and provenance commands; no browser or database dependency. |
 | `packages/image-processing` | Raster source interface, TIFF validation/window reads, shared display math, and CPU PNG composition. |
 | `packages/database` | Drizzle table definitions and `pg`-based PostgreSQL repository, plus in-memory test repository and `Principal`/`Authorizer` interfaces. |
-| `packages/storage` | `ObjectStore` interface, S3-compatible MinIO implementation, and fake test store. |
+| `packages/storage` | `ObjectStore` interface, S3-compatible MinIO implementation, Supabase Storage implementation, env-based selection, and fake test store. |
 | `packages/api-contract` | Shared HTTP routes, TypeBox DTOs, typed errors, and fixed limits. `openapi/openapi-v1.yaml` is the published contract snapshot. |
-| `deploy` | Caddy, Dockerfiles, pinned images, local PostgreSQL/MinIO Compose stack, and optional Supabase database override. |
+| `deploy` | Caddy, Dockerfiles, pinned images, local PostgreSQL/MinIO Compose stack, optional Supabase database override, and Supabase's root CA for verified TLS. |
+| `netlify`, `scripts/build-netlify-functions.mjs` | Netlify function entry points (`api`, `jobs-background`, `jobs-sweep`) and the esbuild step that bundles the API and job runner for them. |
+| `supabase/config.toml` | Supabase CLI project config (Auth, Data API) for `supabase config push`. |
+| `tests/live` | Playwright suite that drives a real hosted deployment without mocks. |
 
 Node 24, pnpm 10, strict TypeScript, Turborepo, Biome, Vitest, and Playwright are the repository
 toolchain. Versions are locked in `pnpm-lock.yaml`; Compose images are digest-pinned. The MinIO
@@ -81,7 +99,11 @@ The key decisions and their reasons are:
 | Use PostgreSQL for documents **and** Graphile jobs. | Saves, audit events, and work enqueue can be durable without operating another queue service. Supabase can later supply the same database. |
 | Save a versioned JSON document with optimistic revisions. | Crop state is portable and reproducible; a stale tab cannot silently overwrite a newer save. Conflicts require explicit recovery. |
 | Export in the browser from original samples. | Preview quality cannot silently become export quality, and no rendered PNG needs server storage. The browser must download and decode originals again. |
-| Keep `Principal`, `Authorizer`, and `ObjectStore` interfaces. | Authentication and storage backends can change behind these boundaries; only single-user and MinIO implementations are complete today. |
+| Keep `Principal`, `Authorizer`, and `ObjectStore` interfaces. | Authentication and storage backends change behind these boundaries: single-user + MinIO locally, Supabase Auth + Supabase Storage when hosted. |
+| Hosted: verify Supabase JWTs in the API and give each user a personal workspace. | The API checks tokens locally against the project's published ES256 keys (no per-request Auth call), provisions `users`/`workspaces` rows on first sight, and keeps every existing ownership check. Admin is `app_metadata.role = "admin"`, which only the secret key can set. |
+| Hosted: use Supabase's native signed upload URLs, not its S3 endpoint. | Supabase's S3 protocol ignores `If-None-Match` on PUT, so it cannot keep originals immutable; native signed uploads refuse to overwrite an existing object. |
+| Hosted: drain the Postgres job queue from Netlify functions with Graphile `runOnce`. | Netlify cannot host a long-lived worker. Jobs stay durable in Postgres; the API triggers a 15-minute background function after enqueueing, and a scheduled function retriggers it every 5 minutes for retries and missed triggers. |
+| Hosted: the app connects as a dedicated `figlab_app` role through the session pooler with verified TLS. | The role owns FigLab's tables (RLS stays on with no policies, so Supabase's `anon`/`authenticated` roles see nothing); session mode suits Graphile; `DATABASE_CA_CERT` pins Supabase's root CA. |
 | Separate MinIO internal and public endpoints. | Containers use Docker networking, while presigned URLs must resolve in the user's browser. Caddy serves the app/API, not image bytes. |
 
 ### Scientific document and editing decisions
@@ -151,10 +173,11 @@ The key decisions and their reasons are:
 
 ### Database, security, and deployment decisions
 
-- Local startup creates one stable administrator, workspace, and membership in PostgreSQL. Access
-  checks use `Principal` and `Authorizer` interfaces so a future auth provider can replace the
-  single-user implementation without rewriting project services. Password/OAuth authentication
-  and collaboration are **not implemented**.
+- Local startup (`AUTH_MODE=single-user`, the default) creates one stable administrator, workspace,
+  and membership in PostgreSQL. Hosted mode (`AUTH_MODE=supabase`) requires a Supabase access
+  token on every `/v1/*` request (401 `UNAUTHORIZED` otherwise) and maps each verified user to
+  their own personal workspace. Both go through `Principal` and `Authorizer`, so project services
+  are unchanged. Collaboration (shared workspaces) is **not implemented**.
 - SQL migrations live in `packages/database/migrations`; Drizzle defines the tables, while the
   current repository executes SQL via `pg`. Graphile Worker has its own migration step. FigLab's
   public tables have row-level security enabled, but there are no browser-facing RLS policies or
@@ -173,6 +196,7 @@ snapshot is `openapi/openapi-v1.yaml`. Key routes:
 
 | Method and path | Purpose |
 | --- | --- |
+| `GET /v1/me` | Signed-in email and role (`admin` or `member`). |
 | `GET/POST /v1/projects` | List and create projects. |
 | `GET/PUT/DELETE /v1/projects/:projectId` | Open, rename, or queue deletion. |
 | `GET/PUT /v1/projects/:projectId/document` | Read or compare-and-swap save a figure document. |
@@ -182,16 +206,92 @@ snapshot is `openapi/openapi-v1.yaml`. Key routes:
 | `POST /v1/assets/:assetId/download-url` | Obtain an authorized, short-lived MinIO GET URL. |
 | `POST /v1/projects/:projectId/exports` | Record browser-export metadata, not PNG bytes. |
 
-Errors use typed envelopes such as `BAD_REQUEST`, `UPLOAD_INVALID`, `UPLOAD_EXPIRED`,
+Errors use typed envelopes such as `BAD_REQUEST`, `UNAUTHORIZED`, `UPLOAD_INVALID`, `UPLOAD_EXPIRED`,
 `ASSET_NOT_READY`, `NOT_FOUND`, and `REVISION_CONFLICT`. The API checks that referenced assets
 belong to the project and are ready before saving the document.
 
-## Optional Supabase development database
+## Hosted deployment (Supabase + Netlify)
+
+### What runs where
+
+| Piece | Hosted on | Notes |
+| --- | --- | --- |
+| Web app | Netlify CDN (`apps/web/dist`) | Built with `VITE_AUTH_MODE=supabase`; `/*` falls back to `index.html`. |
+| API | Netlify Function `api` at `/v1/*` and `/health` | Fastify via `handleFetchRequest`; one warm instance keeps a 3-connection pool. |
+| Jobs | Netlify background function `jobs-background` (+ `jobs-sweep` every 5 min) | Requires `x-figlab-jobs-secret`; verification uses sharp's Linux x64 build staged in `netlify/node_modules`. |
+| Database | Supabase Postgres, session pooler `:5432`, role `figlab_app` | Verified TLS with `deploy/supabase-root-2021-ca.crt`. Data API should be off. |
+| Auth | Supabase Auth, email + password, email confirmation required | Admin = `app_metadata.role: "admin"`. |
+| Originals | Supabase Storage, private bucket `figlab` | 50 MB per file (Free plan limit), PNG/JPEG/TIFF only. |
+
+### Environment
+
+Netlify site variables (functions unless noted):
+
+| Variable | Value |
+| --- | --- |
+| `AUTH_MODE` | `supabase` |
+| `PUBLIC_APP_URL` | The site URL, for example `https://<site>.netlify.app` |
+| `SUPABASE_URL` | `https://<ref>.supabase.co` |
+| `SUPABASE_SECRET_KEY` | Secret key (`sb_secret_…`); server-side only |
+| `DATABASE_URL` | `postgresql://figlab_app.<ref>:<password>@aws-0-<region>.pooler.supabase.com:5432/postgres` |
+| `DATABASE_CA_CERT` | Contents of `deploy/supabase-root-2021-ca.crt` |
+| `STORAGE_DRIVER` / `OBJECT_STORE_BUCKET` | `supabase` / `figlab` |
+| `MAX_UPLOAD_BYTES` | `52428800` on the Supabase Free plan |
+| `JOBS_TRIGGER_SECRET` | Long random string shared by `api` and `jobs-background` |
+| `VITE_AUTH_MODE`, `VITE_SUPABASE_URL`, `VITE_SUPABASE_PUBLISHABLE_KEY` | Build-time; the publishable key is safe in the browser |
+
+### One-time provisioning (already done for project `fxfjsjxizojgtzzwputg`)
+
+1. Create role `figlab_app` (LOGIN, random password) and grant it `CREATE, CONNECT` on the
+   database and `USAGE, CREATE` on schema `public`, so it owns the tables it creates.
+2. As `figlab_app`, run `MIGRATIONS_DIR=packages/database/migrations sh deploy/migrate.sh`, then
+   `migrateJobsSchema()` from `apps/jobs` (Graphile's schema).
+3. Create the private bucket `figlab` (`file_size_limit` 52428800, MIME types `image/png`,
+   `image/jpeg`, `image/tiff`).
+4. Create the admin:
+   `SUPABASE_URL=… SUPABASE_SECRET_KEY=… ADMIN_EMAIL=… ADMIN_PASSWORD=… node scripts/create-admin.ts`
+   (creates a confirmed user, or promotes an existing one).
+5. Set Auth's **Site URL** and redirect allow-list to the Netlify URL and turn off the Data API:
+   edit `supabase/config.toml` (`site_url`, `additional_redirect_urls`, `[api] enabled = false`),
+   review `supabase config push`'s diff, and confirm it.
+
+### Deploy
+
+Create the Netlify site from this repository with **package directory `apps/web`** and the base
+directory left at the repository root, set the variables above, then deploy. The build runs
+`corepack pnpm --filter @figlab/web... build && node scripts/build-netlify-functions.mjs`. To
+check a build without deploying: `npx netlify-cli build --offline --filter @figlab/web`.
+
+### Verify a deployment
+
+```sh
+LIVE_BASE_URL=https://<site>.netlify.app SUPABASE_URL=… SUPABASE_PUBLISHABLE_KEY=… \
+SUPABASE_SECRET_KEY=… ADMIN_EMAIL=… ADMIN_PASSWORD=… [SIGNUP_EMAIL=you+test@…] \
+  npx playwright test -c tests/live/playwright.config.ts
+```
+
+It signs in, uploads PNG/JPEG/16-bit TIFF originals plus a corrupt file, crops, adjusts, exports,
+reloads, forces a revision conflict, checks cross-user isolation, and deletes the project and its
+stored originals. It creates and deletes its own throwaway users. To run the same suite locally
+against Supabase, serve the API (`AUTH_MODE=supabase … tsx apps/api/src/index.ts`), call
+`drainJobsOnce` in a loop, and start Vite with `FIGLAB_API_PROXY=http://127.0.0.1:3000`.
+
+### Known limits
+
+- Supabase's built-in email sender only delivers to the organization's team members and is
+  heavily rate-limited. Configure custom SMTP (Auth → SMTP) before inviting other users, or their
+  verification emails will not arrive.
+- New accounts get a personal workspace only; there is no sharing between users yet.
+- The admin role is recorded and shown, but no admin-only screens exist yet.
+- A job interrupted by a function timeout stays locked until Graphile's 4-hour lock expiry.
+
+## Optional Supabase development database (Compose)
 
 Supabase can host the same PostgreSQL database; it does **not** replace this release's MinIO,
 Graphile Worker, local-admin mode, or server API. Use a **dedicated** Supabase project, turn off
 its **Integrations → Data API**, and place a direct or session-pooler `DATABASE_URL` from its
-Connect panel in the ignored `.env` file. Do not use the transaction pooler: Graphile Worker keeps
+Connect panel in the ignored `.env` file, and set `DATABASE_CA_CERT` to the contents of
+`deploy/supabase-root-2021-ca.crt` so TLS verification succeeds. Do not use the transaction pooler: Graphile Worker keeps
 a database session open for job notifications. Use the session pooler on port 5432 if the Docker
 host cannot reach the direct IPv6 endpoint.
 
@@ -200,8 +300,8 @@ docker compose -f deploy/docker-compose.yml -f deploy/docker-compose.supabase.ym
 ```
 
 The override omits local PostgreSQL; MinIO stays local. Stop with the same two `-f` arguments and
-`down` (without `-v`). This path is configured but **not yet live-tested against a Supabase
-project**. Never point the destructive database integration tests at a production or shared
+`down` (without `-v`). This Compose override itself has not been live-tested; the hosted path
+above uses the same database code against Supabase. Never point the destructive database integration tests at a production or shared
 Supabase database. See Supabase's [connection guide](https://supabase.com/docs/guides/database/connecting-to-postgres)
 and [Data API security guide](https://supabase.com/docs/guides/api/securing-your-api).
 
@@ -236,9 +336,9 @@ lines alone does not change behavior. The shared upload DTO also hard-caps reque
 
 ## Scope boundaries and next-agent reading order
 
-This milestone does not include public deployment, real authentication, Supabase Auth or Storage,
-other object-store adapters, generic text/shapes, blot-specific tools, TIFF/PDF export,
-microscopy pyramids, offline projects, densitometry, or collaboration. It targets desktop Chrome,
+Hosted mode adds email/password accounts, Supabase Storage, and Netlify hosting. Still out of
+scope: shared workspaces and collaboration, admin screens, OAuth/SSO, generic text/shapes, blot-specific tools, TIFF/PDF export,
+microscopy pyramids, offline projects, and densitometry. It targets desktop Chrome,
 Firefox, Safari, and Edge; the editor is not mobile-optimized. The current browser test matrix is
 narrower than that target.
 

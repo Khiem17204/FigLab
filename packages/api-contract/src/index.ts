@@ -8,6 +8,7 @@ export const MAX_EXPORT_PIXELS = 100_000_000;
 
 export const apiRoutes = {
   health: "/health",
+  me: "/v1/me",
   projects: "/v1/projects",
   project: "/v1/projects/:projectId",
   projectDocument: "/v1/projects/:projectId/document",
@@ -20,6 +21,7 @@ export const apiRoutes = {
 
 export const ErrorCodeSchema = Type.Union([
   Type.Literal("BAD_REQUEST"),
+  Type.Literal("UNAUTHORIZED"),
   Type.Literal("NOT_FOUND"),
   Type.Literal("REVISION_CONFLICT"),
   Type.Literal("UPLOAD_EXPIRED"),
@@ -46,6 +48,15 @@ export const RevisionConflictSchema = Type.Object(
   },
   { additionalProperties: false },
 );
+
+export const CurrentUserResponseSchema = Type.Object(
+  {
+    email: Type.String({ minLength: 1 }),
+    role: Type.Union([Type.Literal("admin"), Type.Literal("member")]),
+  },
+  { additionalProperties: false },
+);
+export type CurrentUserResponse = Static<typeof CurrentUserResponseSchema>;
 
 export const ProjectStatusSchema = Type.Union([Type.Literal("active"), Type.Literal("deleting")]);
 

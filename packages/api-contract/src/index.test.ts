@@ -13,6 +13,7 @@ describe("public API contracts", () => {
   it("freezes versioned route paths", () => {
     expect(apiRoutes).toEqual({
       health: "/health",
+      me: "/v1/me",
       projects: "/v1/projects",
       project: "/v1/projects/:projectId",
       projectDocument: "/v1/projects/:projectId/document",

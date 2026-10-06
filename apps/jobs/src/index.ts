@@ -1,9 +1,9 @@
 import { createHash } from "node:crypto";
 import { pathToFileURL } from "node:url";
-import { createPostgresRepository, type FigLabRepository } from "@figlab/database";
+import { createPgPool, createPostgresRepository, type FigLabRepository } from "@figlab/database";
 import { decodeTiff } from "@figlab/image-processing";
-import { type ObjectStore, S3ObjectStore } from "@figlab/storage";
-import { type Runner, run, type TaskList } from "graphile-worker";
+import { createObjectStoreFromEnv, type ObjectStore } from "@figlab/storage";
+import { type Runner, run, runMigrations, runOnce, type TaskList } from "graphile-worker";
 import sharp from "sharp";
 
 const DEFAULT_MAX_IMAGE_PIXELS = 100_000_000;
@@ -88,30 +88,64 @@ export async function startJobsFromEnv(
   environment: NodeJS.ProcessEnv = process.env,
 ): Promise<Runner> {
   const databaseUrl = required(environment, "DATABASE_URL");
-  const { repository, close } = createPostgresRepository(databaseUrl);
-  const store = new S3ObjectStore({
-    bucket: required(environment, "OBJECT_STORE_BUCKET"),
-    region: environment.OBJECT_STORE_REGION ?? "us-east-1",
-    internalEndpoint: required(environment, "OBJECT_STORE_INTERNAL_ENDPOINT"),
-    publicEndpoint: required(environment, "OBJECT_STORE_PUBLIC_ENDPOINT"),
-    accessKeyId: required(environment, "OBJECT_STORE_ACCESS_KEY"),
-    secretAccessKey: required(environment, "OBJECT_STORE_SECRET_KEY"),
-    forcePathStyle: environment.OBJECT_STORE_FORCE_PATH_STYLE !== "false",
-  });
+  const caCert = environment.DATABASE_CA_CERT;
+  const { repository, close } = createPostgresRepository(databaseUrl, caCert ? { caCert } : {});
+  const pgPool = createPgPool(databaseUrl, caCert ? { caCert } : {});
   const runner = await run(
-    { connectionString: databaseUrl, concurrency: Number(environment.JOB_CONCURRENCY ?? 2) },
-    createTaskList(
-      repository,
-      store,
-      configuredPositiveInteger(
-        environment.MAX_IMAGE_PIXELS,
-        DEFAULT_MAX_IMAGE_PIXELS,
-        "MAX_IMAGE_PIXELS",
-      ),
+    { pgPool, concurrency: Number(environment.JOB_CONCURRENCY ?? 2) },
+    taskListFromEnv(repository, environment),
+  );
+  runner.events.once("stop", () => {
+    void close();
+    void pgPool.end();
+  });
+  return runner;
+}
+
+/**
+ * Runs every job that is due now, then returns. Serverless hosts call this from a triggered
+ * background function and a periodic sweep instead of keeping a worker process alive; failed
+ * jobs keep Graphile's retry schedule and are picked up by a later drain.
+ */
+export async function drainJobsOnce(environment: NodeJS.ProcessEnv = process.env): Promise<void> {
+  const databaseUrl = required(environment, "DATABASE_URL");
+  const caCert = environment.DATABASE_CA_CERT;
+  const pool = { maxConnections: 2, ...(caCert ? { caCert } : {}) };
+  const { repository, close } = createPostgresRepository(databaseUrl, pool);
+  const pgPool = createPgPool(databaseUrl, pool);
+  try {
+    await runOnce(
+      { pgPool, concurrency: Number(environment.JOB_CONCURRENCY ?? 2), noHandleSignals: true },
+      taskListFromEnv(repository, environment),
+    );
+  } finally {
+    await Promise.all([close(), pgPool.end()]);
+  }
+}
+
+/** Installs or upgrades Graphile Worker's own schema. */
+export async function migrateJobsSchema(
+  environment: NodeJS.ProcessEnv = process.env,
+): Promise<void> {
+  const caCert = environment.DATABASE_CA_CERT;
+  const pgPool = createPgPool(required(environment, "DATABASE_URL"), caCert ? { caCert } : {});
+  try {
+    await runMigrations({ pgPool });
+  } finally {
+    await pgPool.end();
+  }
+}
+
+function taskListFromEnv(repository: FigLabRepository, environment: NodeJS.ProcessEnv): TaskList {
+  return createTaskList(
+    repository,
+    createObjectStoreFromEnv(environment),
+    configuredPositiveInteger(
+      environment.MAX_IMAGE_PIXELS,
+      DEFAULT_MAX_IMAGE_PIXELS,
+      "MAX_IMAGE_PIXELS",
     ),
   );
-  runner.events.once("stop", () => void close());
-  return runner;
 }
 
 async function decodeTiffAuthoritatively(bytes: Uint8Array): Promise<{

@@ -1,10 +1,19 @@
 {
   "$schema": "https://turbo.build/schema.json",
-  "globalPassThroughEnv": ["CI", "PLAYWRIGHT_BASE_URL"],
+  "globalPassThroughEnv": [
+    "CI",
+    "PLAYWRIGHT_BASE_URL",
+    "JOBS_TRIGGER_SECRET",
+    "URL",
+    "FIGLAB_API_PROXY",
+    "LIVE_BASE_URL",
+    "SIGNUP_EMAIL"
+  ],
   "tasks": {
     "build": {
       "dependsOn": ["^build"],
-      "outputs": ["dist/**"]
+      "outputs": ["dist/**"],
+      "env": ["VITE_AUTH_MODE", "VITE_SUPABASE_URL", "VITE_SUPABASE_PUBLISHABLE_KEY"]
     },
     "dev": {
       "cache": false,

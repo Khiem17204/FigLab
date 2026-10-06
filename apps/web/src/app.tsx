@@ -8,6 +8,7 @@ import { useStore } from "zustand";
 
 import { FigLabClient } from "./api/client";
 import { createArtboardPngExporter, downloadBlob, exportPng } from "./api/export";
+import type { SignedInAccount } from "./auth/auth-gate";
 import { AutosaveController, type SaveStatus } from "./editor/autosave";
 import { bindAutosave } from "./editor/autosave-binding";
 import {
@@ -24,7 +25,13 @@ import "./styles.css";
 
 const defaultClient = new FigLabClient();
 
-export function FigLabApp({ client = defaultClient }: { client?: FigLabClient }) {
+export function FigLabApp({
+  client = defaultClient,
+  account,
+}: {
+  client?: FigLabClient;
+  account?: SignedInAccount;
+}) {
   const [queryClient] = useState(
     () => new QueryClient({ defaultOptions: { queries: { retry: false } } }),
   );
@@ -34,16 +41,29 @@ export function FigLabApp({ client = defaultClient }: { client?: FigLabClient })
       {project ? (
         <EditorLoader client={client} onBack={() => setProject(undefined)} project={project} />
       ) : (
-        <Dashboard client={client} onOpen={setProject} />
+        <Dashboard account={account} client={client} onOpen={setProject} />
       )}
     </QueryClientProvider>
   );
 }
 
+function AccountMenu({ account, client }: { account: SignedInAccount; client: FigLabClient }) {
+  const me = useQuery({ queryKey: ["me"], queryFn: () => client.me() });
+  return (
+    <div className="account-menu">
+      <span className="account-email">{account.email}</span>
+      {me.data?.role === "admin" && <span className="role-badge">Admin</span>}
+      <Button onClick={() => void account.signOut()}>Sign out</Button>
+    </div>
+  );
+}
+
 function Dashboard({
+  account,
   client,
   onOpen,
 }: {
+  account: SignedInAccount | undefined;
   client: FigLabClient;
   onOpen: (project: Project) => void;
 }) {
@@ -67,6 +87,7 @@ function Dashboard({
       <header className="app-header">
         <strong>FigLab</strong>
         <span>Scientific figure workspace</span>
+        {account && <AccountMenu account={account} client={client} />}
       </header>
       <div className="dashboard-layout">
         <nav aria-label="Project navigation" className="side-nav">

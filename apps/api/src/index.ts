@@ -5,6 +5,7 @@ import {
   AssetDescriptorSchema,
   apiRoutes,
   CreateProjectRequestSchema,
+  CurrentUserResponseSchema,
   DownloadUrlResponseSchema,
   ErrorEnvelopeSchema,
   MAX_UPLOAD_BYTES,
@@ -30,9 +31,15 @@ import {
   UploadExpiredError,
 } from "@figlab/database";
 import { decodeFigureDocument, FigureDocumentDecodeError } from "@figlab/figure-schema";
-import { type ObjectStore, S3ObjectStore } from "@figlab/storage";
+import { createObjectStoreFromEnv, type ObjectStore } from "@figlab/storage";
 import { Type } from "@sinclair/typebox";
 import Fastify, { type FastifyInstance } from "fastify";
+import {
+  type PrincipalResolver,
+  singleUserResolver,
+  supabaseResolver,
+  UnauthorizedError,
+} from "./auth.js";
 
 const params = Type.Object({ projectId: Type.String({ minLength: 1 }) });
 const uploadParams = Type.Object({ uploadId: Type.String({ minLength: 1 }) });
@@ -67,10 +74,21 @@ const exportSchema = Type.Object({
 });
 const DEFAULT_SINGLE_USER_EMAIL = "local-admin@figlab.invalid";
 
+declare module "fastify" {
+  interface FastifyRequest {
+    principal: Principal;
+  }
+}
+
 export interface AppDependencies {
   repository: FigLabRepository;
   store: ObjectStore;
-  principal: Principal;
+  /** Fixed single-user principal for the local loopback deployment. */
+  principal?: Principal;
+  /** Per-request authentication; when set, the loopback-only single-user guard does not apply. */
+  resolvePrincipal?: PrincipalResolver;
+  /** Called after durable work is enqueued, so a serverless host can start draining it. */
+  onJobsEnqueued?: () => void;
   authorizer?: Authorizer;
   uploadTtlSeconds?: number;
   maxUploadBytes?: number;
@@ -92,12 +110,30 @@ export function assertSingleUserConfiguration(
     throw new Error("Single-user mode requires a localhost or loopback PUBLIC_APP_URL");
 }
 export async function buildApp(dependencies: AppDependencies): Promise<FastifyInstance> {
-  assertSingleUserConfiguration(
-    dependencies.publicAppUrl ?? "http://localhost",
-    dependencies.allowInsecureSingleUserRemote ?? false,
-  );
+  let resolvePrincipal = dependencies.resolvePrincipal;
+  if (!resolvePrincipal) {
+    if (!dependencies.principal)
+      throw new Error("buildApp requires either a single-user principal or resolvePrincipal");
+    assertSingleUserConfiguration(
+      dependencies.publicAppUrl ?? "http://localhost",
+      dependencies.allowInsecureSingleUserRemote ?? false,
+    );
+    resolvePrincipal = singleUserResolver(dependencies.principal);
+  }
   const app = Fastify({ logger: false, ajv: { customOptions: { removeAdditional: false } } });
   const authorizer = dependencies.authorizer ?? new SingleUserAuthorizer();
+  const jobsEnqueued = () => {
+    try {
+      dependencies.onJobsEnqueued?.();
+    } catch {
+      // Draining is best-effort; the scheduled sweep picks up anything a trigger misses.
+    }
+  };
+  app.decorateRequest("principal", null as unknown as Principal);
+  app.addHook("onRequest", async (request) => {
+    if (!request.url.startsWith("/v1/")) return;
+    request.principal = await resolvePrincipal(request.headers.authorization);
+  });
   await app.register(swagger, {
     openapi: {
       info: {
@@ -107,13 +143,15 @@ export async function buildApp(dependencies: AppDependencies): Promise<FastifyIn
       },
     },
   });
-  const projectFor = async (projectId: string) => {
+  const projectFor = async (principal: Principal, projectId: string) => {
     assertResourceId(projectId);
     const project = await dependencies.repository.getProject(projectId);
-    await authorizer.requireProject(dependencies.principal, project);
+    await authorizer.requireProject(principal, project);
     return project;
   };
   app.setErrorHandler((error, request, reply) => {
+    if (error instanceof UnauthorizedError)
+      return reply.status(401).send({ code: "UNAUTHORIZED", message: error.message });
     if (error instanceof NotFoundError)
       return reply.status(404).send({ code: "NOT_FOUND", message: "Resource not found" });
     if (error instanceof UploadExpiredError)
@@ -137,10 +175,18 @@ export async function buildApp(dependencies: AppDependencies): Promise<FastifyIn
     async () => ({ ok: true }),
   );
   app.get(
+    apiRoutes.me,
+    { schema: { response: { 200: CurrentUserResponseSchema } } },
+    async (request) => ({
+      email: request.principal.email,
+      role: request.principal.role ?? "admin",
+    }),
+  );
+  app.get(
     apiRoutes.projects,
     { schema: { response: { 200: ProjectListResponseSchema } } },
-    async () => ({
-      projects: await dependencies.repository.listProjects(dependencies.principal.workspaceId),
+    async (request) => ({
+      projects: await dependencies.repository.listProjects(request.principal.workspaceId),
     }),
   );
   app.post(
@@ -149,7 +195,7 @@ export async function buildApp(dependencies: AppDependencies): Promise<FastifyIn
     async (request, reply) => {
       const body = request.body as { name: string };
       const project = await dependencies.repository.createProject(
-        dependencies.principal.workspaceId,
+        request.principal.workspaceId,
         body.name,
       );
       return reply.status(201).send(project);
@@ -158,14 +204,15 @@ export async function buildApp(dependencies: AppDependencies): Promise<FastifyIn
   app.get(
     apiRoutes.project,
     { schema: { params, response: { 200: ProjectSchema } } },
-    async (request) => projectFor((request.params as { projectId: string }).projectId),
+    async (request) =>
+      projectFor(request.principal, (request.params as { projectId: string }).projectId),
   );
   app.put(
     apiRoutes.project,
     { schema: { params, body: UpdateProjectRequestSchema, response: { 200: ProjectSchema } } },
     async (request) => {
       const id = (request.params as { projectId: string }).projectId;
-      await projectFor(id);
+      await projectFor(request.principal, id);
       return dependencies.repository.renameProject(id, (request.body as { name: string }).name);
     },
   );
@@ -174,8 +221,10 @@ export async function buildApp(dependencies: AppDependencies): Promise<FastifyIn
     { schema: { params, response: { 202: ProjectSchema } } },
     async (request, reply) => {
       const id = (request.params as { projectId: string }).projectId;
-      await projectFor(id);
-      return reply.status(202).send(await dependencies.repository.markProjectDeleting(id));
+      await projectFor(request.principal, id);
+      const deleting = await dependencies.repository.markProjectDeleting(id);
+      jobsEnqueued();
+      return reply.status(202).send(deleting);
     },
   );
   app.get(
@@ -183,7 +232,7 @@ export async function buildApp(dependencies: AppDependencies): Promise<FastifyIn
     { schema: { params, response: { 200: ProjectDocumentResponseSchema } } },
     async (request) => {
       const id = (request.params as { projectId: string }).projectId;
-      await projectFor(id);
+      await projectFor(request.principal, id);
       return dependencies.repository.getDocument(id);
     },
   );
@@ -206,7 +255,7 @@ export async function buildApp(dependencies: AppDependencies): Promise<FastifyIn
     },
     async (request, reply) => {
       const id = (request.params as { projectId: string }).projectId;
-      await projectFor(id);
+      await projectFor(request.principal, id);
       const body = request.body as { baseRevision: number; document: unknown };
       const document = decodeFigureDocument(body.document);
       await dependencies.repository.assertReadyAssets(id, sourceAssetIds(document));
@@ -240,14 +289,14 @@ export async function buildApp(dependencies: AppDependencies): Promise<FastifyIn
         contentLength: number;
         checksumSha256: string;
       };
-      await projectFor(id);
+      await projectFor(request.principal, id);
       if (!isValidUpload(body, dependencies.maxUploadBytes ?? MAX_UPLOAD_BYTES))
         return reply
           .status(400)
           .send({ code: "UPLOAD_INVALID", message: "Unsupported upload claim" });
       const assetId = randomUUID();
       const uploadTtlSeconds = Math.min(600, Math.max(1, dependencies.uploadTtlSeconds ?? 600));
-      const key = `workspaces/${dependencies.principal.workspaceId}/projects/${id}/assets/${assetId}/original`;
+      const key = `workspaces/${request.principal.workspaceId}/projects/${id}/assets/${assetId}/original`;
       const upload = await dependencies.repository.createUpload({
         projectId: id,
         ...body,
@@ -285,7 +334,7 @@ export async function buildApp(dependencies: AppDependencies): Promise<FastifyIn
       const upload = await dependencies.repository.getUpload(
         resourceId((request.params as { uploadId: string }).uploadId),
       );
-      await projectFor(upload.projectId);
+      await projectFor(request.principal, upload.projectId);
       if (
         upload.status === "expired" ||
         (upload.status === "reserved" && new Date(upload.expiresAt).getTime() <= Date.now())
@@ -299,6 +348,7 @@ export async function buildApp(dependencies: AppDependencies): Promise<FastifyIn
           message: "Uploaded object is missing or has an unexpected length",
         });
       await dependencies.repository.completeUpload(upload.id);
+      jobsEnqueued();
       return reply.status(202).send({ assetId: asset.id, status: asset.status });
     },
   );
@@ -306,7 +356,12 @@ export async function buildApp(dependencies: AppDependencies): Promise<FastifyIn
     apiRoutes.asset,
     { schema: { params: assetParams, response: { 200: AssetDescriptorSchema } } },
     async (request) =>
-      assetFor(dependencies, authorizer, (request.params as { assetId: string }).assetId),
+      assetFor(
+        dependencies,
+        authorizer,
+        request.principal,
+        (request.params as { assetId: string }).assetId,
+      ),
   );
   app.post(
     apiRoutes.assetDownloadUrl,
@@ -323,6 +378,7 @@ export async function buildApp(dependencies: AppDependencies): Promise<FastifyIn
       const asset = await assetFor(
         dependencies,
         authorizer,
+        request.principal,
         (request.params as { assetId: string }).assetId,
       );
       if (asset.status !== "ready")
@@ -345,7 +401,7 @@ export async function buildApp(dependencies: AppDependencies): Promise<FastifyIn
     },
     async (request, reply) => {
       const id = (request.params as { projectId: string }).projectId;
-      await projectFor(id);
+      await projectFor(request.principal, id);
       const body = request.body as {
         format: "png";
         revision: number;
@@ -363,27 +419,36 @@ export async function buildApp(dependencies: AppDependencies): Promise<FastifyIn
   return app;
 }
 
-export async function startServerFromEnv(
+/** Builds the API from environment variables without binding a port. */
+export async function createAppFromEnv(
   environment: NodeJS.ProcessEnv = process.env,
+  options: { maxConnections?: number; onJobsEnqueued?: () => void } = {},
 ): Promise<FastifyInstance> {
   const publicAppUrl = required(environment, "PUBLIC_APP_URL");
+  const authMode = environment.AUTH_MODE ?? "single-user";
+  if (authMode !== "single-user" && authMode !== "supabase")
+    throw new Error(`Unsupported AUTH_MODE: ${authMode}`);
   const allowInsecureSingleUserRemote = environment.ALLOW_INSECURE_SINGLE_USER_REMOTE === "true";
-  assertSingleUserConfiguration(publicAppUrl, allowInsecureSingleUserRemote);
-  const { repository, close } = createPostgresRepository(required(environment, "DATABASE_URL"));
-  const principal = await bootstrapSingleUserFromEnv(repository, environment);
-  const store = new S3ObjectStore({
-    bucket: required(environment, "OBJECT_STORE_BUCKET"),
-    region: environment.OBJECT_STORE_REGION ?? "us-east-1",
-    internalEndpoint: required(environment, "OBJECT_STORE_INTERNAL_ENDPOINT"),
-    publicEndpoint: required(environment, "OBJECT_STORE_PUBLIC_ENDPOINT"),
-    accessKeyId: required(environment, "OBJECT_STORE_ACCESS_KEY"),
-    secretAccessKey: required(environment, "OBJECT_STORE_SECRET_KEY"),
-    forcePathStyle: environment.OBJECT_STORE_FORCE_PATH_STYLE !== "false",
+  if (authMode === "single-user")
+    assertSingleUserConfiguration(publicAppUrl, allowInsecureSingleUserRemote);
+  const { repository, close } = createPostgresRepository(required(environment, "DATABASE_URL"), {
+    ...(options.maxConnections ? { maxConnections: options.maxConnections } : {}),
+    ...(environment.DATABASE_CA_CERT ? { caCert: environment.DATABASE_CA_CERT } : {}),
   });
+  const identity =
+    authMode === "supabase"
+      ? {
+          resolvePrincipal: supabaseResolver({
+            supabaseUrl: required(environment, "SUPABASE_URL"),
+            repository,
+          }),
+        }
+      : { principal: await bootstrapSingleUserFromEnv(repository, environment) };
   const app = await buildApp({
     repository,
-    store,
-    principal,
+    store: createObjectStoreFromEnv(environment),
+    ...identity,
+    ...(options.onJobsEnqueued ? { onJobsEnqueued: options.onJobsEnqueued } : {}),
     publicAppUrl,
     allowInsecureSingleUserRemote,
     uploadTtlSeconds: Number(environment.UPLOAD_URL_TTL_SECONDS ?? 600),
@@ -394,6 +459,13 @@ export async function startServerFromEnv(
     ),
   });
   app.addHook("onClose", close);
+  return app;
+}
+
+export async function startServerFromEnv(
+  environment: NodeJS.ProcessEnv = process.env,
+): Promise<FastifyInstance> {
+  const app = await createAppFromEnv(environment);
   await app.listen({
     host: environment.API_HOST ?? "0.0.0.0",
     port: Number(environment.API_PORT ?? 3000),
@@ -423,12 +495,13 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
 async function assetFor(
   dependencies: AppDependencies,
   authorizer: Authorizer,
+  principal: Principal,
   id: string,
 ): Promise<AssetRecord> {
   assertResourceId(id);
   const asset = await dependencies.repository.getAsset(id);
   await authorizer.requireProject(
-    dependencies.principal,
+    principal,
     await dependencies.repository.getProject(asset.projectId),
   );
   return asset;

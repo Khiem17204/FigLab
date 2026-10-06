@@ -156,3 +156,18 @@ describe("InMemoryFigLabRepository", () => {
     );
   });
 });
+
+describe("InMemoryFigLabRepository.ensureAuthUser", () => {
+  it("keeps one workspace per authenticated user across sign-ins", async () => {
+    const repository = new InMemoryFigLabRepository();
+    const id = "6f0d2b8e-1c55-4e7f-9a7c-0c1b2d3e4f50";
+    const first = await repository.ensureAuthUser({ id, email: "a@example.test" });
+    const again = await repository.ensureAuthUser({ id, email: "a@example.test" });
+    const other = await repository.ensureAuthUser({
+      id: "8a2c4e6f-3b1d-4c5e-8f7a-1b2c3d4e5f60",
+      email: "b@example.test",
+    });
+    expect(again.workspaceId).toBe(first.workspaceId);
+    expect(other.workspaceId).not.toBe(first.workspaceId);
+  });
+});
