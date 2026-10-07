@@ -13,14 +13,15 @@ It runs in two modes from the same code:
   email/password accounts that must verify their email. See
   [Hosted deployment](#hosted-deployment-supabase--netlify).
 
-## Handoff snapshot (2026-10-05)
+## Handoff snapshot (2026-10-06)
 
-Hosted support is on branch `feat/supabase-netlify`. The Supabase project **FigLab**
-(`fxfjsjxizojgtzzwputg`, us-west-2) is provisioned: the `figlab_app` role, FigLab and Graphile
-schemas, the private `figlab` bucket, and one confirmed admin account. The full live test suite
-(`tests/live`) passes against that project with the API and job runner served locally. The
-packaged Netlify functions were built offline and smoke-tested (the job runner on Linux x64). A
-Netlify site has **not** been created yet: it needs a Netlify login (see the deploy steps below).
+FigLab is live at **https://figlab.netlify.app** (Netlify site `figlab`, deployed from branch
+`feat/supabase-netlify` with `netlify deploy --prod --filter @figlab/web`). It uses the Supabase
+project **FigLab** (`fxfjsjxizojgtzzwputg`, us-west-2): role `figlab_app`, FigLab and Graphile
+schemas, private bucket `figlab`, Auth site URL set to the Netlify URL, email confirmation
+required, and the Data API off. One confirmed admin account exists. The live suite
+(`tests/live`, 7 tests including a real sign-up) passes against production. Netlify environment
+variables are plain site variables because scoped and secret variables need a paid Netlify plan.
 Local hosted secrets live in the ignored `.env.hosted`.
 
 The local single-user Compose milestone is unchanged: lint, typecheck, build, unit tests,
