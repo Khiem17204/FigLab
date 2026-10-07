@@ -364,8 +364,10 @@
   font-size: var(--fl-text-xs);
   -moz-appearance: textfield;
 }
-.fl-slider .fl-input::-webkit-inner-spin-button {
-  opacity: 0.6;
+.fl-slider .fl-input::-webkit-inner-spin-button,
+.fl-slider .fl-input::-webkit-outer-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
 }
 .fl-range {
   -webkit-appearance: none;
@@ -466,6 +468,7 @@
 }
 .fl-switch-input {
   position: absolute;
+  z-index: 1;
   inset: 0;
   opacity: 0;
   margin: 0;
@@ -896,8 +899,8 @@
 .fl-toast-viewport {
   position: fixed;
   z-index: 90;
-  right: 20px;
-  bottom: 20px;
+  left: 16px;
+  bottom: 16px;
   margin: 0;
   padding: 0;
   list-style: none;

@@ -1,5 +1,5 @@
 import * as RadixDialog from "@radix-ui/react-dialog";
-import type { ReactNode } from "react";
+import { type ReactNode, useRef } from "react";
 import { Button, IconButton } from "./button";
 import { cx } from "./cx";
 import { CloseIcon } from "./icons";
@@ -26,6 +26,9 @@ export function DialogContent({
   className?: string;
   onOpenAutoFocus?: (event: Event) => void;
 }) {
+  // Radix restores focus only to a Dialog.Trigger; dialogs opened from other controls would
+  // drop focus to <body> on close, so remember what had focus and return to it.
+  const returnFocus = useRef<HTMLElement | null>(null);
   return (
     <RadixDialog.Portal>
       <RadixDialog.Overlay className="fl-dialog-overlay" />
@@ -33,7 +36,18 @@ export function DialogContent({
         className={cx("fl-dialog", className)}
         data-size={size}
         {...(description ? {} : { "aria-describedby": undefined })}
-        {...(onOpenAutoFocus ? { onOpenAutoFocus } : {})}
+        onCloseAutoFocus={(event) => {
+          const target = returnFocus.current;
+          if (target?.isConnected) {
+            event.preventDefault();
+            target.focus();
+          }
+        }}
+        onOpenAutoFocus={(event) => {
+          if (document.activeElement instanceof HTMLElement)
+            returnFocus.current = document.activeElement;
+          onOpenAutoFocus?.(event);
+        }}
       >
         <div className="fl-dialog-header">
           <RadixDialog.Title className="fl-dialog-title">{title}</RadixDialog.Title>
