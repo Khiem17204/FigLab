@@ -347,7 +347,8 @@ test.describe
       ).json()) as {
         document: { schemaVersion: number };
       };
-      expect(old.document.schemaVersion).toBe(2);
+      // Stored revisions are served migrated to the current schema.
+      expect(old.document.schemaVersion).toBe(3);
     });
 
     test("admin band-crops a blot, calibrates, annotates, and gets integrity evidence", async ({
