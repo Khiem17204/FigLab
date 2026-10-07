@@ -640,7 +640,7 @@ export async function createAppFromEnv(
   const allowInsecureSingleUserRemote = environment.ALLOW_INSECURE_SINGLE_USER_REMOTE === "true";
   if (authMode === "single-user")
     assertSingleUserConfiguration(publicAppUrl, allowInsecureSingleUserRemote);
-  const { repository, close } = createPostgresRepository(required(environment, "DATABASE_URL"), {
+  const { repository, close } = createPostgresRepository(apiDatabaseUrl(environment), {
     ...(options.maxConnections ? { maxConnections: options.maxConnections } : {}),
     ...(options.idleTimeoutMillis ? { idleTimeoutMillis: options.idleTimeoutMillis } : {}),
     ...(environment.DATABASE_CA_CERT ? { caCert: environment.DATABASE_CA_CERT } : {}),
@@ -688,6 +688,16 @@ export function bootstrapSingleUserFromEnv(
   environment: NodeJS.ProcessEnv = process.env,
 ): Promise<Principal> {
   return repository.bootstrapSingleUser(environment.SINGLE_USER_EMAIL || DEFAULT_SINGLE_USER_EMAIL);
+}
+
+/**
+ * The API's database URL. `API_DATABASE_URL` lets serverless API traffic use a transaction
+ * pooler (short-lived checkouts, no session limit) while the jobs worker keeps `DATABASE_URL`
+ * on a session pooler, which Graphile needs. The repository holds no session state: its
+ * transactions and advisory locks are transaction-scoped.
+ */
+export function apiDatabaseUrl(environment: NodeJS.ProcessEnv): string {
+  return environment.API_DATABASE_URL || required(environment, "DATABASE_URL");
 }
 
 function required(environment: NodeJS.ProcessEnv, name: string): string {

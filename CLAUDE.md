@@ -106,7 +106,7 @@ There is no Redis or separate queue. Graphile Worker keeps jobs in Postgres in b
 | Verify Supabase JWTs in the API (ES256 JWKS) | No per-request Auth call. Users and personal workspaces are provisioned on first sight. Admin = `app_metadata.role = "admin"`, settable only with the secret key. |
 | Supabase native signed uploads, not its S3 endpoint | The S3 endpoint ignores `If-None-Match` on PUT; native signed uploads refuse overwrites. |
 | Drain jobs with Graphile `runOnce` in Netlify functions | Netlify can't host a long-lived worker. The API triggers a 15-minute background function, with a scheduled sweep every 5 minutes. |
-| App connects as role `figlab_app` via session pooler with verified TLS | The role owns FigLab's tables. RLS is on with no policies, so `anon`/`authenticated` see nothing. Session mode suits Graphile. `DATABASE_CA_CERT` pins Supabase's root CA. |
+| App connects as role `figlab_app` with verified TLS: jobs via the session pooler, the API via the transaction pooler | The role owns FigLab's tables. RLS is on with no policies, so `anon`/`authenticated` see nothing. Graphile needs session mode. Serverless API instances freeze with connections open, so they use the transaction pooler (`API_DATABASE_URL`), which has no 15-client session limit; the repository keeps no session state. `DATABASE_CA_CERT` pins Supabase's root CA. |
 | Supabase Data API off | All data access goes through FigLab's API. |
 | Pre-bundle functions with esbuild; stage sharp's Linux build in `netlify/node_modules` | pnpm keeps app dependencies out of the root `node_modules`, so Netlify's tracer can't package them. Netlify re-bundles and injects `require`/`__filename`, so add no banner. |
 | Separate MinIO internal and public endpoints (Compose) | Containers use Docker DNS; signed URLs must resolve in the browser. |
@@ -258,7 +258,8 @@ Error codes: `BAD_REQUEST`, `UNAUTHORIZED`, `FORBIDDEN`, `NOT_FOUND`, `CONFLICT`
 | `AUTH_MODE` | `supabase` |
 | `PUBLIC_APP_URL` | `https://figlab.netlify.app` |
 | `SUPABASE_URL` / `SUPABASE_SECRET_KEY` | Project URL / `sb_secret_…` (server only) |
-| `DATABASE_URL` | `postgresql://figlab_app.<ref>:<pw>@aws-0-us-west-2.pooler.supabase.com:5432/postgres?sslmode=require` |
+| `DATABASE_URL` | `postgresql://figlab_app.<ref>:<pw>@aws-0-us-west-2.pooler.supabase.com:5432/postgres?sslmode=require` (session pooler; jobs) |
+| `API_DATABASE_URL` | Same, port `6543` (transaction pooler; API only, falls back to `DATABASE_URL`) |
 | `DATABASE_CA_CERT` | Contents of `deploy/supabase-root-2021-ca.crt` |
 | `STORAGE_DRIVER` / `OBJECT_STORE_BUCKET` / `MAX_UPLOAD_BYTES` | `supabase` / `figlab` / `52428800` |
 | `JOBS_TRIGGER_SECRET` | Shared by `api` and `jobs-background` |
@@ -286,12 +287,10 @@ Error codes: `BAD_REQUEST`, `UNAUTHORIZED`, `FORBIDDEN`, `NOT_FOUND`, `CONFLICT`
 **Known limits:**
 - Supabase's built-in SMTP only reaches team members and is rate-limited; configure custom
   SMTP before inviting users.
-- Supabase's session pooler admits 15 clients in total, across every warm function instance
-  of every deploy, and frozen instances keep their connections. The API holds at most 2 per
-  instance and closes idle ones after 1 s, but bursts (several drafts, many parallel requests)
-  can still fail with `EMAXCONNSESSION`; failed jobs show in the admin view and retry on the
-  next drain. The durable fix is pointing the API (not the jobs worker) at the transaction
-  pooler (port 6543); that is a Netlify env change and needs approval.
+- Supabase's session pooler admits 15 clients in total, and frozen function instances keep
+  their connections. The API therefore uses the transaction pooler (`API_DATABASE_URL`), and
+  only job drains hold session connections. If `EMAXCONNSESSION` reappears, failed jobs show in
+  the admin view and retry on the next drain.
 - A job killed by a function timeout stays locked for up to 4 hours (Graphile lock expiry).
 
 ## Local operations
@@ -332,12 +331,10 @@ corepack pnpm build && corepack pnpm test:e2e && corepack pnpm test:visual && co
   admin views) in the Bench Notebook redesign (`packages/ui`, see its README). Migrations
   `0003`–`0005` are applied to Supabase. The previous production deploy was
   `6ac669ba3414e6035fde50f9`, for rollback.
-- Known issue: under load the live suite stalls at "Upload verifying". Warm API instances
-  (frozen with their connections open, even with the 1 s idle timeout) fill Supabase's
-  15-client session pooler, so `verify_asset` fails with `EMAXCONNSESSION` until the 5-minute
-  sweep retries it. A likely fix is routing API traffic through the transaction pooler (port
-  6543) while jobs keep the session pooler. The last full pass of the live suite predates the
-  parity merge.
+- The live suite used to stall at "Upload verifying": warm API instances filled Supabase's
+  15-client session pooler, so `verify_asset` failed with `EMAXCONNSESSION`. API traffic now
+  goes through the transaction pooler (`API_DATABASE_URL`, set on Netlify 2026-10-07); jobs keep
+  the session pooler.
 - Deploy from a normal clone, not a worktree: `netlify deploy --filter` cannot find
   `apps/web/netlify.toml` inside a git worktree, and an unlinked deploy creates a new site.
 - Out of scope: lab-notebook modules (D1), per-project sharing (D3), email invites (D2),

@@ -1,7 +1,12 @@
 import { InMemoryFigLabRepository } from "@figlab/database";
 import { FakeObjectStore } from "@figlab/storage";
 import { describe, expect, it } from "vitest";
-import { assertSingleUserConfiguration, bootstrapSingleUserFromEnv, buildApp } from "./index.js";
+import {
+  apiDatabaseUrl,
+  assertSingleUserConfiguration,
+  bootstrapSingleUserFromEnv,
+  buildApp,
+} from "./index.js";
 
 describe("buildApp", () => {
   it("publishes the project license in generated OpenAPI metadata", async () => {
@@ -799,5 +804,17 @@ describe("buildApp", () => {
     ]);
     expect(responses.map((response) => response.statusCode)).toEqual([404, 404, 404]);
     await app.close();
+  });
+});
+
+describe("apiDatabaseUrl", () => {
+  it("prefers API_DATABASE_URL so API traffic can use a transaction pooler", () => {
+    const session = "postgresql://figlab_app.ref:pw@pooler.example:5432/postgres";
+    const transaction = "postgresql://figlab_app.ref:pw@pooler.example:6543/postgres";
+    expect(apiDatabaseUrl({ DATABASE_URL: session })).toBe(session);
+    expect(apiDatabaseUrl({ DATABASE_URL: session, API_DATABASE_URL: transaction })).toBe(
+      transaction,
+    );
+    expect(() => apiDatabaseUrl({})).toThrow("DATABASE_URL is required");
   });
 });
