@@ -302,8 +302,10 @@ test.describe
     test("rename and delete remove the project and its originals", async ({ page }) => {
       await signIn(page, admin.email, admin.password);
       const renamed = `${projectName} renamed`;
-      page.once("dialog", (dialog) => void dialog.accept(renamed));
       await page.getByRole("button", { name: `Rename ${projectName}` }).click();
+      const renameDialog = page.getByRole("dialog", { name: "Rename project" });
+      await renameDialog.getByLabel("Project name").fill(renamed);
+      await renameDialog.getByRole("button", { name: "Save name" }).click();
       await expect(page.getByRole("heading", { name: renamed })).toBeVisible();
 
       const adminToken = await accessToken(admin.email, admin.password);
@@ -313,8 +315,11 @@ test.describe
       const prefix = `workspaces/${project.workspaceId}/projects/${projectId}/assets`;
       expect((await listStorage(prefix)).length).toBeGreaterThanOrEqual(3);
 
-      page.once("dialog", (dialog) => void dialog.accept());
       await page.getByRole("button", { name: `Delete ${renamed}` }).click();
+      await page
+        .getByRole("dialog", { name: `Delete “${renamed}”?` })
+        .getByRole("button", { name: "Delete project" })
+        .click();
       await expect(page.getByRole("heading", { name: renamed })).toHaveCount(0);
       await expect
         .poll(async () => (await listStorage(prefix)).length, {

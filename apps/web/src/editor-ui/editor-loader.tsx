@@ -3,6 +3,7 @@ import { Button } from "@figlab/ui";
 import { useQuery } from "@tanstack/react-query";
 
 import type { FigLabClient } from "../api/client";
+import type { SignedInAccount } from "../auth/auth-gate";
 import { FigLabEditor } from "./figlab-editor";
 
 export function EditorLoader({
@@ -10,6 +11,7 @@ export function EditorLoader({
   project,
   onBack,
 }: {
+  account?: SignedInAccount | undefined;
   client: FigLabClient;
   project: Project;
   onBack: () => void;

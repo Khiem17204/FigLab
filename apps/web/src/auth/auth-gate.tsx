@@ -1,6 +1,8 @@
-import { Button, Panel } from "@figlab/ui";
+import { AlertIcon, Button, Field, InfoIcon, Input, Mascot, type MascotMood } from "@figlab/ui";
 import type { Session, SupabaseClient } from "@supabase/supabase-js";
 import { type FormEvent, type ReactNode, useEffect, useState } from "react";
+
+import { Brand } from "../shell/brand";
 
 export interface SignedInAccount {
   email: string;
@@ -33,6 +35,7 @@ export function AuthGate({
   if (session === undefined)
     return (
       <main className="loading-page">
+        <Mascot mood="working" size={56} />
         <p role="status">Loading…</p>
       </main>
     );
@@ -45,13 +48,14 @@ export function AuthGate({
   });
 }
 
-type Mode = "sign-in" | "sign-up";
+type Mode = "sign-in" | "sign-up" | "verify";
 type Notice = { kind: "error" | "info"; text: string; canResend?: boolean };
 
 export function SignInScreen({ auth }: { auth: SupabaseClient }) {
   const [mode, setMode] = useState<Mode>("sign-in");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [passwordError, setPasswordError] = useState<string>();
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState<Notice>();
 
@@ -74,10 +78,7 @@ export function SignInScreen({ auth }: { auth: SupabaseClient }) {
     event.preventDefault();
     setNotice(undefined);
     if (password.length < MIN_PASSWORD_LENGTH) {
-      setNotice({
-        kind: "error",
-        text: `Password must be at least ${MIN_PASSWORD_LENGTH} characters.`,
-      });
+      setPasswordError(`Password must be at least ${MIN_PASSWORD_LENGTH} characters.`);
       return;
     }
     setBusy(true);
@@ -89,12 +90,14 @@ export function SignInScreen({ auth }: { auth: SupabaseClient }) {
           options: { emailRedirectTo: window.location.origin },
         });
         if (error) setNotice({ kind: "error", text: error.message });
-        else if (!data.session)
+        else if (!data.session) {
+          setMode("verify");
           setNotice({
             kind: "info",
             text: `Check ${email} for a verification link, then sign in.`,
             canResend: true,
           });
+        }
         return;
       }
       const { error } = await auth.auth.signInWithPassword({ email, password });
@@ -116,63 +119,125 @@ export function SignInScreen({ auth }: { auth: SupabaseClient }) {
   const switchMode = (next: Mode) => {
     setMode(next);
     setNotice(undefined);
+    setPasswordError(undefined);
   };
+
+  const mood: MascotMood =
+    mode === "verify" ? "proud" : notice?.kind === "error" ? "oops" : busy ? "working" : "happy";
+  const noticeBlock = notice && (
+    <div
+      className={`auth-notice ${notice.kind}`}
+      role={notice.kind === "error" ? "alert" : "status"}
+    >
+      {notice.kind === "error" ? <AlertIcon size={18} /> : <InfoIcon size={18} />}
+      <div>
+        <p>{notice.text}</p>
+        {notice.canResend && email && (
+          <Button className="auth-resend" disabled={busy} onClick={() => void resend()} size="sm">
+            Resend verification email
+          </Button>
+        )}
+      </div>
+    </div>
+  );
 
   return (
     <main className="auth-page">
-      <Panel aria-labelledby="auth-heading" className="auth-panel">
-        <p className="eyebrow">FigLab</p>
-        <h1 id="auth-heading">{mode === "sign-in" ? "Sign in" : "Create an account"}</h1>
-        <form className="auth-form" onSubmit={(event) => void submit(event)}>
-          <label>
-            Email
-            <input
-              autoComplete="email"
-              onChange={(event) => setEmail(event.target.value)}
-              required
-              type="email"
-              value={email}
-            />
-          </label>
-          <label>
-            Password
-            <input
-              autoComplete={mode === "sign-in" ? "current-password" : "new-password"}
-              minLength={MIN_PASSWORD_LENGTH}
-              onChange={(event) => setPassword(event.target.value)}
-              required
-              type="password"
-              value={password}
-            />
-          </label>
-          <Button className="primary" disabled={busy} type="submit">
-            {mode === "sign-in" ? "Sign in" : "Sign up"}
-          </Button>
-        </form>
-        {notice && (
-          <div
-            className={`auth-notice ${notice.kind}`}
-            role={notice.kind === "error" ? "alert" : "status"}
-          >
-            <p>{notice.text}</p>
-            {notice.canResend && email && (
-              <Button disabled={busy} onClick={() => void resend()}>
-                Resend verification email
+      <AuthStory />
+      <section aria-labelledby="auth-heading" className="auth-card">
+        <Mascot className="auth-mascot" mood={mood} size={64} />
+        {mode === "verify" ? (
+          <>
+            <h1 id="auth-heading">Check your inbox</h1>
+            <p className="auth-lede">
+              One click on the link in that email confirms your account. It can take a minute to
+              arrive, so peek in spam too.
+            </p>
+            {noticeBlock}
+            <Button block onClick={() => switchMode("sign-in")} variant="primary">
+              Back to sign in
+            </Button>
+          </>
+        ) : (
+          <>
+            <h1 id="auth-heading">{mode === "sign-in" ? "Sign in" : "Create an account"}</h1>
+            <p className="auth-lede">
+              {mode === "sign-in"
+                ? "Welcome back. Your figures are where you left them."
+                : "Make figures your reviewers can trace. We'll email you a link to confirm."}
+            </p>
+            <form className="auth-form" noValidate onSubmit={(event) => void submit(event)}>
+              <Field label="Email">
+                <Input
+                  autoComplete="email"
+                  onChange={(event) => setEmail(event.target.value)}
+                  placeholder="you@lab.org"
+                  required
+                  type="email"
+                  value={email}
+                />
+              </Field>
+              <Field
+                error={passwordError}
+                hint={
+                  mode === "sign-up" && !passwordError
+                    ? `At least ${MIN_PASSWORD_LENGTH} characters.`
+                    : undefined
+                }
+                label="Password"
+              >
+                <Input
+                  autoComplete={mode === "sign-in" ? "current-password" : "new-password"}
+                  minLength={MIN_PASSWORD_LENGTH}
+                  onChange={(event) => {
+                    setPassword(event.target.value);
+                    setPasswordError(undefined);
+                  }}
+                  required
+                  type="password"
+                  value={password}
+                />
+              </Field>
+              {noticeBlock}
+              <Button block loading={busy} size="lg" type="submit" variant="primary">
+                {mode === "sign-in" ? "Sign in" : "Sign up"}
               </Button>
-            )}
-          </div>
+            </form>
+            <p className="auth-switch">
+              {mode === "sign-in" ? "No account yet?" : "Already have an account?"}{" "}
+              <button
+                className="link-button"
+                onClick={() => switchMode(mode === "sign-in" ? "sign-up" : "sign-in")}
+                type="button"
+              >
+                {mode === "sign-in" ? "Create one" : "Sign in"}
+              </button>
+            </p>
+          </>
         )}
-        <p className="auth-switch">
-          {mode === "sign-in" ? "No account yet?" : "Already have an account?"}{" "}
-          <button
-            className="link-button"
-            onClick={() => switchMode(mode === "sign-in" ? "sign-up" : "sign-in")}
-            type="button"
-          >
-            {mode === "sign-in" ? "Create one" : "Sign in"}
-          </button>
-        </p>
-      </Panel>
+      </section>
     </main>
+  );
+}
+
+function AuthStory() {
+  return (
+    <aside aria-label="About FigLab" className="auth-story">
+      <Brand />
+      <p className="auth-story-title">
+        Figures you can trace back to <span className="fl-highlight">the pixel</span>.
+      </p>
+      <ul className="auth-points">
+        <li>Upload PNG, JPEG or 16-bit TIFF originals. They are never altered.</li>
+        <li>Crop, arrange and adjust panels without touching source data.</li>
+        <li>Export a PNG rendered from the original samples, with provenance recorded.</li>
+      </ul>
+      <figure aria-hidden="true" className="auth-sketch">
+        <span className="sketch-panel a" />
+        <span className="sketch-panel b" />
+        <span className="sketch-panel c" />
+        <figcaption className="fl-hand-note">every crop remembers its source ✿</figcaption>
+      </figure>
+    </aside>
   );
 }

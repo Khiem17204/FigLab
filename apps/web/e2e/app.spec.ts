@@ -54,12 +54,43 @@ test("opens the real project and exposes rename and delete actions", async ({ pa
 
   await expect(page.getByRole("heading", { name: "Cell Atlas" })).toBeVisible();
   await page.getByRole("button", { name: "Projects" }).click();
-  page.once("dialog", (dialog) => dialog.accept("Renamed Atlas"));
   await page.getByRole("button", { name: "Rename Cell Atlas" }).click();
+  const renameDialog = page.getByRole("dialog", { name: "Rename project" });
+  await renameDialog.getByLabel("Project name").fill("   ");
+  await renameDialog.getByRole("button", { name: "Save name" }).click();
+  await expect(renameDialog.getByText("Give your project a name to save it.")).toBeVisible();
+  expect(renamedTo).toBe("");
+  await renameDialog.getByLabel("Project name").fill("Renamed Atlas");
+  await renameDialog.getByRole("button", { name: "Save name" }).click();
   await expect.poll(() => renamedTo).toBe("Renamed Atlas");
-  page.once("dialog", (dialog) => dialog.accept());
+  await expect(renameDialog).toBeHidden();
+
   await page.getByRole("button", { name: "Delete Cell Atlas" }).click();
+  const deleteDialog = page.getByRole("dialog", { name: "Delete “Cell Atlas”?" });
+  await deleteDialog.getByRole("button", { name: "Cancel" }).click();
+  await expect(deleteDialog).toBeHidden();
+  expect(deleted).toBe(false);
+  await page.getByRole("button", { name: "Delete Cell Atlas" }).click();
+  await deleteDialog.getByRole("button", { name: "Delete project" }).click();
   await expect.poll(() => deleted).toBe(true);
+});
+
+test("refuses to create a project without a name", async ({ page }) => {
+  let created = false;
+  await page.route(/\/v1\/projects$/, async (route) => {
+    if (route.request().method() === "POST") created = true;
+    await route.fulfill({ json: { projects: [] } });
+  });
+  await page.goto("/");
+  await expect(page.getByRole("heading", { name: "No projects yet" })).toBeVisible();
+  await page.getByRole("button", { name: "Create project" }).click();
+  const name = page.getByLabel("New project name");
+  await expect(name).toHaveAttribute("aria-invalid", "true");
+  await expect(name).toBeFocused();
+  await expect(page.getByText("Give your project a name to create it.")).toBeVisible();
+  expect(created).toBe(false);
+  await name.fill("Fig. 2");
+  await expect(name).not.toHaveAttribute("aria-invalid", "true");
 });
 
 test("uploads and verifies an original, then creates a crop with accessible handles", async ({
