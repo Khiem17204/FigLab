@@ -1,66 +1,78 @@
 import type { FigureDocumentV1 } from "@figlab/figure-schema";
-import { Button } from "@figlab/ui";
-import { useState } from "react";
+import { Field, Input, Section, Segmented } from "@figlab/ui";
 
-export function ExportControls({
-  artboard,
-  onExport,
-  status,
-}: {
-  artboard: FigureDocumentV1["artboards"][number] | undefined;
-  onExport: (width: number, height: number) => Promise<void>;
-  status: string;
-}) {
-  const [scale, setScale] = useState<"1" | "2" | "custom">("1");
-  const [custom, setCustom] = useState("1200");
+export type ExportScale = "1" | "2" | "custom";
+
+export function exportDimensions(
+  artboard: FigureDocumentV1["artboards"][number] | undefined,
+  scale: ExportScale,
+  customWidth: string,
+): { width: number; height: number; valid: boolean } {
   const width =
-    scale === "custom" ? Number(custom) : Math.round((artboard?.widthPt ?? 0) * Number(scale));
+    scale === "custom" ? Number(customWidth) : Math.round((artboard?.widthPt ?? 0) * Number(scale));
   const height = Math.round(width * ((artboard?.heightPt ?? 0) / (artboard?.widthPt ?? 1)));
+  return {
+    width,
+    height,
+    valid: !!artboard && Number.isFinite(width) && width >= 1 && height >= 1,
+  };
+}
+
+/** PNG export settings. The "Export PNG" action lives in the editor toolbar. */
+export function ExportSection({
+  scale,
+  customWidth,
+  width,
+  height,
+  valid,
+  status,
+  statusTone = "info",
+  onScaleChange,
+  onCustomWidthChange,
+}: {
+  scale: ExportScale;
+  customWidth: string;
+  width: number;
+  height: number;
+  valid: boolean;
+  status: string;
+  statusTone?: "info" | "success" | "error";
+  onScaleChange: (scale: ExportScale) => void;
+  onCustomWidthChange: (value: string) => void;
+}) {
   return (
-    <section aria-labelledby="png-export" className="export-controls">
-      <h3 id="png-export">PNG export</h3>
-      <label>
-        <input
-          checked={scale === "1"}
-          name="png-scale"
-          onChange={() => setScale("1")}
-          type="radio"
-        />
-        1×
-      </label>
-      <label>
-        <input
-          checked={scale === "2"}
-          name="png-scale"
-          onChange={() => setScale("2")}
-          type="radio"
-        />
-        2×
-      </label>
-      <label>
-        <input
-          checked={scale === "custom"}
-          name="png-scale"
-          onChange={() => setScale("custom")}
-          type="radio"
-        />
-        Custom width
-      </label>
-      <input
-        aria-label="Custom width"
-        disabled={scale !== "custom"}
-        min="1"
-        onChange={(event) => setCustom(event.target.value)}
-        type="number"
-        value={custom}
+    <Section title="Export">
+      <Segmented
+        block
+        label="PNG scale"
+        onChange={onScaleChange}
+        options={[
+          { value: "1", label: "1×" },
+          { value: "2", label: "2×" },
+          { value: "custom", label: "Custom" },
+        ]}
+        value={scale}
       />
-      <Button
-        disabled={!artboard || !Number.isFinite(width) || width < 1 || height < 1}
-        onClick={() => void onExport(width, height)}
-      >
-        Export PNG
-      </Button>
-      {status && <p role="status">{status}</p>}
-    </section>
+      {scale === "custom" && (
+        <Field label="Custom width" hint="Height follows the artboard's aspect ratio.">
+          <Input
+            min="1"
+            onChange={(event) => onCustomWidthChange(event.target.value)}
+            size="sm"
+            type="number"
+            value={customWidth}
+          />
+        </Field>
+      )}
+      <p className="export-dims fl-mono">
+        {valid ? `${width} × ${height} px · 8-bit PNG` : "Enter a width of at least 1 px"}
+      </p>
+      <p className="export-note">Rendered from the original samples, not the preview.</p>
+      {status && (
+        <p className="export-status" data-tone={statusTone} role="status">
+          {status}
+        </p>
+      )}
+    </Section>
   );
 }

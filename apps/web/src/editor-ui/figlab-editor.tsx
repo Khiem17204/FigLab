@@ -1,34 +1,42 @@
 import type { AssetDescriptor, Project, ProjectDocumentResponse } from "@figlab/api-contract";
 import { selectImageProvenance } from "@figlab/editor-core";
-import { Button } from "@figlab/ui";
+import { Badge, EmptyState, IconButton, TrashIcon, useToast } from "@figlab/ui";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useStore } from "zustand";
 
 import { FigLabClient } from "../api/client";
 import { createArtboardPngExporter, downloadBlob, exportPng } from "../api/export";
+import type { SignedInAccount } from "../auth/auth-gate";
 import { AutosaveController, type SaveStatus } from "../editor/autosave";
 import { bindAutosave } from "../editor/autosave-binding";
 import { BrowserRasterRepository, type SupportedRasterMime } from "../editor/raster-sources";
 import { createEditorSession } from "../editor/session-store";
+import { AccountArea } from "../shell/account-menu";
 import { ArtboardEditor } from "./artboard-editor";
 import { isTextEntryTarget } from "./dom-helpers";
 import { EditorToolbar, SaveProblemBanner } from "./editor-toolbar";
-import { TransformControls } from "./inspector/display-section";
-import { ExportControls } from "./inspector/export-panel";
+import { DisplaySection } from "./inspector/display-section";
+import { type ExportScale, ExportSection, exportDimensions } from "./inspector/export-panel";
 import { ProvenanceSection } from "./inspector/provenance-section";
+import { useEditorLayout } from "./layout-preferences";
 import { OriginalInspector } from "./original-inspector";
+import { ShortcutsDialog } from "./shortcuts-dialog";
 import { SourceLibrary } from "./source-library";
+import { type UploadItem, updateUpload } from "./uploads";
+import type { ZoomLevel } from "./zoom";
 
 const defaultClient = new FigLabClient();
 
 export function FigLabEditor({
   client = defaultClient,
+  account,
   initial,
   onBack,
   project,
   reload,
 }: {
   client?: FigLabClient;
+  account?: SignedInAccount | undefined;
   initial: ProjectDocumentResponse;
   onBack: () => void;
   project: Project;
@@ -118,24 +126,56 @@ export function FigLabEditor({
     };
   }, [client, initial.document, rasterSources]);
 
+  const toast = useToast();
+  const [uploads, setUploads] = useState<UploadItem[]>([]);
+  const uploadQueue = useRef<Promise<void>>(Promise.resolve());
+  const [zoom, setZoom] = useState<ZoomLevel>("fit");
+  const [layout, setLayout] = useEditorLayout();
+  const [shortcutsOpen, setShortcutsOpen] = useState(false);
+  const [exportScale, setExportScale] = useState<ExportScale>("1");
+  const [customWidth, setCustomWidth] = useState("1200");
+  const [exporting, setExporting] = useState(false);
+  const [exportTone, setExportTone] = useState<"info" | "success" | "error">("info");
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => {
+      if (event.metaKey || event.ctrlKey || event.altKey || isTextEntryTarget(event.target)) return;
+      if (event.key === "?") setShortcutsOpen(true);
+      else if (event.key === "[") setLayout({ libraryOpen: !layout.libraryOpen });
+      else if (event.key === "]") setLayout({ inspectorOpen: !layout.inspectorOpen });
+      else return;
+      event.preventDefault();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [layout, setLayout]);
+
   const selected = state.document.objects.find((object) => object.id === state.selectedObjectId);
   const selectedAsset = assets.find((asset) => asset.id === selectedAssetId);
   const selectedPreviewUrl = selectedAssetId
     ? rasterSources.getPreviewUrl(selectedAssetId)
     : undefined;
   const provenance = selected ? selectImageProvenance(state.document, selected.id) : undefined;
-  const highlightedViewport = provenance?.viewport;
+  // Only outline the selected panel's crop when its own original is the one on screen.
+  const highlightedViewport =
+    provenance && provenance.assetId === selectedAssetId ? provenance.viewport : undefined;
+  const artboard = state.document.artboards[0];
+  const dimensions = exportDimensions(artboard, exportScale, customWidth);
 
-  const upload = async (file: File) => {
+  const trackUpload = (key: string, patch: Partial<Omit<UploadItem, "key">>) =>
+    setUploads((current) => updateUpload(current, key, patch));
+
+  const upload = async (file: File, key: string) => {
     setUploadStatus("Computing SHA-256 and reserving upload…");
     try {
-      const asset = await client.prepareAndUpload(project.id, file, file.name, (stage) =>
-        setUploadStatus(`Upload ${stage}`),
-      );
+      const asset = await client.prepareAndUpload(project.id, file, file.name, (stage) => {
+        setUploadStatus(`Upload ${stage}`);
+        trackUpload(key, { stage });
+      });
       if (asset.status === "rejected") {
-        setUploadStatus(
-          `Upload rejected: ${asset.rejectionReason ?? "unsupported image"}. Choose the original again to retry.`,
-        );
+        const reason = asset.rejectionReason ?? "unsupported image";
+        setUploadStatus(`Upload rejected: ${reason}. Choose the original again to retry.`);
+        trackUpload(key, { state: "error", message: `Rejected: ${reason}` });
+        toast.show({ tone: "error", title: `${file.name} was rejected`, description: reason });
         return;
       }
       await rasterSources.add(
@@ -146,12 +186,33 @@ export function FigLabEditor({
       setAssets((current) => [...current.filter((item) => item.id !== asset.id), asset]);
       setSelectedAssetId(asset.id);
       setUploadStatus("Upload completed and verified.");
+      trackUpload(key, { stage: "completed", state: "done" });
+      setTimeout(() => setUploads((current) => current.filter((item) => item.key !== key)), 1600);
+      toast.show({
+        tone: "success",
+        title: `${file.name} verified`,
+        description: "Checksum and format confirmed. Ready to crop.",
+      });
     } catch (error) {
+      const message = error instanceof Error ? error.message : "Upload failed.";
       setUploadStatus(
         error instanceof Error
           ? `Upload failed: ${error.message}. Choose the original again to retry.`
           : "Upload failed. Retry.",
       );
+      trackUpload(key, { state: "error", message });
+      toast.show({ tone: "error", title: `Could not upload ${file.name}`, description: message });
+    }
+  };
+
+  const enqueueUploads = (files: File[]) => {
+    for (const file of files) {
+      const key = crypto.randomUUID();
+      setUploads((current) => [
+        ...current,
+        { key, name: file.name, stage: "hashing", state: "active" },
+      ]);
+      uploadQueue.current = uploadQueue.current.then(() => upload(file, key));
     }
   };
 
@@ -165,10 +226,18 @@ export function FigLabEditor({
 
   const exportArtboard = async (widthPx: number, heightPx: number) => {
     setExportStatus("Saving the exact revision for export…");
+    setExportTone("info");
+    setExporting(true);
     try {
       const saved = await autosave.saveNow();
       if (!saved) {
         setExportStatus("Save the project before exporting. Recover your local work first.");
+        setExportTone("error");
+        toast.show({
+          tone: "error",
+          title: "Export paused",
+          description: "Resolve the save problem first, so the PNG matches a saved revision.",
+        });
         return;
       }
       const artboardId = saved.document.artboards[0]?.id;
@@ -184,18 +253,41 @@ export function FigLabEditor({
         download: downloadBlob,
       });
       setExportStatus("PNG downloaded and provenance recorded.");
+      setExportTone("success");
+      toast.show({
+        tone: "success",
+        title: "PNG exported",
+        description: `${widthPx} × ${heightPx} px from revision ${saved.revision}, rendered from the originals.`,
+      });
     } catch (error) {
       setExportStatus(error instanceof Error ? error.message : "PNG export failed.");
+      setExportTone("error");
+      toast.show({
+        tone: "error",
+        title: "Export failed",
+        description: error instanceof Error ? error.message : "Try again in a moment.",
+      });
+    } finally {
+      setExporting(false);
     }
   };
 
   return (
     <main className="editor-shell">
       <EditorToolbar
+        account={account ? <AccountArea account={account} client={client} compact /> : undefined}
+        canExport={dimensions.valid}
         canRedo={state.future.length > 0}
         canUndo={state.history.length > 0}
+        exporting={exporting}
+        inspectorOpen={layout.inspectorOpen}
+        libraryOpen={layout.libraryOpen}
         onBack={() => void navigateBack()}
+        onExport={() => void exportArtboard(dimensions.width, dimensions.height)}
         onRedo={() => session.getState().redo()}
+        onShowShortcuts={() => setShortcutsOpen(true)}
+        onToggleInspector={() => setLayout({ inspectorOpen: !layout.inspectorOpen })}
+        onToggleLibrary={() => setLayout({ libraryOpen: !layout.libraryOpen })}
         onUndo={() => session.getState().undo()}
         projectName={project.name}
         saveStatus={saveStatus}
@@ -205,17 +297,39 @@ export function FigLabEditor({
         onReload={() => void recoverLatest()}
         saveStatus={saveStatus}
       />
-      <div className="editor-layout">
-        <SourceLibrary
-          assets={assets}
-          onSelect={setSelectedAssetId}
-          onUpload={(file) => void upload(file)}
-          uploadStatus={uploadStatus}
-        />
+      <div
+        className="editor-layout"
+        data-inspector={layout.inspectorOpen ? "open" : "closed"}
+        data-library={layout.libraryOpen ? "open" : "closed"}
+      >
+        {layout.libraryOpen && (
+          <SourceLibrary
+            assets={assets}
+            onCollapse={() => setLayout({ libraryOpen: false })}
+            onDismissUpload={(key) =>
+              setUploads((current) => current.filter((item) => item.key !== key))
+            }
+            onRejectedFiles={(files) =>
+              toast.show({
+                tone: "error",
+                title: `Skipped ${files.map((file) => file.name).join(", ")}`,
+                description: "FigLab accepts PNG, JPEG and TIFF originals.",
+              })
+            }
+            onSelect={setSelectedAssetId}
+            onUpload={enqueueUploads}
+            previewUrl={(assetId) => rasterSources.getPreviewUrl(assetId)}
+            selectedAssetId={selectedAssetId}
+            uploadStatus={uploadStatus}
+            uploads={uploads}
+          />
+        )}
         <section aria-label="Figure editor" className="workspace">
           <OriginalInspector
             {...(selectedAsset ? { asset: selectedAsset } : {})}
+            collapsed={layout.originalCollapsed}
             {...(highlightedViewport ? { highlightedViewport } : {})}
+            onCollapsedChange={(originalCollapsed) => setLayout({ originalCollapsed })}
             onCrop={(viewport) => {
               if (!selectedAssetId) return;
               session.getState().beginCrop({ x: viewport.x, y: viewport.y });
@@ -239,33 +353,75 @@ export function FigLabEditor({
               session.getState().previewObjectResize(delta, anchor);
             }}
             onSelect={(id) => session.getState().selectObject(id)}
+            onZoomChange={setZoom}
             rasterSources={rasterSources}
             {...(state.selectedObjectId ? { selectedId: state.selectedObjectId } : {})}
+            zoom={zoom}
           />
         </section>
-        <aside aria-label="Display inspector" className="display-inspector">
-          <h2>Display inspector</h2>
-          {selected ? (
-            <>
-              <TransformControls
-                object={selected}
-                onChange={(display) => session.getState().setDisplay(selected.id, display)}
-              />
-              <Button onClick={() => session.getState().deleteSelectedObject()}>
-                Delete selected panel
-              </Button>
-            </>
-          ) : (
-            <p className="empty-state">Select or crop an image to adjust its display transform.</p>
-          )}
-          <ExportControls
-            artboard={state.document.artboards[0]}
-            onExport={exportArtboard}
-            status={exportStatus}
-          />
-          <ProvenanceSection onShowInOriginal={setSelectedAssetId} provenance={provenance} />
-        </aside>
+        {layout.inspectorOpen && (
+          <aside aria-label="Inspector" className="inspector">
+            {selected ? (
+              <div className="pane-header">
+                <h2>
+                  Panel{" "}
+                  <Badge mono title={selected.id} tone="primary">
+                    {selected.id.slice(0, 13)}
+                  </Badge>
+                </h2>
+                <IconButton
+                  icon={<TrashIcon size={16} />}
+                  label="Delete selected panel"
+                  onClick={() => session.getState().deleteSelectedObject()}
+                  shortcut="Delete"
+                  size="sm"
+                  tooltipAlign="end"
+                  variant="danger"
+                />
+              </div>
+            ) : (
+              <div className="pane-header">
+                <h2>Inspector</h2>
+              </div>
+            )}
+            {selected ? (
+              <>
+                <DisplaySection
+                  object={selected}
+                  onChange={(display) => session.getState().setDisplay(selected.id, display)}
+                />
+                {provenance && (
+                  <ProvenanceSection
+                    asset={assets.find((asset) => asset.id === provenance.assetId)}
+                    onShowInOriginal={(assetId) => {
+                      setSelectedAssetId(assetId);
+                      if (layout.originalCollapsed) setLayout({ originalCollapsed: false });
+                    }}
+                    provenance={provenance}
+                  />
+                )}
+              </>
+            ) : (
+              <EmptyState headingLevel={3} mood="sleepy" plain title="No panel selected">
+                Drag across the original to crop a panel, or click a panel on the artboard to adjust
+                it.
+              </EmptyState>
+            )}
+            <ExportSection
+              customWidth={customWidth}
+              height={dimensions.height}
+              onCustomWidthChange={setCustomWidth}
+              onScaleChange={setExportScale}
+              scale={exportScale}
+              status={exportStatus}
+              statusTone={exportTone}
+              valid={dimensions.valid}
+              width={dimensions.width}
+            />
+          </aside>
+        )}
       </div>
+      <ShortcutsDialog onOpenChange={setShortcutsOpen} open={shortcutsOpen} />
     </main>
   );
 }
