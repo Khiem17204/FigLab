@@ -232,8 +232,12 @@ export class PostgresFigLabRepository implements FigLabRepository {
   ): Promise<{ id: string; name: string; kind: WorkspaceKind }> {
     assertResourceId(workspaceId);
     const row = first(
-      (await this.pool.query("SELECT id,name,kind FROM workspaces WHERE id=$1", [workspaceId]))
-        .rows,
+      (
+        await this.pool.query(
+          "SELECT id,name,kind FROM workspaces WHERE id=$1 AND deleted_at IS NULL",
+          [workspaceId],
+        )
+      ).rows,
     );
     return { id: row.id, name: row.name, kind: row.kind };
   }
@@ -283,6 +287,35 @@ export class PostgresFigLabRepository implements FigLabRepository {
         )
       ).rows,
     );
+  }
+  async deleteLabWorkspace(workspaceId: string): Promise<void> {
+    assertResourceId(workspaceId);
+    await this.transaction(async (client) => {
+      const workspace = first(
+        (
+          await client.query(
+            "SELECT kind FROM workspaces WHERE id=$1 AND deleted_at IS NULL FOR UPDATE",
+            [workspaceId],
+          )
+        ).rows,
+      );
+      if (workspace.kind !== "lab") throw new NotFoundError();
+      const live = await client.query(
+        "SELECT 1 FROM projects WHERE workspace_id=$1 AND status<>'deleted' LIMIT 1",
+        [workspaceId],
+      );
+      if ((live.rowCount ?? 0) > 0)
+        throw new ConflictError("Delete or move the lab's projects first");
+      await client.query("UPDATE projects SET folder_id=NULL WHERE workspace_id=$1", [workspaceId]);
+      await client.query("DELETE FROM workspace_invites WHERE workspace_id=$1", [workspaceId]);
+      await client.query("DELETE FROM project_templates WHERE workspace_id=$1", [workspaceId]);
+      await client.query("UPDATE folders SET parent_id=NULL WHERE workspace_id=$1", [workspaceId]);
+      await client.query("DELETE FROM folders WHERE workspace_id=$1", [workspaceId]);
+      await client.query("DELETE FROM workspace_members WHERE workspace_id=$1", [workspaceId]);
+      await client.query("UPDATE workspaces SET deleted_at=now(),updated_at=now() WHERE id=$1", [
+        workspaceId,
+      ]);
+    });
   }
   async listMembers(workspaceId: string): Promise<WorkspaceMember[]> {
     assertResourceId(workspaceId);
@@ -725,8 +758,8 @@ export class PostgresFigLabRepository implements FigLabRepository {
         await this.pool.query(
           `SELECT
              (SELECT count(*) FROM users)::int AS users,
-             (SELECT count(*) FROM workspaces WHERE kind='personal')::int AS personal,
-             (SELECT count(*) FROM workspaces WHERE kind='lab')::int AS labs,
+             (SELECT count(*) FROM workspaces WHERE kind='personal' AND deleted_at IS NULL)::int AS personal,
+             (SELECT count(*) FROM workspaces WHERE kind='lab' AND deleted_at IS NULL)::int AS labs,
              (SELECT count(*) FROM projects WHERE status='active')::int AS projects,
              (SELECT count(*) FROM assets a JOIN projects p ON p.id=a.project_id
                 WHERE a.status='ready' AND p.status='active')::int AS assets,
@@ -793,7 +826,7 @@ export class PostgresFigLabRepository implements FigLabRepository {
          (SELECT COALESCE(sum(u.content_length),0) FROM assets a
             JOIN projects p ON p.id=a.project_id JOIN upload_sessions u ON u.id=a.upload_id
             WHERE p.workspace_id=w.id AND p.status='active' AND a.status='ready')::bigint AS storage
-       FROM workspaces w ORDER BY w.created_at, w.id LIMIT $1`,
+       FROM workspaces w WHERE w.deleted_at IS NULL ORDER BY w.created_at, w.id LIMIT $1`,
       [limit],
     );
     return result.rows.map((row) => ({

@@ -7470,6 +7470,17 @@ paths:
       responses:
         '204':
           description: Default Response
+    delete:
+      parameters:
+      - schema:
+          format: uuid
+          type: string
+        in: path
+        name: workspaceId
+        required: true
+      responses:
+        '204':
+          description: Default Response
   "/v1/workspaces/{workspaceId}/projects":
     get:
       parameters:

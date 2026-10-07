@@ -6,10 +6,11 @@ Build publication-ready scientific figures from your original images without eve
 
 ## Features
 
-- **Accounts** — sign up with email and password, verify your email, and keep a private workspace.
+- **Accounts** — sign up with email and password, verify your email, and keep a private
+  workspace.
 - **Projects** — create, rename, open, and delete figure projects.
 - **Immutable originals** — upload PNG, JPEG, and 8/16-bit TIFF images; each file is
-  checksum-verified and never modified.
+  checksum-verified and never modified (derived previews are stored beside it).
 - **Reproducible crops** — drag to crop panels from an original; every panel keeps an exact
   link back to its source ("Show in Original").
 - **Non-destructive adjustments** — brightness, contrast, gamma, and invert, with move, resize,
@@ -25,6 +26,14 @@ Build publication-ready scientific figures from your original images without eve
   pixels, one figure or all at once, with provenance recorded for every file.
 - **History** — an audit trail of who changed what, saved versions you can restore, and export
   records.
+- **Blots** — band crops along tilted lanes, ladder marking with kDa labels, lane label tables,
+  densitometry normalized to a loading control, with CSV export.
+- **Microscopy** — multi-page, tiled, OME and BigTIFF; levels, lookup tables, channel split and
+  merge; calibrated scale bars; linked zoom insets.
+- **Integrity evidence** — per-panel reports of crops, adjustments, saturation, and checks such
+  as missing loading controls; a provenance bundle with uncropped originals for reviewers.
+- **Labs** — shared workspaces with owner/admin/editor/viewer roles and copyable invite links,
+  folders, search, templates, comment threads, and an admin overview.
 
 ## Tech stack
 

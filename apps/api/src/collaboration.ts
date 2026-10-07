@@ -155,6 +155,18 @@ export function registerCollaborationRoutes(
       return reply.status(204).send();
     },
   );
+  app.delete(
+    apiRoutes.workspace,
+    { schema: { params: WorkspaceParamsSchema, response: { 204: Type.Null() } } },
+    async (request, reply) => {
+      const { workspaceId } = request.params as { workspaceId: string };
+      const role = await authorizer.requireWorkspace(request.principal, workspaceId, "manage");
+      if (role !== "owner") throw new ForbiddenError("Only owners can delete a lab");
+      await requireLab(workspaceId);
+      await repository.deleteLabWorkspace(workspaceId);
+      return reply.status(204).send();
+    },
+  );
   app.get(
     apiRoutes.workspaceProjects,
     {

@@ -244,6 +244,9 @@ export class FigLabClient {
       body: { name },
     });
   }
+  async deleteLab(workspaceId: string): Promise<void> {
+    await this.json(path(apiRoutes.workspace, { workspaceId }), { method: "DELETE" });
+  }
   async listWorkspaceProjects(
     workspaceId: string,
     filter: { q?: string; folderId?: string } = {},

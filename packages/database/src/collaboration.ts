@@ -176,6 +176,11 @@ export interface CollaborationRepository {
   listWorkspaces(userId: string): Promise<WorkspaceSummary[]>;
   createLabWorkspace(userId: string, name: string): Promise<WorkspaceSummary>;
   renameWorkspace(workspaceId: string, name: string): Promise<void>;
+  /**
+   * Removes a lab: its members, invites, folders, and templates go and the row stays as a
+   * tombstone. Throws `ConflictError` while it still has projects.
+   */
+  deleteLabWorkspace(workspaceId: string): Promise<void>;
   listMembers(workspaceId: string): Promise<WorkspaceMember[]>;
   /** Throws `ConflictError` when the change would leave the workspace without an owner. */
   setMemberRole(workspaceId: string, userId: string, role: WorkspaceRole): Promise<WorkspaceMember>;

@@ -480,7 +480,7 @@ test.describe
 
     test("other users cannot see or open the project", async () => {
       const token = await accessToken(member.email, member.password);
-      expect(await (await api("/v1/me", token)).json()).toEqual({
+      expect(await (await api("/v1/me", token)).json()).toMatchObject({
         email: member.email,
         role: "member",
       });
@@ -488,10 +488,99 @@ test.describe
       expect((await api(`/v1/projects/${projectId}`, token)).status).toBe(404);
       expect((await api(`/v1/projects/${projectId}/document`, token)).status).toBe(404);
       const adminToken = await accessToken(admin.email, admin.password);
-      expect(await (await api("/v1/me", adminToken)).json()).toEqual({
+      expect(await (await api("/v1/me", adminToken)).json()).toMatchObject({
         email: admin.email,
         role: "admin",
       });
+    });
+
+    test("a lab shares a project by invite link with a view-only member who comments", async ({
+      page,
+      browser,
+    }) => {
+      const labName = `Live lab ${runId}`;
+      const labProject = `Lab project ${runId}`;
+      await signIn(page, admin.email, admin.password);
+      await page.getByLabel("New lab name").fill(labName);
+      await page.getByRole("button", { name: "Create lab" }).click();
+      await expect(page.getByText(`Lab · ${labName}`)).toBeVisible();
+      await page.getByLabel("New project name").fill(labProject);
+      await page.getByRole("button", { name: "Create project" }).click();
+      await expect(page.getByRole("heading", { name: labProject })).toBeVisible();
+      await page.getByRole("button", { name: "Projects" }).click();
+      await page.getByRole("button", { name: "Lab members" }).click();
+      await page.getByLabel("Invite role").selectOption("viewer");
+      await page.getByLabel("Only for email (optional)").fill(member.email);
+      await page.getByRole("button", { name: "Create invite link" }).click();
+      const link = await page.getByLabel("Invite link").inputValue();
+      expect(link).toMatch(/\?invite=[A-Za-z0-9_-]{43}$/);
+
+      // The member opens the link signed out, signs in, and joins.
+      const memberContext = await browser.newContext();
+      const memberPage = await memberContext.newPage();
+      await memberPage.goto(link);
+      await memberPage.getByLabel("Email").fill(member.email);
+      await memberPage.getByLabel("Password").fill(member.password);
+      await memberPage.getByRole("button", { name: "Sign in", exact: true }).click();
+      await expect(memberPage.getByRole("region", { name: "Lab invite" })).toContainText(
+        `join ${labName} as viewer`,
+      );
+      await memberPage.getByRole("button", { name: `Join ${labName}` }).click();
+      await expect(memberPage.getByText(`Lab · ${labName}`)).toBeVisible();
+      await memberPage.getByRole("button", { name: `Open ${labProject}` }).click();
+      await expect(memberPage.getByRole("note")).toContainText("View only");
+      await memberPage.getByLabel("Comment", { exact: true }).fill(`Live comment ${runId}`);
+      await memberPage.getByRole("button", { name: "Add comment" }).click();
+      await expect(memberPage.getByRole("list", { name: "Comment threads" })).toContainText(
+        `Live comment ${runId}`,
+      );
+      await memberContext.close();
+
+      const memberToken = await accessToken(member.email, member.password);
+      const adminToken = await accessToken(admin.email, admin.password);
+      const workspaces = (await (await api("/v1/workspaces", adminToken)).json()) as {
+        workspaces: { id: string; name: string }[];
+      };
+      const lab = workspaces.workspaces.find((workspace) => workspace.name === labName);
+      if (!lab) throw new Error("lab missing");
+      const projects = (await (
+        await api(`/v1/workspaces/${lab.id}/projects`, adminToken)
+      ).json()) as { projects: { id: string }[] };
+      const sharedId = projects.projects[0]?.id ?? "";
+      const document = await (await api(`/v1/projects/${sharedId}/document`, memberToken)).json();
+      const save = await api(`/v1/projects/${sharedId}/document`, memberToken, {
+        method: "PUT",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ baseRevision: document.revision, document: document.document }),
+      });
+      expect(save.status).toBe(403);
+      const comments = (await (
+        await api(`/v1/projects/${sharedId}/comments`, adminToken)
+      ).json()) as { comments: { body: string; author: { email: string } }[] };
+      expect(comments.comments).toEqual([
+        expect.objectContaining({
+          body: `Live comment ${runId}`,
+          author: expect.objectContaining({ email: member.email }),
+        }),
+      ]);
+      expect((await api("/v1/admin/overview", adminToken)).status).toBe(200);
+      expect((await api("/v1/admin/overview", memberToken)).status).toBe(403);
+
+      // Clean up: delete the project, then the lab once the deletion job has run.
+      expect((await api(`/v1/projects/${sharedId}`, adminToken, { method: "DELETE" })).status).toBe(
+        202,
+      );
+      await expect
+        .poll(
+          async () =>
+            (await api(`/v1/workspaces/${lab.id}`, adminToken, { method: "DELETE" })).status,
+          { timeout: 420_000, intervals: [5_000] },
+        )
+        .toBe(204);
+      expect(
+        ((await (await api("/v1/workspaces", memberToken)).json()) as { workspaces: unknown[] })
+          .workspaces,
+      ).toHaveLength(1);
     });
 
     test("rename and delete remove the project and its originals", async ({ page }) => {

@@ -4,6 +4,8 @@
 ALTER TABLE public.workspaces ADD COLUMN IF NOT EXISTS kind text NOT NULL DEFAULT 'personal';
 ALTER TABLE public.workspaces ADD CONSTRAINT workspaces_kind_check CHECK (kind IN ('personal','lab'));
 ALTER TABLE public.workspaces ADD COLUMN IF NOT EXISTS created_by uuid REFERENCES public.users(id);
+-- Deleted labs keep their row (projects' audit trails reference it) but lose every member.
+ALTER TABLE public.workspaces ADD COLUMN IF NOT EXISTS deleted_at timestamptz;
 ALTER TABLE public.workspace_members ADD CONSTRAINT workspace_members_role_check
   CHECK (role IN ('owner','admin','editor','viewer'));
 CREATE INDEX IF NOT EXISTS workspace_members_workspace ON public.workspace_members(workspace_id);

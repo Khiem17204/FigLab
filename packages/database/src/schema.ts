@@ -27,6 +27,7 @@ export const workspaces = pgTable("workspaces", {
   name: text("name").notNull(),
   kind: text("kind").notNull().default("personal"),
   createdBy: uuid("created_by").references(() => users.id),
+  deletedAt: timestamp("deleted_at", { withTimezone: true }),
   ...dates,
 });
 export const workspaceMembers = pgTable(

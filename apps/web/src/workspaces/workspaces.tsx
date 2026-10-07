@@ -515,6 +515,20 @@ export function LabMembers({
           Rename lab
         </Button>
       )}
+      {workspace.role === "owner" && (
+        <Button
+          onClick={() => {
+            if (!window.confirm(`Delete ${workspace.name}? Its projects must be deleted first.`))
+              return;
+            void run(async () => {
+              await client.deleteLab(workspace.id);
+              onLeft();
+            });
+          }}
+        >
+          Delete lab
+        </Button>
+      )}
       <table aria-label="Members">
         <thead>
           <tr>

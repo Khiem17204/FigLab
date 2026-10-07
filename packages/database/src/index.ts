@@ -873,6 +873,29 @@ export class InMemoryFigLabRepository implements FigLabRepository {
     if (!workspace) throw new NotFoundError();
     workspace.name = name;
   }
+  async deleteLabWorkspace(workspaceId: string): Promise<void> {
+    if (this.workspaces.get(workspaceId)?.kind !== "lab") throw new NotFoundError();
+    if (
+      [...this.projects.values()].some(
+        (project) => project.workspaceId === workspaceId && project.status !== "deleted",
+      )
+    )
+      throw new ConflictError("Delete or move the lab's projects first");
+    for (let index = this.members.length - 1; index >= 0; index -= 1)
+      if (this.members[index]?.workspaceId === workspaceId) this.members.splice(index, 1);
+    for (let index = this.invites.length - 1; index >= 0; index -= 1)
+      if (this.invites[index]?.workspaceId === workspaceId) this.invites.splice(index, 1);
+    for (const [id, folder] of this.folders)
+      if (folder.workspaceId === workspaceId) this.folders.delete(id);
+    for (const [id, template] of this.templates)
+      if (template.workspaceId === workspaceId) this.templates.delete(id);
+    for (const [id, project] of this.projects)
+      if (project.workspaceId === workspaceId && project.folderId) {
+        const { folderId: _gone, ...rest } = project;
+        this.projects.set(id, rest);
+      }
+    this.workspaces.delete(workspaceId);
+  }
   async listMembers(workspaceId: string): Promise<WorkspaceMember[]> {
     return this.members
       .filter((member) => member.workspaceId === workspaceId)

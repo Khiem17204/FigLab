@@ -295,6 +295,46 @@ export function collaborationContract(setup: Setup): void {
     expect(await repository.listComments(project.id)).toEqual([]);
   });
 
+  it("deletes an empty lab, removing its members, invites, folders, and templates", async () => {
+    const repository = await setup();
+    const [pi, student] = await users(repository, 2);
+    if (!pi || !student) throw new Error("users");
+    const lab = await repository.createLabWorkspace(pi.id, "Closing Lab");
+    const hash = token();
+    await repository.createInvite({
+      workspaceId: lab.id,
+      role: "editor",
+      createdBy: pi.id,
+      tokenSha256: hash,
+      expiresAt: later(),
+    });
+    await repository.acceptInvite(hash, student);
+    const folder = await repository.createFolder(lab.id, "Old");
+    await repository.createFolder(lab.id, "Older", folder.id);
+    await repository.createTemplate({
+      workspaceId: lab.id,
+      name: "Layout",
+      document: { schemaVersion: 3 },
+      createdBy: pi.id,
+    });
+    const project = await repository.createProject(lab.id, "Still here", { folderId: folder.id });
+    await expect(repository.deleteLabWorkspace(lab.id)).rejects.toBeInstanceOf(ConflictError);
+    await repository.markProjectDeleting(project.id);
+    await repository.deleteProjectData(project.id);
+    await repository.deleteLabWorkspace(lab.id);
+    expect((await repository.listWorkspaces(student.id)).map((entry) => entry.id)).not.toContain(
+      lab.id,
+    );
+    expect(await repository.getWorkspaceRole(lab.id, pi.id)).toBeUndefined();
+    await expect(repository.getWorkspace(lab.id)).rejects.toBeInstanceOf(NotFoundError);
+    await expect(repository.previewInvite(hash)).rejects.toBeInstanceOf(NotFoundError);
+    // The deleted project's audit trail survives.
+    expect((await repository.listAuditEvents(project.id)).length).toBeGreaterThan(0);
+    await expect(repository.deleteLabWorkspace(pi.workspaceId)).rejects.toBeInstanceOf(
+      NotFoundError,
+    );
+  });
+
   it("summarizes users, workspaces, and storage for admins", async () => {
     const repository = await setup();
     const [pi] = await users(repository, 1);

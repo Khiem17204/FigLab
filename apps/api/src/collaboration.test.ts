@@ -72,7 +72,7 @@ async function lab() {
 
 describe("lab workspaces over HTTP", () => {
   it("invites by link, enforces roles per route, and keeps outsiders out", async () => {
-    const { app, pi, student, stranger, call } = await lab();
+    const { app, repository, pi, student, stranger, call } = await lab();
     const workspace = (await call(pi, "POST", "/v1/workspaces", { name: "Ramos Lab" })).body;
     expect(workspace).toMatchObject({ kind: "lab", role: "owner", memberCount: 1 });
     const project = (
@@ -181,6 +181,14 @@ describe("lab workspaces over HTTP", () => {
       (await call(student, "DELETE", `/v1/workspaces/${workspace.id}/members/${STUDENT}`)).status,
     ).toBe(204);
     expect((await call(student, "GET", `/v1/projects/${project.id}`)).status).toBe(404);
+
+    // Owners delete a lab once its projects are gone.
+    expect((await call(pi, "DELETE", `/v1/workspaces/${workspace.id}`)).body.code).toBe("CONFLICT");
+    expect((await call(pi, "DELETE", `/v1/projects/${project.id}`)).status).toBe(202);
+    await repository.deleteProjectData(project.id);
+    expect((await call(pi, "DELETE", `/v1/workspaces/${workspace.id}`)).status).toBe(204);
+    expect((await call(pi, "GET", "/v1/workspaces")).body.workspaces).toHaveLength(1);
+    expect((await call(pi, "DELETE", `/v1/workspaces/${personal}`)).status).toBe(409);
     await app.close();
   });
 
