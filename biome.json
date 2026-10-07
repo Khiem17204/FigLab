@@ -8,7 +8,9 @@
       "!!**/dist",
       "!!**/coverage",
       "!!**/playwright-report",
-      "!!**/test-results"
+      "!!**/test-results",
+      "!!**/.netlify",
+      "!!netlify/node_modules"
     ]
   },
   "formatter": {

@@ -25,5 +25,24 @@ jobs:
       - run: pnpm build
       - run: pnpm exec playwright install --with-deps chromium
       - run: pnpm test:e2e
-      - run: pnpm test:visual
       - run: pnpm test:compose
+
+  # Screenshot baselines are generated in this exact image (linux/amd64), so fonts and
+  # rendering match: `docker run --platform linux/amd64 -v "$PWD":/repo -w /repo
+  # mcr.microsoft.com/playwright:v1.62.1-noble` then `pnpm exec playwright test --grep @visual
+  # --update-snapshots` after a fresh `pnpm install`.
+  visual:
+    runs-on: ubuntu-latest
+    container:
+      image: mcr.microsoft.com/playwright:v1.62.1-noble
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.34.5
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm test:visual
