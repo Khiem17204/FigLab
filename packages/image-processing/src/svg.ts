@@ -1,8 +1,9 @@
 import type { FigureDocument } from "@figlab/figure-schema";
 import { bytesToBase64 } from "./encode.js";
-import { renderImageViewPng, sceneFor } from "./export.js";
+import { renderPanelPng, sceneFor } from "./export.js";
 import { FIGURE_FONT_FAMILY, type FontFaceBytes, type FontFaceKey, fontFaceKey } from "./fonts.js";
-import type { RasterSourceResolver } from "./index.js";
+import { documentSourceSizes } from "./panel-render.js";
+import type { RasterSourceResolver } from "./raster.js";
 import type { PathCommand, StrokeStyle, TextMetrics, VectorPrimitive } from "./scene.js";
 
 const number = (value: number) => Number(value.toFixed(3)).toString();
@@ -49,11 +50,12 @@ export async function composeArtboardSvg(
   },
 ): Promise<string> {
   const scene = sceneFor(document, artboardId, options.metrics);
+  const sizes = documentSourceSizes(document, options.resolver);
   const body: string[] = [];
   const usedFaces = new Set<FontFaceKey>();
   for (const item of scene.items) {
     if (item.kind === "raster") {
-      const { png } = await renderImageViewPng(item.object, options.dpi, options.resolver);
+      const { png } = await renderPanelPng(item.object, options.dpi, options.resolver, sizes);
       const { xPt, yPt, widthPt, heightPt } = item.object.transform;
       body.push(
         `<image data-object-id="${escapeXml(item.object.id)}" x="${number(xPt)}" y="${number(yPt)}" width="${number(widthPt)}" height="${number(heightPt)}" preserveAspectRatio="none" href="data:image/png;base64,${bytesToBase64(png)}"/>`,

@@ -1,7 +1,8 @@
-import { normalizedToPixelRect, type ObjectTransform } from "@figlab/editor-core";
-import type { FigureDocument, FigureObject, ImageViewObjectV1 } from "@figlab/figure-schema";
+import type { ObjectTransform } from "@figlab/editor-core";
+import type { FigureDocument, FigureObject, ImagePanelObject } from "@figlab/figure-schema";
 import {
   buildArtboardScene,
+  documentSourceSizes,
   type TextMetrics,
   type VectorSceneItem,
 } from "@figlab/image-processing";
@@ -54,7 +55,7 @@ export async function buildPixiArtboardScene({
   screenTransform: ArtboardScreenTransform;
   previewTransforms?: PreviewTransforms;
   metrics?: TextMetrics;
-  loadTexture: (object: ImageViewObjectV1) => Promise<Texture | undefined>;
+  loadTexture: (object: ImagePanelObject) => Promise<Texture | undefined>;
   loadVectorTexture?: (item: VectorSceneItem, scale: number) => VectorTexture | undefined;
   isDisposed?: () => boolean;
 }) {
@@ -146,12 +147,14 @@ export function PixiArtboard({
         ...(metrics ? { metrics } : {}),
         isDisposed: () => disposed,
         loadTexture: async (object) => {
-          if (!rasterSources.has(object.view.sourceAssetId)) return undefined;
-          const source = await rasterSources.describe(object.view.sourceAssetId);
-          const previewUrl = await rasterSources.getDisplayPreviewUrl(
-            object.view.sourceAssetId,
-            normalizedToPixelRect(object.view.viewport, source.widthPx, source.heightPx),
-            object.view.display,
+          const assets =
+            object.type === "image-view"
+              ? [object.view.sourceAssetId]
+              : object.composite.channels.map((channel) => channel.sourceAssetId);
+          if (!assets.every((assetId) => rasterSources.has(assetId))) return undefined;
+          const previewUrl = await rasterSources.getPanelPreviewUrl(
+            object,
+            documentSourceSizes(document, rasterSources),
           );
           return Assets.load<Texture>(previewUrl);
         },

@@ -1,4 +1,5 @@
 import {
+  attachedTargetIds,
   decodeFigureDocument,
   type FigureDocument,
   type FigureObject,
@@ -56,18 +57,19 @@ export function arrangementUnits(
   }
   for (const object of document.objects) {
     if (!expanded.has(object.id) || unitOf.has(object.id)) continue;
-    const target = object.type === "text" ? object.panelLabel?.targetObjectId : undefined;
-    if (target !== undefined && expanded.has(target)) continue;
+    if (attachedTargetIds(object).some((target) => expanded.has(target))) continue;
     const unit = [object.id];
     units.push(unit);
     unitOf.set(object.id, unit);
   }
-  // Attached labels ride with their target's unit; they never define its bounds.
+  // Attached objects ride with their target's unit; they never define its bounds.
   const labels: [string, string[]][] = [];
   for (const object of document.objects) {
-    if (!expanded.has(object.id) || object.type !== "text" || !object.panelLabel) continue;
-    const targetUnit = unitOf.get(object.panelLabel.targetObjectId);
-    if (targetUnit && targetUnit !== unitOf.get(object.id)) labels.push([object.id, targetUnit]);
+    const targetId = attachedTargetIds(object).find((target) => unitOf.has(target));
+    if (!expanded.has(object.id) || targetId === undefined) continue;
+    const targetUnit = unitOf.get(targetId);
+    if (targetUnit && targetUnit !== unitOf.get(object.id) && !targetUnit.includes(object.id))
+      labels.push([object.id, targetUnit]);
   }
   const unitBounds = units.map(
     (unit) => unionBounds(unit.map((id) => objectBounds(byId.get(id) as FigureObject))) as Bounds,
@@ -276,6 +278,50 @@ export function ungroupObjectsCommand(ids: ReadonlyArray<string>): Command {
 }
 
 /**
+ * Points a copied object's attachment at copied targets. A label whose target was not copied
+ * becomes plain text; other attached objects are dropped, since they cannot exist detached.
+ */
+function remapAttachment(copy: FigureObject, idMap: Map<string, string>): FigureObject | undefined {
+  const mapped = (id: string) => idMap.get(id);
+  switch (copy.type) {
+    case "text": {
+      if (!copy.panelLabel) return copy;
+      const target = mapped(copy.panelLabel.targetObjectId);
+      if (target) return { ...copy, panelLabel: { ...copy.panelLabel, targetObjectId: target } };
+      const { panelLabel: _detached, ...plain } = copy;
+      return plain;
+    }
+    case "scale-bar": {
+      const target = mapped(copy.scaleBar.targetObjectId);
+      return target
+        ? { ...copy, scaleBar: { ...copy.scaleBar, targetObjectId: target } }
+        : undefined;
+    }
+    case "lane-table": {
+      const target = mapped(copy.laneTable.targetObjectId);
+      return target
+        ? { ...copy, laneTable: { ...copy.laneTable, targetObjectId: target } }
+        : undefined;
+    }
+    case "mw-labels": {
+      const target = mapped(copy.mwLabels.targetObjectId);
+      return target
+        ? { ...copy, mwLabels: { ...copy.mwLabels, targetObjectId: target } }
+        : undefined;
+    }
+    case "zoom-link": {
+      const from = mapped(copy.zoomLink.sourceObjectId);
+      const inset = mapped(copy.zoomLink.insetObjectId);
+      return from && inset
+        ? { ...copy, zoomLink: { ...copy.zoomLink, sourceObjectId: from, insetObjectId: inset } }
+        : undefined;
+    }
+    default:
+      return copy;
+  }
+}
+
+/**
  * Copies the selection (with groups and attached labels) above everything else on its artboard,
  * offset by a delta. Labels keep their link only when their target was copied too, and image
  * copies keep `sourceAssetId`, so they stay provenance siblings of the original crop.
@@ -297,22 +343,19 @@ export function duplicateObjects(
     .filter(({ object }) => selected.has(object.id))
     .sort((left, right) => left.object.zIndex - right.object.zIndex || left.index - right.index)
     .map(({ object }) => object);
-  const copies = originals.map((object) => {
-    const zIndex = (topZ.get(object.artboardId) ?? -1) + 1;
-    topZ.set(object.artboardId, zIndex);
-    const copy = {
-      ...translate(structuredClone(object), offsetPt.x, offsetPt.y),
-      id: idMap.get(object.id) as string,
-      zIndex,
-      locked: false,
-    } as FigureObject;
-    if (copy.type === "text" && copy.panelLabel) {
-      const target = idMap.get(copy.panelLabel.targetObjectId);
-      if (target) copy.panelLabel = { ...copy.panelLabel, targetObjectId: target };
-      else delete copy.panelLabel;
-    }
-    return copy;
-  });
+  const copies = originals
+    .map((object) => {
+      const zIndex = (topZ.get(object.artboardId) ?? -1) + 1;
+      topZ.set(object.artboardId, zIndex);
+      const copy = {
+        ...translate(structuredClone(object), offsetPt.x, offsetPt.y),
+        id: idMap.get(object.id) as string,
+        zIndex,
+        locked: false,
+      } as FigureObject;
+      return remapAttachment(copy, idMap);
+    })
+    .filter((copy): copy is FigureObject => copy !== undefined);
   const groups = document.groups
     .filter((group) => group.objectIds.every((id) => idMap.has(id)))
     .map((group) => ({

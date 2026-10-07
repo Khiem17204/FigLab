@@ -8,8 +8,13 @@ import type {
 
 export interface TiffRasterClient {
   open(assetId: string, bytes: ArrayBuffer): Promise<RasterDescription>;
-  read(assetId: string, sourceRect: SourcePixelRect, pyramidLevel?: number): Promise<RasterRegion>;
-  preview(assetId: string, maxEdge?: number): Promise<RasterRegion>;
+  read(
+    assetId: string,
+    sourceRect: SourcePixelRect,
+    pyramidLevel?: number,
+    plane?: number,
+  ): Promise<RasterRegion>;
+  preview(assetId: string, maxEdge?: number, plane?: number): Promise<RasterRegion>;
   terminate(): void;
 }
 
@@ -57,15 +62,27 @@ export class TiffRasterWorkerClient implements TiffRasterClient {
     assetId: string,
     sourceRect: SourcePixelRect,
     pyramidLevel = 0,
+    plane = 0,
   ): Promise<RasterRegion> {
-    const response = await this.request({ kind: "read", assetId, sourceRect, pyramidLevel });
+    const response = await this.request({
+      kind: "read",
+      assetId,
+      sourceRect,
+      pyramidLevel,
+      ...(plane ? { plane } : {}),
+    });
     if (response.kind !== "region")
       throw new Error("TIFF worker returned an invalid read response");
     return response.region;
   }
 
-  async preview(assetId: string, maxEdge = 1_024): Promise<RasterRegion> {
-    const response = await this.request({ kind: "preview", assetId, maxEdge });
+  async preview(assetId: string, maxEdge = 1_024, plane = 0): Promise<RasterRegion> {
+    const response = await this.request({
+      kind: "preview",
+      assetId,
+      maxEdge,
+      ...(plane ? { plane } : {}),
+    });
     if (response.kind !== "region")
       throw new Error("TIFF worker returned an invalid preview response");
     return response.region;

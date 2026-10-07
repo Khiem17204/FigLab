@@ -1,11 +1,15 @@
-import type { DisplayTransformV1 } from "@figlab/figure-schema";
+import type { DisplayTransformV1, ImagePanelObject } from "@figlab/figure-schema";
 import {
   applyDisplayTransform,
+  cropSizePx,
   decodeBrowserRaster,
+  panelCrop,
   type RasterDescription,
   type RasterRegion,
   type RasterSourceResolver,
+  renderPanelRgba,
   type SourcePixelRect,
+  type SourceSizes,
 } from "@figlab/image-processing";
 import { createTiffRasterWorkerClient, type TiffRasterClient } from "./tiff-worker-client";
 
@@ -46,6 +50,62 @@ export class BrowserRasterRepository implements RasterSourceResolver {
 
   getPreviewUrl(assetId: string): string | undefined {
     return this.previewUrls.get(assetId);
+  }
+
+  /** A whole-image preview of one page of a multi-page TIFF (page 0 is `getPreviewUrl`). */
+  async getPlanePreviewUrl(assetId: string, plane: number): Promise<string | undefined> {
+    if (plane === 0) return this.getPreviewUrl(assetId);
+    const key = `plane:${assetId}:${plane}`;
+    const cached = this.previewUrls.get(key);
+    if (cached) return cached;
+    if (!this.tiffDescriptions.has(assetId)) return undefined;
+    const url = await createTiffPreviewUrl(
+      await this.requiredTiffClient().preview(assetId, 1_024, plane),
+    );
+    this.previewUrls.set(key, url);
+    return url;
+  }
+
+  /**
+   * A preview of a panel rendered with the same sampler as export, from original samples, at a
+   * bounded size. Everything that affects pixels (crop, rotation, flips, plane, channel, display)
+   * is part of the cache key; placement on the artboard is not.
+   */
+  async getPanelPreviewUrl(
+    object: ImagePanelObject,
+    sizes: SourceSizes,
+    maxEdge = 768,
+  ): Promise<string> {
+    const reading = object.type === "image-view" ? object.view : object.composite;
+    const cacheKey = `panel:${JSON.stringify(reading)}:${maxEdge}`;
+    const cached = this.previewUrls.get(cacheKey);
+    if (cached) return cached;
+    const firstAsset =
+      object.type === "image-view"
+        ? object.view.sourceAssetId
+        : (object.composite.channels[0]?.sourceAssetId ?? "");
+    const crop = cropSizePx(panelCrop(object), await sizes(firstAsset));
+    const scale = Math.min(1, maxEdge / Math.max(crop.widthPx, crop.heightPx));
+    const widthPx = Math.max(1, Math.round(crop.widthPx * scale));
+    const heightPx = Math.max(1, Math.round(crop.heightPx * scale));
+    const rgba = await renderPanelRgba(object, widthPx, heightPx, this, sizes);
+    const canvas = document.createElement("canvas");
+    canvas.width = widthPx;
+    canvas.height = heightPx;
+    const context = canvas.getContext("2d");
+    if (!context) throw new Error("Canvas 2D is unavailable");
+    const image = context.createImageData(widthPx, heightPx);
+    image.data.set(rgba);
+    context.putImageData(image, 0, 0);
+    const blob = await new Promise<Blob>((resolve, reject) =>
+      canvas.toBlob(
+        (result) => (result ? resolve(result) : reject(new Error("Could not render a preview"))),
+        "image/png",
+      ),
+    );
+    const url = URL.createObjectURL(blob);
+    this.previewUrls.set(cacheKey, url);
+    return url;
   }
 
   async getDisplayPreviewUrl(
@@ -95,10 +155,12 @@ export class BrowserRasterRepository implements RasterSourceResolver {
     assetId: string,
     sourceRect: SourcePixelRect,
     pyramidLevel = 0,
+    plane = 0,
   ): Promise<RasterRegion> {
     if (this.tiffDescriptions.has(assetId))
-      return this.requiredTiffClient().read(assetId, sourceRect, pyramidLevel);
+      return this.requiredTiffClient().read(assetId, sourceRect, pyramidLevel, plane);
     if (pyramidLevel !== 0) throw new Error("Raster pyramids are not supported");
+    if (plane !== 0) throw new Error("Only TIFF originals have more than one page");
     return cropRegion(this.required(assetId), sourceRect);
   }
 

@@ -189,8 +189,6 @@ describe("TIFF validation", () => {
   });
 
   it.each([
-    ["tiled", { isTiled: true }],
-    ["multi-page", { imageCount: 2 }],
     ["signed", { sampleFormats: [2] }],
     ["palette", { photometricInterpretation: 3 }],
     [
@@ -232,8 +230,20 @@ describe("CPU PNG export", () => {
       hidden: false,
       view: {
         sourceAssetId: "asset",
+        plane: 0,
+        channel: null,
+        rotationDeg: 0,
+        flipX: false,
+        flipY: false,
         viewport: { x: 0, y: 0, width: 1, height: 1 },
-        display: { brightness: 0, contrast: 1, gamma: 1, invert: false },
+        display: {
+          levels: { black: 0, white: 1 },
+          brightness: 0,
+          contrast: 1,
+          gamma: 1,
+          invert: false,
+          lut: "none",
+        },
       },
     });
     const resolver: RasterSourceResolver = {
@@ -273,8 +283,20 @@ describe("CPU PNG export", () => {
       hidden: false,
       view: {
         sourceAssetId: "rgba-asset",
+        plane: 0,
+        channel: null,
+        rotationDeg: 0,
+        flipX: false,
+        flipY: false,
         viewport: { x: 0, y: 0, width: 1, height: 1 },
-        display: { brightness: 0, contrast: 1, gamma: 1, invert: true },
+        display: {
+          levels: { black: 0, white: 1 },
+          brightness: 0,
+          contrast: 1,
+          gamma: 1,
+          invert: true,
+          lut: "none",
+        },
       },
     });
     const resolver: RasterSourceResolver = {
@@ -363,8 +385,13 @@ function rgbaView(
     hidden: false,
     view: {
       sourceAssetId,
+      plane: 0,
+      channel: null,
+      rotationDeg: 0,
+      flipX: false,
+      flipY: false,
       viewport: { x: 0, y: 0, width: 1, height: 1 },
-      display,
+      display: { levels: { black: 0, white: 1 }, lut: "none" as const, ...display },
     },
   };
 }

@@ -60,8 +60,20 @@ const imageView = (overrides: Partial<Extract<FigureObject, { type: "image-view"
     zIndex: 0,
     view: {
       sourceAssetId: "asset",
+      plane: 0,
+      channel: null,
+      rotationDeg: 0,
+      flipX: false,
+      flipY: false,
       viewport: { x: 0, y: 0, width: 1, height: 1 },
-      display: { brightness: 0, contrast: 1, gamma: 1, invert: false },
+      display: {
+        levels: { black: 0, white: 1 },
+        brightness: 0,
+        contrast: 1,
+        gamma: 1,
+        invert: false,
+        lut: "none",
+      },
     },
     ...overrides,
   }) as FigureObject;

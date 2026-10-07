@@ -24,9 +24,10 @@ import {
   setStrokingRgbColor,
   stroke,
 } from "pdf-lib";
-import { renderImageViewPng, sceneFor } from "./export.js";
+import { renderPanelPng, sceneFor } from "./export.js";
 import { type FontFaceBytes, type FontFaceKey, fontFaceKey } from "./fonts.js";
-import type { RasterSourceResolver } from "./index.js";
+import { documentSourceSizes } from "./panel-render.js";
+import type { RasterSourceResolver } from "./raster.js";
 import type { StrokeStyle, TextMetrics, VectorPrimitive, VectorSceneItem } from "./scene.js";
 
 const KAPPA = 0.5522847498;
@@ -59,6 +60,7 @@ export async function composeDocumentPdf(
   pdf.setProducer("FigLab");
   pdf.setCreator("FigLab");
   if (options.title) pdf.setTitle(options.title);
+  const sizes = documentSourceSizes(document, options.resolver);
   const fonts = new Map<FontFaceKey, PDFFont>();
   const fontFor = async (key: FontFaceKey) => {
     let font = fonts.get(key);
@@ -80,7 +82,7 @@ export async function composeDocumentPdf(
     page.drawRectangle({ x: 0, y: 0, width: scene.widthPt, height, color: rgb(r, g, b) });
     for (const item of scene.items) {
       if (item.kind === "raster") {
-        const { png } = await renderImageViewPng(item.object, options.dpi, options.resolver);
+        const { png } = await renderPanelPng(item.object, options.dpi, options.resolver, sizes);
         const image = await pdf.embedPng(png);
         const { xPt, yPt, widthPt, heightPt } = item.object.transform;
         page.drawImage(image, {

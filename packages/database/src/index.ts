@@ -148,7 +148,8 @@ export function assertResourceId(value: string): void {
 }
 const timestamp = () => new Date().toISOString();
 const defaultDocument = (id: string) => ({
-  schemaVersion: 2,
+  schemaVersion: 3,
+  sources: [],
   artboards: [{ id, name: "Figure 1", widthPt: 612, heightPt: 792, backgroundHex: "#FFFFFF" }],
   objects: [],
   groups: [],
@@ -294,7 +295,7 @@ export class InMemoryFigLabRepository implements FigLabRepository {
     this.documents.set(project.id, {
       projectId: project.id,
       revision: 0,
-      schemaVersion: 2,
+      schemaVersion: 3,
       document: defaultDocument(randomUUID()),
       updatedAt: now,
     });

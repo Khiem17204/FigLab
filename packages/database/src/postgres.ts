@@ -32,7 +32,8 @@ const LOCAL_USER_ID = "00000000-0000-4000-8000-000000000001";
 const LOCAL_WORKSPACE_ID = "00000000-0000-4000-8000-000000000002";
 const LOCAL_MEMBERSHIP_ID = "00000000-0000-4000-8000-000000000003";
 const defaultDocument = () => ({
-  schemaVersion: 2,
+  schemaVersion: 3,
+  sources: [],
   artboards: [
     { id: randomUUID(), name: "Figure 1", widthPt: 612, heightPt: 792, backgroundHex: "#FFFFFF" },
   ],

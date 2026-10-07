@@ -66,7 +66,7 @@ describe("browser raster sources", () => {
       bitDepth: 16,
       channels: 1,
     });
-    expect(read).toHaveBeenCalledWith("tiff-a", sourceRect, 0);
+    expect(read).toHaveBeenCalledWith("tiff-a", sourceRect, 0, 0);
     expect(region.data).toBeInstanceOf(Uint16Array);
     expect(region.data).toHaveLength(13 * 17);
     expect(region.data[0]).toBe(100);

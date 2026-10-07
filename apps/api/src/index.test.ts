@@ -39,7 +39,7 @@ describe("buildApp", () => {
       method: "GET",
       url: `/v1/projects/${project.id}/document`,
     });
-    expect(document.json()).toMatchObject({ revision: 0, document: { schemaVersion: 2 } });
+    expect(document.json()).toMatchObject({ revision: 0, document: { schemaVersion: 3 } });
     const first = await app.inject({
       method: "PUT",
       url: `/v1/projects/${project.id}/document`,
@@ -60,7 +60,7 @@ describe("buildApp", () => {
     await app.close();
   });
 
-  it("serves stored v1 documents as v2 and stores v1 saves as v2", async () => {
+  it("serves stored v1 documents as current and stores v1 saves as current", async () => {
     const repository = new InMemoryFigLabRepository();
     const principal = await repository.bootstrapSingleUser();
     const project = await repository.createProject(principal.workspaceId, "Legacy");
@@ -78,7 +78,7 @@ describe("buildApp", () => {
     const app = await buildApp({ repository, store: new FakeObjectStore(), principal });
     const read = await app.inject({ method: "GET", url: `/v1/projects/${project.id}/document` });
     expect(read.statusCode).toBe(200);
-    expect(read.json().document).toEqual({ ...v1, schemaVersion: 2 });
+    expect(read.json().document).toEqual({ ...v1, schemaVersion: 3, sources: [] });
 
     const saved = await app.inject({
       method: "PUT",
@@ -86,13 +86,13 @@ describe("buildApp", () => {
       payload: { baseRevision: 1, document: v1 },
     });
     expect(saved.statusCode).toBe(200);
-    expect(saved.json().document.schemaVersion).toBe(2);
-    expect((await repository.getDocument(project.id)).schemaVersion).toBe(2);
+    expect(saved.json().document.schemaVersion).toBe(3);
+    expect((await repository.getDocument(project.id)).schemaVersion).toBe(3);
 
     const future = await app.inject({
       method: "PUT",
       url: `/v1/projects/${project.id}/document`,
-      payload: { baseRevision: 2, document: { ...v1, schemaVersion: 3 } },
+      payload: { baseRevision: 2, document: { ...v1, schemaVersion: 4 } },
     });
     expect(future.statusCode).toBe(400);
     await app.close();
@@ -151,8 +151,20 @@ describe("buildApp", () => {
       hidden: false,
       view: {
         sourceAssetId: "asset-1",
+        plane: 0,
+        channel: null,
         viewport: { x: 0.8, y: 0.2, width: 0.3, height: 0.5 },
-        display: { brightness: 0, contrast: 1, gamma: 1, invert: false },
+        rotationDeg: 0,
+        flipX: false,
+        flipY: false,
+        display: {
+          levels: { black: 0, white: 1 },
+          brightness: 0,
+          contrast: 1,
+          gamma: 1,
+          invert: false,
+          lut: "none",
+        },
       },
     });
     const app = await buildApp({ repository, store: new FakeObjectStore(), principal });
@@ -439,7 +451,7 @@ describe("buildApp", () => {
     expect(first.json()).toMatchObject({
       revision: 1,
       schemaVersion: 1,
-      document: { schemaVersion: 2 },
+      document: { schemaVersion: 3 },
     });
     expect(
       (await app.inject({ method: "GET", url: `/v1/projects/${project.id}/versions/7` }))
@@ -514,6 +526,69 @@ describe("buildApp", () => {
         .statusCode,
     ).toBe(404);
     expect((await repository.listAuditEvents(project.id)).at(-1)?.action).toBe("PROJECT_DELETED");
+    await app.close();
+  });
+
+  it("checks the document's source registry against verified originals", async () => {
+    const repository = new InMemoryFigLabRepository();
+    const principal = await repository.bootstrapSingleUser();
+    const project = await repository.createProject(principal.workspaceId, "Registry");
+    const upload = await repository.createUpload({
+      projectId: project.id,
+      filename: "stack.tif",
+      mimeType: "image/tiff",
+      contentLength: 10,
+      checksumSha256: "a".repeat(64),
+      storageKey: "registry-key",
+    });
+    await repository.updateAsset(upload.assetId, {
+      status: "ready",
+      widthPx: 400,
+      heightPx: 200,
+      metadata: { calibration: { umPerPxX: 0.5, umPerPxY: 0.5, source: "imagej" } },
+    });
+    const current = (await repository.getDocument(project.id)).document as {
+      artboards: { id: string }[];
+    };
+    const app = await buildApp({ repository, store: new FakeObjectStore(), principal });
+    const save = (sources: unknown[], baseRevision: number) =>
+      app.inject({
+        method: "PUT",
+        url: `/v1/projects/${project.id}/document`,
+        payload: {
+          baseRevision,
+          document: {
+            ...current,
+            schemaVersion: 3,
+            sources,
+            objects: [],
+            groups: [],
+            constraints: [],
+            styles: [],
+          },
+        },
+      });
+    const source = (extra: Record<string, unknown> = {}) => ({
+      assetId: upload.assetId,
+      widthPx: 400,
+      heightPx: 200,
+      calibration: null,
+      markers: [],
+      ...extra,
+    });
+    expect((await save([source()], 0)).statusCode).toBe(200);
+    const wrongSize = await save([source({ widthPx: 401 })], 1);
+    expect(wrongSize.statusCode).toBe(400);
+    expect(wrongSize.json().message).toMatch(/size does not match/);
+    const metadata = { umPerPxX: 0.5, umPerPxY: 0.5, origin: "metadata" };
+    expect((await save([source({ calibration: metadata })], 1)).statusCode).toBe(200);
+    const forged = await save([source({ calibration: { ...metadata, umPerPxX: 0.1 } })], 2);
+    expect(forged.statusCode).toBe(400);
+    expect(forged.json().message).toMatch(/marked as file metadata/);
+    const manual = { umPerPxX: 0.1, umPerPxY: 0.1, origin: "manual" };
+    expect((await save([source({ calibration: manual })], 2)).statusCode).toBe(200);
+    const elsewhere = await save([source({ assetId: "00000000-0000-4000-8000-0000000000ff" })], 3);
+    expect(elsewhere.statusCode).toBe(404);
     await app.close();
   });
 

@@ -1,11 +1,15 @@
 import {
-  type DisplayTransformV1,
+  attachedTargetIds,
+  type DisplayTransformV3,
   decodeFigureDocument,
   type FigureDocument,
   type FigureObject,
-  type ImageViewObjectV1,
+  IDENTITY_DISPLAY_V3,
+  type ImageViewObjectV3,
   isImageView,
   type NormalizedRect,
+  type ScientificImageViewV3,
+  type SourceInfoV3,
 } from "@figlab/figure-schema";
 
 import { pruneGroups } from "./arrange.js";
@@ -28,12 +32,13 @@ export type EditorSessionState = {
 };
 
 export type CreateImageViewInput = Omit<
-  ImageViewObjectV1,
+  ImageViewObjectV3,
   "type" | "locked" | "hidden" | "view"
 > & {
   sourceAssetId: string;
   viewport: NormalizedRect;
-  display: DisplayTransformV1;
+  display?: DisplayTransformV3;
+  view?: Partial<Omit<ScientificImageViewV3, "sourceAssetId" | "viewport" | "display">>;
   locked?: boolean;
   hidden?: boolean;
 };
@@ -54,8 +59,14 @@ export function createImageViewCommand(input: CreateImageViewInput): EditorComma
           hidden: input.hidden ?? false,
           view: {
             sourceAssetId: input.sourceAssetId,
+            plane: 0,
+            channel: null,
             viewport: input.viewport,
-            display: input.display,
+            rotationDeg: 0,
+            flipX: false,
+            flipY: false,
+            display: input.display ?? { ...IDENTITY_DISPLAY_V3 },
+            ...input.view,
           },
         },
       ],
@@ -67,9 +78,42 @@ export function setViewportCommand(id: string, viewport: NormalizedRect): Editor
     replaceImageView(document, id, (object) => ({ ...object, view: { ...object.view, viewport } }));
 }
 
-export function setDisplayCommand(id: string, display: DisplayTransformV1): EditorCommand {
+export function setDisplayCommand(id: string, display: DisplayTransformV3): EditorCommand {
   return (document) =>
     replaceImageView(document, id, (object) => ({ ...object, view: { ...object.view, display } }));
+}
+
+/** Changes how a view reads its source: plane, channel, crop rotation, or flips. */
+export function setViewCommand(
+  id: string,
+  patch: Partial<Omit<ScientificImageViewV3, "sourceAssetId">>,
+): EditorCommand {
+  return (document) =>
+    replaceImageView(document, id, (object) => ({ ...object, view: { ...object.view, ...patch } }));
+}
+
+/**
+ * Records (or updates) measured facts about an original: its size, calibration, and ladder
+ * markers. Existing calibration and markers are kept unless the patch replaces them.
+ */
+export function upsertSourceCommand(
+  source: Pick<SourceInfoV3, "assetId" | "widthPx" | "heightPx"> & Partial<SourceInfoV3>,
+): EditorCommand {
+  return (document) => {
+    const existing = document.sources.find((entry) => entry.assetId === source.assetId);
+    const next: SourceInfoV3 = {
+      calibration: null,
+      markers: [],
+      ...existing,
+      ...source,
+    };
+    return decodeFigureDocument({
+      ...document,
+      sources: existing
+        ? document.sources.map((entry) => (entry.assetId === source.assetId ? next : entry))
+        : [...document.sources, next],
+    });
+  };
 }
 
 /** Replaces transforms; each must suit its object's kind, or validation rejects the result. */
@@ -135,7 +179,7 @@ export function deleteObjectsCommand(ids: ReadonlyArray<string>): EditorCommand 
 function replaceImageView(
   document: FigureDocument,
   id: string,
-  replacement: (object: ImageViewObjectV1) => ImageViewObjectV1,
+  replacement: (object: ImageViewObjectV3) => ImageViewObjectV3,
 ): FigureDocument {
   return decodeFigureDocument({
     ...document,
@@ -214,7 +258,8 @@ export function proportionallyResizeTransform<T extends BoxTransform>(
 export type ImageProvenance = {
   assetId: string;
   viewport: NormalizedRect;
-  display: DisplayTransformV1;
+  rotationDeg: number;
+  display: DisplayTransformV3;
   siblingImageViewIds: string[];
 };
 
@@ -227,6 +272,7 @@ export function selectImageProvenance(
   return {
     assetId: selected.view.sourceAssetId,
     viewport: selected.view.viewport,
+    rotationDeg: selected.view.rotationDeg,
     display: selected.view.display,
     siblingImageViewIds: document.objects
       .filter(

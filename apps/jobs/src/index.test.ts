@@ -91,7 +91,7 @@ describe("verifyAsset", () => {
     expect(Object.keys(tasks).sort()).toEqual(["delete_project", "verify_asset"]);
   });
 
-  it("rejects BigTIFF through the shared TIFF decoder contract", async () => {
+  it("rejects an undecodable BigTIFF through the shared TIFF decoder", async () => {
     const repository = new InMemoryFigLabRepository();
     const principal = await repository.bootstrapSingleUser();
     const project = await repository.createProject(principal.workspaceId, "Cells");
@@ -108,7 +108,8 @@ describe("verifyAsset", () => {
     });
     await store.putForTest("bigtiff", bytes, "image/tiff");
     await verifyAsset(repository, store, upload.assetId);
-    expect((await repository.getAsset(upload.assetId)).rejectionReason).toMatch(/BigTIFF/);
+    // A truncated BigTIFF header cannot be decoded, so the original is rejected.
+    expect(await repository.getAsset(upload.assetId)).toMatchObject({ status: "rejected" });
   });
 
   it("marks a supported real 16-bit grayscale TIFF ready from shared authoritative metadata", async () => {
@@ -146,7 +147,7 @@ describe("verifyAsset", () => {
     expect((await repository.getAsset(assetId)).rejectionReason).toMatch(reason);
   });
 
-  it("rejects a tiled TIFF through the shared decoder", async () => {
+  it("accepts a tiled TIFF and records its layout", async () => {
     const bytes = new Uint8Array(
       await sharp({ create: { width: 32, height: 32, channels: 3, background: "#808080" } })
         .tiff({ tile: true, tileWidth: 16, tileHeight: 16, compression: "lzw" })
@@ -154,7 +155,13 @@ describe("verifyAsset", () => {
     );
     const { repository, store, assetId } = await uploadedTiff(bytes, "tiled");
     await verifyAsset(repository, store, assetId);
-    expect((await repository.getAsset(assetId)).rejectionReason).toMatch(/tiled/);
+    expect(await repository.getAsset(assetId)).toMatchObject({
+      status: "ready",
+      widthPx: 32,
+      heightPx: 32,
+      channelCount: 3,
+      metadata: { format: "tiff", planes: 1, tiled: true, bigTiff: false },
+    });
   });
 });
 

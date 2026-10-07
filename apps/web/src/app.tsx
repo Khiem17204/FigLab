@@ -1,6 +1,6 @@
 import type { AssetDescriptor, Project, ProjectDocumentResponse } from "@figlab/api-contract";
 import { selectImageProvenance } from "@figlab/editor-core";
-import { type ImageViewObjectV1, isImageView, type NormalizedRect } from "@figlab/figure-schema";
+import { type ImageViewObjectV3, isImageView, type NormalizedRect } from "@figlab/figure-schema";
 import { Button, Panel } from "@figlab/ui";
 import { QueryClient, QueryClientProvider, useMutation, useQuery } from "@tanstack/react-query";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -623,8 +623,8 @@ function TransformControls({
   object,
   onChange,
 }: {
-  object: ImageViewObjectV1;
-  onChange: (display: ImageViewObjectV1["view"]["display"]) => void;
+  object: ImageViewObjectV3;
+  onChange: (display: ImageViewObjectV3["view"]["display"]) => void;
 }) {
   const display = object.view.display;
   const range = (

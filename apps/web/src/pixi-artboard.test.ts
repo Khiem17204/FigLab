@@ -1,11 +1,11 @@
-import type { FigureDocument, ImageViewObjectV1 } from "@figlab/figure-schema";
+import type { FigureDocument, ImageViewObjectV3 } from "@figlab/figure-schema";
 import { BufferImageSource, Container, Graphics, Sprite, Texture } from "pixi.js";
 import { describe, expect, it } from "vitest";
 
 import { artboardScreenTransform } from "./editor/geometry";
 import { buildPixiArtboardScene } from "./pixi-artboard";
 
-const makeObject = (id: string, sourceAssetId: string, zIndex: number): ImageViewObjectV1 => ({
+const makeObject = (id: string, sourceAssetId: string, zIndex: number): ImageViewObjectV3 => ({
   id,
   type: "image-view",
   artboardId: "board",
@@ -15,13 +15,26 @@ const makeObject = (id: string, sourceAssetId: string, zIndex: number): ImageVie
   hidden: false,
   view: {
     sourceAssetId,
+    plane: 0,
+    channel: null,
+    rotationDeg: 0,
+    flipX: false,
+    flipY: false,
     viewport: { x: 0, y: 0, width: 1, height: 1 },
-    display: { brightness: 0, contrast: 1, gamma: 1, invert: false },
+    display: {
+      levels: { black: 0, white: 1 },
+      brightness: 0,
+      contrast: 1,
+      gamma: 1,
+      invert: false,
+      lut: "none",
+    },
   },
 });
 
-const makeDocument = (objects: ImageViewObjectV1[]): FigureDocument => ({
-  schemaVersion: 2,
+const makeDocument = (objects: ImageViewObjectV3[]): FigureDocument => ({
+  schemaVersion: 3,
+  sources: [],
   artboards: [
     { id: "board", name: "Figure 1", widthPt: 10, heightPt: 10, backgroundHex: "#FFFFFF" },
   ],
@@ -55,7 +68,7 @@ describe("Pixi artboard scene", () => {
       document: makeDocument([lower, top]),
       screenTransform: artboardScreenTransform(10, 10, 10, 10),
       loadTexture: async (object) => {
-        const texture = textures.get(object.view.sourceAssetId);
+        const texture = textures.get(object.type === "image-view" ? object.view.sourceAssetId : "");
         if (!texture) throw new Error("Missing test texture");
         return texture;
       },

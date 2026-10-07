@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { pathToFileURL } from "node:url";
 import { createPgPool, createPostgresRepository, type FigLabRepository } from "@figlab/database";
-import { decodeTiff } from "@figlab/image-processing";
+import { type TiffDescription, verifyTiff } from "@figlab/image-processing";
 import { createObjectStoreFromEnv, type ObjectStore } from "@figlab/storage";
 import { type Runner, run, runMigrations, runOnce, type TaskList } from "graphile-worker";
 import sharp from "sharp";
@@ -31,7 +31,15 @@ export async function verifyAsset(
         heightPx: description.heightPx,
         bitDepth: description.bitDepth,
         channelCount: description.channels,
-        metadata: { format: "tiff" },
+        metadata: {
+          format: "tiff",
+          planes: description.planes,
+          planeLabels: description.planeLabels,
+          ome: description.ome,
+          tiled: description.tiled,
+          bigTiff: description.bigTiff,
+          ...(description.calibration ? { calibration: description.calibration } : {}),
+        },
       });
       return;
     }
@@ -148,27 +156,13 @@ function taskListFromEnv(repository: FigLabRepository, environment: NodeJS.Proce
   );
 }
 
-async function decodeTiffAuthoritatively(bytes: Uint8Array): Promise<{
-  widthPx: number;
-  heightPx: number;
-  bitDepth: 8 | 16;
-  channels: 1 | 3;
-}> {
-  if (isBigTiff(bytes)) throw new Error("Unsupported TIFF: BigTIFF is not supported");
+/** Decodes every page of the TIFF, so only fully readable originals become editable. */
+async function decodeTiffAuthoritatively(bytes: Uint8Array): Promise<TiffDescription> {
   const exact = bytes.buffer.slice(
     bytes.byteOffset,
     bytes.byteOffset + bytes.byteLength,
   ) as ArrayBuffer;
-  return decodeTiff(exact);
-}
-
-function isBigTiff(bytes: Uint8Array): boolean {
-  if (bytes.byteLength < 4) return false;
-  const little = bytes[0] === 0x49 && bytes[1] === 0x49;
-  const big = bytes[0] === 0x4d && bytes[1] === 0x4d;
-  return (
-    (little && bytes[2] === 43 && bytes[3] === 0) || (big && bytes[2] === 0 && bytes[3] === 43)
-  );
+  return verifyTiff(exact);
 }
 
 async function streamBytes(stream: AsyncIterable<Uint8Array>): Promise<Uint8Array> {

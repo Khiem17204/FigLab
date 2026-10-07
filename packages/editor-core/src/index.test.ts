@@ -1,7 +1,7 @@
 import {
   createDefaultFigureDocument,
   type FigureDocument,
-  type ImageViewObjectV1,
+  type ImageViewObjectV3,
   isImageView,
 } from "@figlab/figure-schema";
 import { describe, expect, it } from "vitest";
@@ -21,7 +21,15 @@ import {
   undo,
 } from "./index.js";
 
-const display = { brightness: 0, contrast: 1, gamma: 1, invert: false };
+const display = {
+  levels: { black: 0, white: 1 },
+  brightness: 0,
+  contrast: 1,
+  gamma: 1,
+  invert: false,
+  lut: "none" as const,
+};
+const reading = { plane: 0, channel: null, rotationDeg: 0, flipX: false, flipY: false };
 const viewport = { x: 0.25, y: 0.5, width: 0.75, height: 0.5 };
 
 describe("editor core commands", () => {
@@ -48,6 +56,7 @@ describe("editor core commands", () => {
     expect(createdView.view.viewport).toEqual(viewport);
     expect(changedView.view).toEqual({
       sourceAssetId: "asset-a",
+      ...reading,
       viewport: { x: 0, y: 0, width: 0.5, height: 0.5 },
       display: { ...display, invert: true },
     });
@@ -120,6 +129,7 @@ describe("editor core commands", () => {
     expect(provenance).toEqual({
       assetId: "asset-a",
       viewport: { x: 0, y: 0, width: 0.5, height: 0.5 },
+      rotationDeg: 0,
       display,
       siblingImageViewIds: ["view-b"],
     });
@@ -133,7 +143,7 @@ function documentWithTwoViews(): FigureDocument {
   };
 }
 
-function imageView(id: string, sourceAssetId: string, xPt: number): ImageViewObjectV1 {
+function imageView(id: string, sourceAssetId: string, xPt: number): ImageViewObjectV3 {
   return {
     id,
     type: "image-view",
@@ -142,6 +152,11 @@ function imageView(id: string, sourceAssetId: string, xPt: number): ImageViewObj
     zIndex: 0,
     locked: false,
     hidden: false,
-    view: { sourceAssetId, viewport: { x: 0, y: 0, width: 0.5, height: 0.5 }, display },
+    view: {
+      sourceAssetId,
+      ...reading,
+      viewport: { x: 0, y: 0, width: 0.5, height: 0.5 },
+      display,
+    },
   };
 }

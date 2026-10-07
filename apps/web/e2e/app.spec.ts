@@ -303,7 +303,7 @@ test("exports the exact saved revision at the current artboard dimensions", asyn
   expect((await download).suggestedFilename()).toBe("cell-atlas-figure-1-300dpi.png");
   expect(savedBody).toMatchObject({
     baseRevision: 3,
-    document: { ...landscape.document, schemaVersion: 2 },
+    document: { ...landscape.document, schemaVersion: 3, sources: [] },
   });
   expect(exportMetadata).toMatchObject({
     format: "png",

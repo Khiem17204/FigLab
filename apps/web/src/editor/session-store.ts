@@ -15,11 +15,13 @@ import {
   setObjectTransformsCommand,
   snapMove,
   unionBounds,
+  upsertSourceCommand,
 } from "@figlab/editor-core";
 import {
-  type DisplayTransformV1,
+  type DisplayTransformV3,
   type FigureDocument,
-  type ImageViewObjectV1,
+  IDENTITY_DISPLAY_V3,
+  type ImageViewObjectV3,
   migrateFigureDocument,
   type NormalizedRect,
 } from "@figlab/figure-schema";
@@ -68,7 +70,20 @@ export type EditorSessionState = EditorSnapshot & {
     assetId: string,
     objectId: string,
     sourceSize?: { widthPx: number; heightPx: number },
+    plane?: number,
   ) => void;
+  /**
+   * Adds a panel for a crop of an original. With the source size, the panel takes the crop's
+   * true aspect ratio and the size is recorded in the document's source registry.
+   */
+  addPanel: (input: {
+    assetId: string;
+    objectId: string;
+    viewport: NormalizedRect;
+    rotationDeg?: number;
+    plane?: number;
+    sourceSize?: { widthPx: number; heightPx: number };
+  }) => void;
   beginObjectGesture: (objectId: string) => void;
   previewObjectTransform: (transform: Omit<ObjectTransform, "rotationDeg">) => void;
   /** Moves the grabbed object with its selection, groups, and labels, snapping when enabled. */
@@ -76,7 +91,7 @@ export type EditorSessionState = EditorSnapshot & {
   previewObjectResize: (delta: Point, draggedCorner: ResizeAnchor) => void;
   commitObjectTransform: () => void;
   cancelObjectGesture: () => void;
-  setDisplay: (objectId: string, display: DisplayTransformV1) => void;
+  setDisplay: (objectId: string, display: DisplayTransformV3) => void;
   deleteSelectedObject: () => void;
   selectObject: (objectId: string | undefined) => void;
   /** Replaces the selection, adds to it, or toggles membership. */
@@ -110,13 +125,6 @@ const toViewport = (draft: CropDraft): NormalizedRect => {
   };
 };
 
-const defaultDisplay: DisplayTransformV1 = {
-  brightness: 0,
-  contrast: 1,
-  gamma: 1,
-  invert: false,
-};
-
 const DEFAULT_PANEL_WIDTH_PT = 240;
 const DEFAULT_PANEL_HEIGHT_PT = 180;
 const DEFAULT_SNAP_THRESHOLD_PT = 4;
@@ -127,11 +135,17 @@ const snapshot = (state: EditorSnapshot): EditorSnapshot => ({
   activeArtboardId: state.activeArtboardId,
 });
 
-const clampDisplay = (display: DisplayTransformV1): DisplayTransformV1 => ({
+const clampUnitValue = (value: number) => Math.min(1, Math.max(0, value));
+const clampDisplay = (display: DisplayTransformV3): DisplayTransformV3 => ({
+  levels: {
+    black: clampUnitValue(Math.min(display.levels.black, display.levels.white)),
+    white: clampUnitValue(Math.max(display.levels.black, display.levels.white)),
+  },
   brightness: Math.min(1, Math.max(-1, display.brightness)),
   contrast: Math.min(4, Math.max(0, display.contrast)),
   gamma: Math.min(10, Math.max(0.1, display.gamma)),
   invert: display.invert,
+  lut: display.lut,
 });
 
 const pushHistory = (
@@ -180,14 +194,22 @@ export function createEditorSession(received: unknown) {
       const draft = get().cropDraft;
       if (draft) set({ cropDraft: { ...draft, end: point } });
     },
-    commitCrop: (assetId, objectId, sourceSize) => {
+    commitCrop: (assetId, objectId, sourceSize, plane) => {
       const state = get();
       if (!state.cropDraft) return;
       const viewport = toViewport(state.cropDraft);
-      if (viewport.width === 0 || viewport.height === 0) {
-        set({ cropDraft: undefined });
-        return;
-      }
+      set({ cropDraft: undefined });
+      if (viewport.width === 0 || viewport.height === 0) return;
+      get().addPanel({
+        assetId,
+        objectId,
+        viewport,
+        ...(plane ? { plane } : {}),
+        ...(sourceSize ? { sourceSize } : {}),
+      });
+    },
+    addPanel: ({ assetId, objectId, viewport, rotationDeg = 0, plane = 0, sourceSize }) => {
+      const state = get();
       const artboardId = validArtboard(state.document, state.activeArtboardId);
       if (!artboardId) return;
       const heightPt = sourceSize
@@ -195,30 +217,26 @@ export function createEditorSession(received: unknown) {
           (viewport.width * sourceSize.widthPx)
         : DEFAULT_PANEL_HEIGHT_PT;
       const onBoard = state.document.objects.filter((object) => object.artboardId === artboardId);
-      const object: ImageViewObjectV1 = {
+      const object: Omit<ImageViewObjectV3, "type" | "locked" | "hidden" | "view"> = {
         id: objectId,
-        type: "image-view",
         artboardId,
         transform: { xPt: 48, yPt: 48, widthPt: DEFAULT_PANEL_WIDTH_PT, heightPt, rotationDeg: 0 },
         zIndex: Math.max(-1, ...onBoard.map((candidate) => candidate.zIndex)) + 1,
-        locked: false,
-        hidden: false,
-        view: { sourceAssetId: assetId, viewport, display: { ...defaultDisplay } },
       };
+      const withSource = sourceSize
+        ? upsertSourceCommand({ assetId, ...sourceSize })(state.document)
+        : state.document;
       set({
         document: createImageViewCommand({
-          id: object.id,
-          artboardId: object.artboardId,
-          transform: object.transform,
-          zIndex: object.zIndex,
-          sourceAssetId: object.view.sourceAssetId,
-          viewport: object.view.viewport,
-          display: object.view.display,
-        })(state.document),
+          ...object,
+          sourceAssetId: assetId,
+          viewport,
+          display: { ...IDENTITY_DISPLAY_V3 },
+          view: { rotationDeg, plane },
+        })(withSource),
         selectedIds: [objectId],
         selectedObjectId: objectId,
         ...pushHistory(state),
-        cropDraft: undefined,
       });
     },
     beginObjectGesture: (objectId) => {

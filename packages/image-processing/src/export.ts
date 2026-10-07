@@ -1,13 +1,13 @@
-import type { FigureDocument, ImageViewObjectV1 } from "@figlab/figure-schema";
-import { encodePngRgba, encodeTiffRgb } from "./encode.js";
+import type { FigureDocument, ImagePanelObject } from "@figlab/figure-schema";
 import {
   compositeImageView,
   compositeSourceOver,
   fillBackground,
-  normalizedToPixelRect,
-  type RasterSourceResolver,
   validateExportDimensions,
-} from "./index.js";
+} from "./compose.js";
+import { encodePngRgba, encodeTiffRgb } from "./encode.js";
+import { createPanelSampler, documentSourceSizes, type SourceSizes } from "./panel-render.js";
+import type { RasterSourceResolver } from "./raster.js";
 import {
   type ArtboardScene,
   buildArtboardScene,
@@ -83,6 +83,7 @@ export async function composeArtboardRgba(
   const canvas = new Uint8Array(widthPx * heightPx * 4);
   fillBackground(canvas, scene.backgroundHex);
   const pxPerPt = { x: widthPx / scene.widthPt, y: heightPx / scene.heightPt };
+  const sizes = documentSourceSizes(document, resolver);
   let run: VectorSceneItem[] = [];
   const flush = async () => {
     if (run.length === 0) return;
@@ -101,7 +102,6 @@ export async function composeArtboardRgba(
       continue;
     }
     await flush();
-    const region = await sourceRegion(item.object, resolver);
     compositeImageView(
       canvas,
       widthPx,
@@ -109,8 +109,7 @@ export async function composeArtboardRgba(
       scene.widthPt,
       scene.heightPt,
       item.object.transform,
-      region,
-      item.object.view.display,
+      await createPanelSampler(item.object, resolver, sizes),
     );
   }
   await flush();
@@ -159,15 +158,15 @@ export async function composeArtboardTiff(
  * Renders one image panel on its own, from original samples, at its size on the page times
  * `dpi`. SVG and PDF exports embed these as lossless PNGs.
  */
-export async function renderImageViewPng(
-  object: ImageViewObjectV1,
+export async function renderPanelPng(
+  object: ImagePanelObject,
   dpi: number,
   resolver: RasterSourceResolver,
+  sizes: SourceSizes,
 ): Promise<{ png: Uint8Array; widthPx: number; heightPx: number }> {
   const { widthPx, heightPx } = exportPixelSize(object.transform, dpi);
   validateExportDimensions(widthPx, heightPx);
   const canvas = new Uint8Array(widthPx * heightPx * 4);
-  const region = await sourceRegion(object, resolver);
   compositeImageView(
     canvas,
     widthPx,
@@ -175,16 +174,9 @@ export async function renderImageViewPng(
     object.transform.widthPt,
     object.transform.heightPt,
     { ...object.transform, xPt: 0, yPt: 0 },
-    region,
-    object.view.display,
+    await createPanelSampler(object, resolver, sizes),
   );
   return { png: await encodePngRgba(canvas, widthPx, heightPx, dpi), widthPx, heightPx };
-}
-
-async function sourceRegion(object: ImageViewObjectV1, resolver: RasterSourceResolver) {
-  const source = await resolver.describe(object.view.sourceAssetId);
-  const rect = normalizedToPixelRect(object.view.viewport, source.widthPx, source.heightPx);
-  return resolver.getRegion(object.view.sourceAssetId, rect, 0);
 }
 
 function vectorRegion(

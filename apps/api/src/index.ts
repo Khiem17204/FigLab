@@ -41,8 +41,8 @@ import {
 import {
   type FigureDocument,
   FigureDocumentDecodeError,
-  isImageView,
   migrateFigureDocument,
+  panelAssetIds,
 } from "@figlab/figure-schema";
 import { createObjectStoreFromEnv, type ObjectStore } from "@figlab/storage";
 import { Type } from "@sinclair/typebox";
@@ -275,6 +275,8 @@ export async function buildApp(dependencies: AppDependencies): Promise<FastifyIn
       const body = request.body as { baseRevision: number; document: unknown };
       const document = migrateFigureDocument(body.document);
       await dependencies.repository.assertReadyAssets(id, sourceAssetIds(document));
+      const mismatch = await sourceRegistryMismatch(dependencies.repository, id, document);
+      if (mismatch) return reply.status(400).send({ code: "BAD_REQUEST", message: mismatch });
       const saved = await dependencies.repository.saveDocument(
         id,
         body.baseRevision,
@@ -608,7 +610,44 @@ function resourceId(value: string): string {
   return value;
 }
 function sourceAssetIds(document: FigureDocument): string[] {
-  return document.objects.filter(isImageView).map((object) => object.view.sourceAssetId);
+  return [
+    ...document.objects.flatMap(panelAssetIds),
+    ...document.sources.map((source) => source.assetId),
+  ];
+}
+/**
+ * The document records each source's size and calibration so figures render deterministically;
+ * those records must agree with what the verifier measured from the immutable original.
+ */
+async function sourceRegistryMismatch(
+  repository: FigLabRepository,
+  projectId: string,
+  document: FigureDocument,
+): Promise<string | undefined> {
+  if (document.sources.length === 0) return undefined;
+  const assets = new Map(
+    (await repository.listProjectAssets(projectId)).map((asset) => [asset.id, asset]),
+  );
+  for (const source of document.sources) {
+    const asset = assets.get(source.assetId);
+    if (!asset) return `Source ${source.assetId} is not an asset of this project`;
+    if (asset.widthPx !== source.widthPx || asset.heightPx !== source.heightPx)
+      return `Source ${source.assetId} size does not match the verified original`;
+    if (source.calibration?.origin === "metadata") {
+      const measured = asset.metadata.calibration as
+        | { umPerPxX?: unknown; umPerPxY?: unknown }
+        | undefined;
+      const same = (left: unknown, right: number) =>
+        typeof left === "number" && Math.abs(left - right) <= Math.abs(right) * 1e-9;
+      if (
+        !measured ||
+        !same(measured.umPerPxX, source.calibration.umPerPxX) ||
+        !same(measured.umPerPxY, source.calibration.umPerPxY)
+      )
+        return `Source ${source.assetId} calibration is marked as file metadata but differs from it`;
+    }
+  }
+  return undefined;
 }
 /** Stored documents may be older versions; responses always carry the current version. */
 function currentDocument<T extends { document: unknown }>(

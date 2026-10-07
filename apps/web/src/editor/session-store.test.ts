@@ -87,10 +87,12 @@ describe("editor session crop commands", () => {
     const session = sessionWithView();
     for (let index = 0; index <= MAX_HISTORY_SNAPSHOTS; index += 1) {
       session.getState().setDisplay("view-1", {
+        levels: { black: 0, white: 1 },
         brightness: (index % 2) * 0.1,
         contrast: 1,
         gamma: 1,
         invert: false,
+        lut: "none",
       });
     }
     expect(session.getState().history).toHaveLength(MAX_HISTORY_SNAPSHOTS);
@@ -102,22 +104,31 @@ describe("editor session crop commands", () => {
     session.getState().previewCrop({ x: 0.5, y: 0.5 });
     session.getState().commitCrop("asset-1", "view-1");
 
-    session
-      .getState()
-      .setDisplay("view-1", { brightness: 7, contrast: -1, gamma: 99, invert: true });
+    session.getState().setDisplay("view-1", {
+      levels: { black: 0, white: 1 },
+      brightness: 7,
+      contrast: -1,
+      gamma: 99,
+      invert: true,
+      lut: "none",
+    });
     expect(imageViewAt(session, 0)?.view.display).toEqual({
+      levels: { black: 0, white: 1 },
       brightness: 1,
       contrast: 0,
       gamma: 10,
       invert: true,
+      lut: "none",
     });
 
     session.getState().undo();
     expect(imageViewAt(session, 0)?.view.display).toEqual({
+      levels: { black: 0, white: 1 },
       brightness: 0,
       contrast: 1,
       gamma: 1,
       invert: false,
+      lut: "none",
     });
     session.getState().redo();
     expect(imageViewAt(session, 0)?.view.display.invert).toBe(true);

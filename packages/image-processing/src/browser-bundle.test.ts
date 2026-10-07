@@ -19,16 +19,16 @@ describe("browser bundle", () => {
             return `
               import { composeArtboardPng } from ${JSON.stringify(sourcePath)};
               const document = {
-                schemaVersion: 1,
+                schemaVersion: 3, sources: [],
                 artboards: [{ id: "board", name: "Figure 1", widthPt: 1, heightPt: 1, backgroundHex: "#000000" }],
                 objects: [{
                   id: "view", type: "image-view", artboardId: "board",
                   transform: { xPt: 0, yPt: 0, widthPt: 1, heightPt: 1, rotationDeg: 0 },
                   zIndex: 0, locked: false, hidden: false,
                   view: {
-                    sourceAssetId: "asset",
+                    sourceAssetId: "asset", plane: 0, channel: null, rotationDeg: 0, flipX: false, flipY: false, 
                     viewport: { x: 0, y: 0, width: 1, height: 1 },
-                    display: { brightness: 0, contrast: 1, gamma: 1, invert: false }
+                    display: { levels: { black: 0, white: 1 }, brightness: 0, contrast: 1, gamma: 1, invert: false, lut: "none" }
                   }
                 }],
                 groups: [], constraints: [], styles: []
@@ -97,7 +97,7 @@ describe("vector export bundle", () => {
                 Object.entries(globalThis.__fontBytes).map(([key, bytes]) => [key, new Uint8Array(bytes)]),
               );
               const document = {
-                schemaVersion: 2,
+                schemaVersion: 3, sources: [],
                 artboards: [{ id: "board", name: "Figure 1", widthPt: 100, heightPt: 50, backgroundHex: "#FFFFFF" }],
                 objects: [{
                   id: "label", type: "text", artboardId: "board",

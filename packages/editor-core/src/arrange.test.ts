@@ -30,7 +30,15 @@ import {
   updateObjectCommand,
 } from "./index.js";
 
-const display = { brightness: 0, contrast: 1, gamma: 1, invert: false };
+const display = {
+  levels: { black: 0, white: 1 },
+  brightness: 0,
+  contrast: 1,
+  gamma: 1,
+  invert: false,
+  lut: "none" as const,
+};
+const reading = { plane: 0, channel: null, rotationDeg: 0, flipX: false, flipY: false };
 
 function view(id: string, xPt: number, yPt: number, size = 100, zIndex = 0): FigureObject {
   return {
@@ -41,7 +49,12 @@ function view(id: string, xPt: number, yPt: number, size = 100, zIndex = 0): Fig
     zIndex,
     locked: false,
     hidden: false,
-    view: { sourceAssetId: "asset", viewport: { x: 0, y: 0, width: 1, height: 1 }, display },
+    view: {
+      sourceAssetId: "asset",
+      ...reading,
+      viewport: { x: 0, y: 0, width: 1, height: 1 },
+      display,
+    },
   };
 }
 

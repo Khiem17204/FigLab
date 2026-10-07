@@ -1,11 +1,20 @@
 import {
   type FigureDocument,
   type FigureObject,
-  type ImageViewObjectV1,
+  type ImagePanelObject,
+  isImagePanel,
   type StrokeV2,
   TEXT_LINE_HEIGHT_EM,
   type TextStyleV2,
 } from "@figlab/figure-schema";
+
+import {
+  type AnnotationContext,
+  laneTablePrimitives,
+  mwLabelPrimitives,
+  scaleBarPrimitives,
+  zoomLinkPrimitives,
+} from "./scene-annotations.js";
 
 /** Font facts the layout needs; supplied by the bundled font so every renderer agrees. */
 export type TextMetrics = {
@@ -49,7 +58,7 @@ export type VectorPrimitive =
 
 export type Bounds = { left: number; top: number; right: number; bottom: number };
 
-export type RasterSceneItem = { kind: "raster"; object: ImageViewObjectV1 };
+export type RasterSceneItem = { kind: "raster"; object: ImagePanelObject };
 export type VectorSceneItem = {
   kind: "vector";
   objectId: string;
@@ -82,11 +91,16 @@ export function buildArtboardScene(
 ): ArtboardScene {
   const artboard = document.artboards.find((candidate) => candidate.id === artboardId);
   if (artboard === undefined) throw new Error(`Artboard ${artboardId} was not found`);
+  const context: AnnotationContext = {
+    metrics,
+    objects: new Map(document.objects.map((object) => [object.id, object])),
+    sources: new Map(document.sources.map((source) => [source.assetId, source])),
+  };
   const items = document.objects
     .map((object, index) => ({ object, index }))
     .filter(({ object }) => object.artboardId === artboardId && !object.hidden)
     .sort((left, right) => left.object.zIndex - right.object.zIndex || left.index - right.index)
-    .map(({ object }) => sceneItem(object, metrics));
+    .map(({ object }) => sceneItem(object, context));
   return {
     artboardId,
     widthPt: artboard.widthPt,
@@ -96,14 +110,9 @@ export function buildArtboardScene(
   };
 }
 
-function sceneItem(object: FigureObject, metrics: TextMetrics): SceneItem {
-  if (object.type === "image-view") return { kind: "raster", object };
-  const primitives =
-    object.type === "text"
-      ? textPrimitives(object, metrics)
-      : object.type === "line"
-        ? linePrimitives(object)
-        : shapePrimitives(object);
+function sceneItem(object: FigureObject, context: AnnotationContext): SceneItem {
+  if (isImagePanel(object)) return { kind: "raster", object };
+  const primitives = vectorPrimitives(object, context);
   const { xPt, yPt, widthPt, heightPt, rotationDeg } = object.transform;
   const rotation =
     rotationDeg === 0
@@ -116,6 +125,78 @@ function sceneItem(object: FigureObject, metrics: TextMetrics): SceneItem {
     ...(rotation ? { rotation } : {}),
     bounds: rotatedBounds(primitivesBounds(primitives), rotation),
   };
+}
+
+function vectorPrimitives(
+  object: Exclude<FigureObject, ImagePanelObject>,
+  context: AnnotationContext,
+): VectorPrimitive[] {
+  switch (object.type) {
+    case "text":
+      return textPrimitives(object, context.metrics);
+    case "line":
+      return linePrimitives(object);
+    case "shape":
+      return shapePrimitives(object);
+    case "scale-bar":
+      return scaleBarPrimitives(context, object);
+    case "zoom-link":
+      return zoomLinkPrimitives(context, object);
+    case "lane-table":
+      return laneTablePrimitives(context, object);
+    case "mw-labels":
+      return mwLabelPrimitives(context, object);
+  }
+}
+
+/**
+ * Keeps each derived object's stored box (used for selection and arrangement) equal to the
+ * bounds it actually draws at. Rendering never relies on these stored sizes.
+ */
+export function syncDerivedTransforms(
+  document: FigureDocument,
+  metrics: TextMetrics,
+): FigureDocument {
+  const context: AnnotationContext = {
+    metrics,
+    objects: new Map(document.objects.map((object) => [object.id, object])),
+    sources: new Map(document.sources.map((source) => [source.assetId, source])),
+  };
+  let changed = false;
+  const objects = document.objects.map((object) => {
+    if (
+      object.type !== "scale-bar" &&
+      object.type !== "zoom-link" &&
+      object.type !== "lane-table" &&
+      object.type !== "mw-labels"
+    )
+      return object;
+    let bounds: Bounds;
+    try {
+      bounds = primitivesBounds(vectorPrimitives(object, context), metrics);
+    } catch {
+      return object;
+    }
+    const transform = {
+      ...object.transform,
+      ...(object.type === "scale-bar" ? {} : { xPt: bounds.left, yPt: bounds.top }),
+      widthPt: Math.max(
+        0.01,
+        bounds.right - (object.type === "scale-bar" ? object.transform.xPt : bounds.left),
+      ),
+      heightPt: Math.max(
+        0.01,
+        bounds.bottom - (object.type === "scale-bar" ? object.transform.yPt : bounds.top),
+      ),
+    };
+    const same = (["xPt", "yPt", "widthPt", "heightPt"] as const).every(
+      (key) => Math.abs(transform[key] - object.transform[key]) < 1e-6,
+    );
+    if (same) return object;
+    changed = true;
+    return { ...object, transform } as FigureObject;
+  });
+  return changed ? { ...document, objects } : document;
 }
 
 function strokeStyle(stroke: StrokeV2): StrokeStyle {
@@ -290,7 +371,8 @@ function shapePrimitives(object: Extract<FigureObject, { type: "shape" }>): Vect
   return [{ type: "path", commands: rectPath(xPt, yPt, widthPt, heightPt), ...paint }];
 }
 
-function primitivesBounds(primitives: ReadonlyArray<VectorPrimitive>): Bounds {
+/** Bounds of drawn primitives: conservative for rasterizing, or exact when given font metrics. */
+function primitivesBounds(primitives: ReadonlyArray<VectorPrimitive>, exact?: TextMetrics): Bounds {
   const bounds: Bounds = {
     left: Number.POSITIVE_INFINITY,
     top: Number.POSITIVE_INFINITY,
@@ -314,14 +396,29 @@ function primitivesBounds(primitives: ReadonlyArray<VectorPrimitive>): Bounds {
       include(primitive.cx - primitive.rx, primitive.cy - primitive.ry, pad);
       include(primitive.cx + primitive.rx, primitive.cy + primitive.ry, pad);
     } else {
-      // Glyphs may overhang their advance; allow an em around the baseline box.
       const size = primitive.fontSizePt;
-      include(primitive.x, primitive.baselineY - size * 1.2, size * 0.3);
-      include(
-        primitive.x + primitive.text.length * size * 1.2,
-        primitive.baselineY + size * 0.4,
-        0,
-      );
+      if (exact) {
+        // Exact boxes (for selection) use the measured advance and the font's vertical extent.
+        const width = exact.measure(primitive.text, {
+          fontSizePt: size,
+          bold: primitive.bold,
+          italic: primitive.italic,
+          underline: false,
+          colorHex: primitive.colorHex,
+          align: "start",
+          backgroundHex: null,
+        });
+        include(primitive.x, primitive.baselineY - exact.ascentEm * size, 0);
+        include(primitive.x + width, primitive.baselineY + exact.descentEm * size, 0);
+      } else {
+        // Glyphs may overhang their advance; allow an em around the baseline box.
+        include(primitive.x, primitive.baselineY - size * 1.2, size * 0.3);
+        include(
+          primitive.x + primitive.text.length * size * 1.2,
+          primitive.baselineY + size * 0.4,
+          0,
+        );
+      }
     }
   }
   if (!Number.isFinite(bounds.left)) return { left: 0, top: 0, right: 0, bottom: 0 };
