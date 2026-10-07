@@ -1,5 +1,8 @@
 import { createHash } from "node:crypto";
-import type { FigureDocumentV1 } from "../packages/figure-schema/src/index.ts";
+import {
+  type FigureDocumentV1,
+  migrateFigureDocument,
+} from "../packages/figure-schema/src/index.ts";
 import {
   composeArtboardPng,
   type RasterSourceResolver,
@@ -40,7 +43,8 @@ const bytes =
   input.mode === "source"
     ? await sourcePng()
     : await composeArtboardPng(
-        input.document,
+        // The stack stores v1 documents here; export takes the current schema, as the app does.
+        migrateFigureDocument(input.document),
         input.document.artboards[0]?.id ?? "missing-artboard",
         input.widthPx,
         input.heightPx,
@@ -79,7 +83,7 @@ async function sourcePng(): Promise<Uint8Array> {
     constraints: [],
     styles: [],
   };
-  return composeArtboardPng(document, "source-board", 4, 2, resolver);
+  return composeArtboardPng(migrateFigureDocument(document), "source-board", 4, 2, resolver);
 }
 
 async function readStandardInput(): Promise<string> {

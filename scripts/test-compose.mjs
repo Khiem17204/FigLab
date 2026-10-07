@@ -202,8 +202,22 @@ try {
   const loaded = await requestJson(`${publicOrigin}/v1/projects/${project.id}/document`);
   const imageViewId = "00000000-0000-4000-8000-000000000010";
   const siblingViewId = "00000000-0000-4000-8000-000000000011";
+  // Current-schema (v3) views: the API validates request bodies exactly.
+  const view = (viewport, display) => ({
+    sourceAssetId: reservation.assetId,
+    plane: 0,
+    channel: null,
+    viewport,
+    rotationDeg: 0,
+    flipX: false,
+    flipY: false,
+    display: { levels: { black: 0, white: 1 }, lut: "none", ...display },
+  });
   const document = {
     ...loaded.document,
+    sources: [
+      { assetId: reservation.assetId, widthPx: 4, heightPx: 2, calibration: null, markers: [] },
+    ],
     objects: [
       {
         id: imageViewId,
@@ -213,11 +227,10 @@ try {
         zIndex: 0,
         locked: false,
         hidden: false,
-        view: {
-          sourceAssetId: reservation.assetId,
-          viewport: { x: 0.25, y: 0, width: 0.5, height: 1 },
-          display: { brightness: 0.1, contrast: 1.2, gamma: 0.9, invert: false },
-        },
+        view: view(
+          { x: 0.25, y: 0, width: 0.5, height: 1 },
+          { brightness: 0.1, contrast: 1.2, gamma: 0.9, invert: false },
+        ),
       },
       {
         id: siblingViewId,
@@ -227,11 +240,10 @@ try {
         zIndex: 1,
         locked: false,
         hidden: false,
-        view: {
-          sourceAssetId: reservation.assetId,
-          viewport: { x: 0.5, y: 0, width: 0.5, height: 1 },
-          display: { brightness: 0, contrast: 1, gamma: 1, invert: true },
-        },
+        view: view(
+          { x: 0.5, y: 0, width: 0.5, height: 1 },
+          { brightness: 0, contrast: 1, gamma: 1, invert: true },
+        ),
       },
     ],
   };
