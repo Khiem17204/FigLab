@@ -52,7 +52,7 @@ Production: https://figlab.netlify.app (Netlify site `figlab`) on Supabase proje
 | `apps/web` | React 19 + Vite 8 app: dashboard, editor (PixiJS 8 artboard, accessible DOM/SVG controls), Zustand session, autosave, browser raster resolver, PNG export. `src/auth` is the Supabase sign-in gate; `netlify.toml` defines the Netlify site. |
 | `apps/api` | Fastify 5 + TypeBox HTTP boundary. Handles projects, documents, upload reservations, asset status, signed URLs, and export records; never proxies image bytes. `src/auth.ts` resolves the caller per request; `src/fetch-adapter.ts` runs Fastify behind fetch-style runtimes. |
 | `apps/jobs` | Graphile Worker tasks `verify_asset` and `delete_project`. Runs as a long-lived worker (Compose) or `drainJobsOnce` (Netlify). |
-| `packages/figure-schema` | Strict `FigureDocumentV1`, semantic validation, typed decode errors, migration entry point. |
+| `packages/figure-schema` | Strict v1 and v2 documents, semantic validation, typed decode errors, `migrateFigureDocument`, journal size presets. |
 | `packages/editor-core` | Pure crop, transform, history, and provenance commands. |
 | `packages/image-processing` | Raster sources, TIFF validation and window reads, display math, CPU PNG composition. |
 | `packages/database` | Drizzle tables, `pg` repository, in-memory repository, `Principal`/`Authorizer`, SQL migrations. |
@@ -107,12 +107,17 @@ There is no Redis or separate queue. Graphile Worker keeps jobs in Postgres in b
 
 ## Domain details
 
-**Document.** `FigureDocumentV1` has `schemaVersion: 1`, artboards, and image-view objects;
-`groups`, `constraints`, and `styles` are empty. The default artboard is white US Letter,
-612×792 pt at 72 pt/in.
+**Document.** The current schema is v2 (`packages/figure-schema/src/v2.ts`); v1 is frozen in
+`v1.ts`. Every read and every received save goes through `migrateFigureDocument`, which
+validates the stored version and upgrades it; saves always store the current version.
+- A document has one or more artboards (each a "figure"), objects, and `groups`
+  (`constraints`/`styles` stay empty). The default artboard is white US Letter, 612×792 pt.
+- Object kinds: `image-view`, `text` (optionally a panel label linked to a target), `line`
+  (arrowheads; one zero-size dimension allowed), and `shape` (rect, ellipse, bracket).
 - Each image view has a `sourceAssetId`, a top-left normalized viewport, and display settings:
   brightness [-1,1], contrast [0,4], gamma [0.1,10], invert. Position and size are in points.
-  Rotation is fixed at 0 in v1, and resizing keeps the crop's aspect ratio.
+  Image rotation is fixed at 0; resizing keeps the crop's aspect ratio, and a new crop's panel
+  takes the crop's aspect ratio in source pixels. Text and shapes may rotate about their center.
 - Crop → source pixels: `floor` left/top, `ceil` right/bottom. Validation rejects malformed,
   out-of-bounds, duplicate-ID, and future-version documents.
 - Editing: pointer-move previews, pointer-up commits one command. Undo keeps at most 100
@@ -143,11 +148,18 @@ only `ready` assets may be saved into a document.
 - Pixi draws the preview textures; DOM/SVG handles interaction and accessibility.
 - Display math: normalize the sample, apply contrast around 0.5, add brightness, clamp to
   [0,1], raise to 1/gamma, then invert.
-- Export re-reads source regions, applies the same math, composites in z-order, and writes an
-  8-bit PNG (16-bit TIFF values are kept until this step). Limits are 16,384 px per edge and
-  100 Mpx.
-- Export flushes autosave first. The API records the format, exact revision, size, and SHA-256,
-  never the bytes.
+- `buildArtboardScene` (`packages/image-processing/src/scene.ts`) resolves an artboard to an
+  ordered draw list; the preview and every export format draw from it. Text is laid out with
+  the bundled Arimo font (`packages/image-processing/fonts`, SIL OFL 1.1) without kerning or
+  ligatures.
+- Raster export (PNG with pHYs, TIFF with resolution tags) re-reads source regions, applies the
+  same math, and composites in z-order; text and shapes are rasterized by the browser and
+  composited between panels. 16-bit values are kept until this step. Limits are 16,384 px per
+  edge and 100 Mpx. Pixel size is the figure's physical size × DPI (300 by default).
+- SVG and PDF stay vector and embed each panel as a lossless PNG rendered from originals at the
+  export DPI. fontkit and pdf-lib load from `@figlab/image-processing/vector` on demand.
+- Export flushes autosave first. The API records the format, figure, DPI, exact revision, size,
+  and SHA-256 of every exported figure, never the bytes.
 - "Show in Original" uses the view's asset and viewport. Views sharing an asset are
   provenance siblings.
 
@@ -258,5 +270,9 @@ corepack pnpm build && corepack pnpm test:e2e && corepack pnpm test:visual && co
 - Worktrees: `.worktrees/ui-refresh` (`feat/ui-refresh`, visual redesign; owns `apps/web` look
   and `packages/ui`) and `.worktrees/sciugo-parity` (`feat/sciugo-parity`, feature parity with
   Sciugo; owns schema, editor-core, API, jobs, export). The UI branch lands first.
-- Out of scope so far: shared workspaces, admin screens, OAuth/SSO, text/shapes, blot tools,
-  TIFF/PDF export, pyramids, offline use, densitometry, and mobile layout.
+- `feat/sciugo-parity` P0 (see `docs/superpowers/plans/2026-10-06-sciugo-parity-p0.md`): schema
+  v2, figures and journal presets, text/lines/arrows/shapes/brackets, panel lettering, arrange
+  tools, PNG/TIFF/SVG/PDF export with DPI, and audit/version/export history. It needs migration
+  `0003` on Supabase before it is deployed.
+- Out of scope so far: shared workspaces, admin screens, OAuth/SSO, blot tools, microscopy
+  channels, pyramids, offline use, densitometry, and mobile layout.

@@ -16,8 +16,15 @@ Build publication-ready scientific figures from your original images without eve
   delete, and undo/redo.
 - **Autosave with conflict protection** — every change is versioned; a second tab can't
   silently overwrite your work.
-- **Faithful export** — PNG rendered from original pixels at the size you choose, with
-  provenance recorded.
+- **Figures and annotations** — several figures per project sized to journal columns (Nature,
+  Cell Press, PNAS, PLOS) or custom; text with symbol shortcuts, lines, arrows, rectangles,
+  ellipses, and brackets; automatic panel letters.
+- **Arrange** — multi-select, align, distribute, snapping guides, grouping, layers, lock, and
+  duplicate.
+- **Faithful export** — PNG, TIFF, SVG, or PDF at 300/600 dpi or custom, rendered from original
+  pixels, one figure or all at once, with provenance recorded for every file.
+- **History** — an audit trail of who changed what, saved versions you can restore, and export
+  records.
 
 ## Tech stack
 

@@ -132,6 +132,20 @@ async function dragCrop(page: Page, aspect: number) {
   await page.mouse.up();
 }
 
+/** A point at fractions of the figure canvas, scrolled to the middle of the viewport. */
+async function canvasPoint(page: Page, fx: number, fy: number) {
+  const canvas = page.locator(".figure-canvas");
+  const before = await canvas.boundingBox();
+  if (!before) throw new Error("figure canvas has no box");
+  await page.evaluate(
+    (y) => window.scrollBy(0, y - window.innerHeight / 2),
+    before.y + before.height * fy,
+  );
+  const box = await canvas.boundingBox();
+  if (!box) throw new Error("figure canvas has no box");
+  return { x: box.x + box.width * fx, y: box.y + box.height * fy };
+}
+
 async function openProject(page: Page) {
   await page.getByRole("button", { name: `Open ${projectName}` }).click();
   await expect(page.getByRole("heading", { name: projectName })).toBeVisible();
@@ -231,11 +245,14 @@ test.describe
       const download = page.waitForEvent("download");
       await page.getByRole("button", { name: "Export PNG" }).click();
       const file = await download;
-      expect(file.suggestedFilename()).toMatch(/^figlab-\d+x\d+\.png$/);
+      expect(file.suggestedFilename()).toMatch(/^live-smoke-[a-z0-9]+-figure-1-300dpi\.png$/);
       const path = await file.path();
       const exported = await sharp(await readFile(path ?? "")).metadata();
       expect(exported.format).toBe("png");
-      await expect(page.getByText("PNG downloaded and provenance recorded.")).toBeVisible();
+      expect([exported.width, exported.height, exported.density]).toEqual([2550, 3300, 300]);
+      await expect(
+        page.getByText(/downloaded and provenance recorded for 1 figure\./),
+      ).toBeVisible();
 
       // A fresh load restores the saved document and re-downloads originals from storage.
       await page.reload();
@@ -251,6 +268,86 @@ test.describe
         .last()
         .click();
       await expect(page.getByRole("checkbox", { name: "Invert" })).toBeChecked();
+    });
+
+    test("admin annotates, labels panels, adds a journal-sized figure, and exports TIFF and PDF", async ({
+      page,
+    }) => {
+      await signIn(page, admin.email, admin.password);
+      await openProject(page);
+      await expect(page.getByRole("button", { name: /Move view-/ })).toHaveCount(2);
+
+      await page.getByRole("button", { name: "Text", exact: true }).click();
+      const at = await canvasPoint(page, 0.5, 0.08);
+      await page.mouse.click(at.x, at.y);
+      const content = page.getByLabel("Text content");
+      await content.fill("IL-6 10 \\muM");
+      await content.blur();
+      await expect(content).toHaveValue("IL-6 10 μM");
+      await page.keyboard.press("Escape");
+      await page.getByRole("button", { name: "Label panels" }).click();
+      await expect(page.getByRole("button", { name: /Move label-/ })).toHaveCount(2);
+
+      await page.getByRole("button", { name: "Add figure" }).click();
+      await page.getByLabel("Figure size").selectOption("nature-double");
+      await expect(page.getByLabel("Width (mm)")).toHaveValue("183");
+      await page.getByRole("button", { name: "Figure 1", exact: true }).click();
+      await expect(page.locator(".editor-header").getByRole("status")).toHaveText("Saved", {
+        timeout: 15_000,
+      });
+
+      await page.getByLabel("Format").selectOption("tiff");
+      const tiffDownload = page.waitForEvent("download");
+      await page.getByRole("button", { name: "Export TIFF" }).click();
+      const tiff = await sharp(
+        await readFile((await (await tiffDownload).path()) ?? ""),
+      ).metadata();
+      expect([tiff.format, tiff.width, tiff.height, tiff.density]).toEqual([
+        "tiff",
+        2550,
+        3300,
+        300,
+      ]);
+
+      await page.getByLabel("Format").selectOption("pdf");
+      await page.getByLabel(/All figures/).check();
+      const pdfDownload = page.waitForEvent("download");
+      await page.getByRole("button", { name: "Export PDF" }).click();
+      const pdf = (await readFile((await (await pdfDownload).path()) ?? "")).toString("latin1");
+      expect(pdf.startsWith("%PDF-")).toBe(true);
+      expect(pdf.match(/\/Type \/Page\b/g)).toHaveLength(2);
+      expect(pdf).toContain("/FontFile2");
+
+      const trail = page.getByRole("list", { name: "Audit trail" });
+      await expect(trail).toContainText("Exported: PDF at 300 dpi", { timeout: 15_000 });
+      await expect(trail).toContainText(admin.email);
+
+      const token = await accessToken(admin.email, admin.password);
+      const events = (await (
+        await api(`/v1/projects/${projectId}/audit-events?limit=200`, token)
+      ).json()) as {
+        events: { action: string; actor?: { email: string } }[];
+      };
+      const created = events.events.filter((event) => event.action === "OBJECT_CREATED");
+      expect(created.length).toBeGreaterThanOrEqual(3);
+      expect(created.every((event) => event.actor?.email === admin.email)).toBe(true);
+      const exports = (await (await api(`/v1/projects/${projectId}/exports`, token)).json()) as {
+        exports: { format: string; dpi?: number }[];
+      };
+      expect(exports.exports.filter((record) => record.format === "pdf")).toHaveLength(2);
+      expect(exports.exports.some((record) => record.format === "tiff" && record.dpi === 300)).toBe(
+        true,
+      );
+      const versions = (await (await api(`/v1/projects/${projectId}/versions`, token)).json()) as {
+        versions: { revision: number }[];
+      };
+      const first = versions.versions.at(-1)?.revision ?? 1;
+      const old = (await (
+        await api(`/v1/projects/${projectId}/versions/${first}`, token)
+      ).json()) as {
+        document: { schemaVersion: number };
+      };
+      expect(old.document.schemaVersion).toBe(2);
     });
 
     test("a stale tab gets a revision conflict and keeps local work", async ({ browser }) => {
@@ -327,5 +424,7 @@ test.describe
           timeout: 60_000,
         })
         .toBe(404);
+      // The project is a tombstone now: its history is no longer reachable through the API.
+      expect((await api(`/v1/projects/${projectId}/audit-events`, adminToken)).status).toBe(404);
     });
   });
