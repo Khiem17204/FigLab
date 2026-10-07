@@ -73,7 +73,8 @@ export function PixiArtboard({
     const target = host.current;
     if (!target) return;
     const app = new Application();
-    void app.init({ background: "#cbd5e1", resizeTo: target, antialias: true }).then(async () => {
+    // Transparent so the themed canvas color and the paper shadow behind it show through.
+    void app.init({ backgroundAlpha: 0, resizeTo: target, antialias: true }).then(async () => {
       initialized = true;
       if (disposed || !host.current) {
         app.destroy(true, { children: true, texture: false });
@@ -99,7 +100,9 @@ export function PixiArtboard({
             normalizedToPixelRect(object.view.viewport, source.widthPx, source.heightPx),
             object.view.display,
           );
-          return Assets.load<Texture>(previewUrl);
+          // Preview URLs are extension-less blob: URLs, so name the texture parser explicitly;
+          // without it Pixi cannot pick a loader and the panel silently renders empty.
+          return Assets.load<Texture>({ src: previewUrl, parser: "texture" });
         },
       });
     });
