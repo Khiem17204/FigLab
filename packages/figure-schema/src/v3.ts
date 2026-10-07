@@ -79,6 +79,10 @@ export const SampleInfoV3Schema = Type.Object(
     lot: infoText,
     supplier: infoText,
     notes: Type.Optional(Type.String({ maxLength: 1000 })),
+    /** The panel is the loading control the other blot panels are compared with. */
+    loadingControl: Type.Optional(Type.Boolean()),
+    /** Where the target's band should run; checked against the original's ladder marks. */
+    expectedKDa: Type.Optional(Type.Number({ exclusiveMinimum: 0, maximum: 10_000 })),
   },
   { additionalProperties: false },
 );

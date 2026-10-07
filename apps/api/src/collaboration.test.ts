@@ -67,7 +67,7 @@ async function lab() {
       body: response.body ? (response.json() as Json) : {},
     };
   };
-  return { app, pi, student, stranger, call };
+  return { app, repository, pi, student, stranger, call };
 }
 
 describe("lab workspaces over HTTP", () => {
@@ -249,6 +249,40 @@ describe("lab workspaces over HTTP", () => {
     expect((await call(pi, "GET", "/v1/admin/users?limit=10")).body.users).toHaveLength(2);
     expect((await call(pi, "GET", "/v1/admin/workspaces")).body.workspaces).toHaveLength(2);
     expect((await call(pi, "GET", "/v1/admin/jobs")).body).toEqual({ jobs: [] });
+    await app.close();
+  });
+
+  it("signs derived previews the worker recorded, and nothing else", async () => {
+    const { app, repository, pi, stranger, call } = await lab();
+    const project = (await call(pi, "POST", "/v1/projects", { name: "Previews" })).body;
+    const key = `workspaces/w/projects/${project.id}/assets/a/original`;
+    const upload = await repository.createUpload({
+      projectId: project.id,
+      filename: "big.tif",
+      mimeType: "image/tiff",
+      contentLength: 10,
+      checksumSha256: "a".repeat(64),
+      storageKey: key,
+    });
+    await repository.updateAsset(upload.assetId, {
+      status: "ready",
+      widthPx: 4000,
+      heightPx: 3000,
+      bitDepth: 16,
+      channelCount: 1,
+      metadata: { previews: [{ maxEdge: 256, widthPx: 256, heightPx: 192, stretched: true }] },
+    });
+    const signed = await call(pi, "POST", `/v1/assets/${upload.assetId}/previews/256/download-url`);
+    expect(signed.status).toBe(201);
+    expect(decodeURIComponent(signed.body.url)).toContain(`assets/a/preview-256.png`);
+    expect(decodeURIComponent(signed.body.url)).not.toContain("original");
+    expect(
+      (await call(pi, "POST", `/v1/assets/${upload.assetId}/previews/1024/download-url`)).status,
+    ).toBe(404);
+    expect(
+      (await call(stranger, "POST", `/v1/assets/${upload.assetId}/previews/256/download-url`))
+        .status,
+    ).toBe(404);
     await app.close();
   });
 });

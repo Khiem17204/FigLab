@@ -52,7 +52,7 @@ import {
   migrateFigureDocument,
   panelAssetIds,
 } from "@figlab/figure-schema";
-import { createObjectStoreFromEnv, type ObjectStore } from "@figlab/storage";
+import { createObjectStoreFromEnv, derivedPreviewKey, type ObjectStore } from "@figlab/storage";
 import { Type } from "@sinclair/typebox";
 import Fastify, { type FastifyInstance } from "fastify";
 import {
@@ -421,6 +421,31 @@ export async function buildApp(dependencies: AppDependencies): Promise<FastifyIn
         request.principal,
         (request.params as { assetId: string }).assetId,
       ),
+  );
+  app.post(
+    apiRoutes.assetPreviewDownloadUrl,
+    {
+      schema: {
+        params: Type.Object({
+          assetId: Type.String({ minLength: 1 }),
+          maxEdge: Type.Integer({ minimum: 1 }),
+        }),
+        response: { 201: DownloadUrlResponseSchema },
+      },
+    },
+    async (request, reply) => {
+      const { assetId, maxEdge } = request.params as { assetId: string; maxEdge: number };
+      const asset = await assetFor(dependencies, authorizer, request.principal, assetId);
+      const previews = Array.isArray(asset.metadata.previews)
+        ? (asset.metadata.previews as { maxEdge?: unknown }[])
+        : [];
+      if (asset.status !== "ready" || !previews.some((preview) => preview.maxEdge === maxEdge))
+        throw new NotFoundError();
+      const signed = await dependencies.store.presignDownload(
+        derivedPreviewKey(asset.storageKey, maxEdge),
+      );
+      return reply.status(201).send({ url: signed.url, expiresAt: signed.expiresAt });
+    },
   );
   app.post(
     apiRoutes.assetDownloadUrl,

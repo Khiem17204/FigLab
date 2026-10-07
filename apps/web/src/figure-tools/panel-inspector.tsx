@@ -180,6 +180,22 @@ export function PanelInspector({
     }
   };
   const view = object?.type === "image-view" ? object : undefined;
+  /** Merges into the selected view's sample info, dropping empty fields. */
+  const setSampleInfo = (patch: Record<string, string | number | boolean | undefined>) => {
+    if (!view) return;
+    apply(
+      updateObjectCommand(view.id, (current) => {
+        if (current.type !== "image-view") return current;
+        const cleaned = Object.fromEntries(
+          Object.entries({ ...current.sampleInfo, ...patch }).filter(
+            ([, entry]) => entry !== undefined && entry !== "" && entry !== false,
+          ),
+        );
+        const { sampleInfo: _old, ...rest } = current;
+        return Object.keys(cleaned).length > 0 ? { ...rest, sampleInfo: cleaned } : rest;
+      }),
+    );
+  };
   const asset = view
     ? assets.find((candidate) => candidate.id === view.view.sourceAssetId)
     : undefined;
@@ -361,23 +377,35 @@ export function PanelInspector({
                 onBlur={(event) => {
                   const value = event.currentTarget.value.trim();
                   if (value === (view.sampleInfo?.[key] ?? "")) return;
-                  apply(
-                    updateObjectCommand(view.id, (current) => {
-                      if (current.type !== "image-view") return current;
-                      const next = { ...current.sampleInfo, [key]: value || undefined };
-                      const cleaned = Object.fromEntries(
-                        Object.entries(next).filter(([, entry]) => entry),
-                      );
-                      const { sampleInfo: _old, ...rest } = current;
-                      return Object.keys(cleaned).length > 0
-                        ? { ...rest, sampleInfo: cleaned }
-                        : rest;
-                    }),
-                  );
+                  setSampleInfo({ [key]: value || undefined });
                 }}
               />
             </label>
           ))}
+          <label className="inline">
+            <input
+              checked={view.sampleInfo?.loadingControl === true}
+              onChange={(event) => setSampleInfo({ loadingControl: event.target.checked })}
+              type="checkbox"
+            />
+            Loading control
+          </label>
+          <label>
+            Expected size (kDa)
+            <input
+              defaultValue={view.sampleInfo?.expectedKDa ?? ""}
+              key={`${view.id}-kda-${view.sampleInfo?.expectedKDa ?? ""}`}
+              max="10000"
+              min="0"
+              onBlur={(event) => {
+                const value = Number(event.currentTarget.value);
+                const next = event.currentTarget.value.trim() && value > 0 ? value : undefined;
+                if (next !== view.sampleInfo?.expectedKDa) setSampleInfo({ expectedKDa: next });
+              }}
+              step="any"
+              type="number"
+            />
+          </label>
         </fieldset>
         <fieldset>
           <legend>Add to this panel</legend>

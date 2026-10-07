@@ -29,6 +29,22 @@ export interface ObjectStore {
   stat(key: string): Promise<ObjectStat | undefined>;
   read(key: string): Promise<AsyncIterable<Uint8Array>>;
   delete(key: string): Promise<void>;
+  /**
+   * Writes a server-made derived object (such as a preview), replacing any earlier one. Originals
+   * are never written this way: keys ending in `/original` are refused.
+   */
+  putDerived(key: string, bytes: Uint8Array, contentType: string): Promise<void>;
+}
+
+/** Storage key of an original's derived display preview, beside (never over) the original. */
+export function derivedPreviewKey(originalKey: string, maxEdge: number): string {
+  return `${originalKey.replace(/\/original$/, "")}/preview-${maxEdge}.png`;
+}
+
+/** Throws for keys that name an immutable original. */
+export function assertDerivedKey(key: string): void {
+  if (/\/original$/.test(key) || !key.trim())
+    throw new Error("Derived objects cannot be written over originals");
 }
 const expiry = (seconds: number) => new Date(Date.now() + seconds * 1000).toISOString();
 export class FakeObjectStore implements ObjectStore {
@@ -76,6 +92,13 @@ export class FakeObjectStore implements ObjectStore {
   }
   async putForTest(key: string, bytes: Uint8Array, contentType: string): Promise<void> {
     this.objects.set(key, { bytes, contentType });
+  }
+  async putDerived(key: string, bytes: Uint8Array, contentType: string): Promise<void> {
+    assertDerivedKey(key);
+    this.objects.set(key, { bytes: bytes.slice(), contentType });
+  }
+  keys(): string[] {
+    return [...this.objects.keys()];
   }
 }
 
@@ -166,6 +189,17 @@ export class S3ObjectStore implements ObjectStore {
   }
   async delete(key: string): Promise<void> {
     await this.internal.send(new DeleteObjectCommand({ Bucket: this.options.bucket, Key: key }));
+  }
+  async putDerived(key: string, bytes: Uint8Array, contentType: string): Promise<void> {
+    assertDerivedKey(key);
+    await this.internal.send(
+      new PutObjectCommand({
+        Bucket: this.options.bucket,
+        Key: key,
+        Body: bytes,
+        ContentType: contentType,
+      }),
+    );
   }
 }
 

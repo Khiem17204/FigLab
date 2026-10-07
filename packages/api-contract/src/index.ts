@@ -20,6 +20,7 @@ export const apiRoutes = {
   uploadComplete: "/v1/uploads/:uploadId/complete",
   asset: "/v1/assets/:assetId",
   assetDownloadUrl: "/v1/assets/:assetId/download-url",
+  assetPreviewDownloadUrl: "/v1/assets/:assetId/previews/:maxEdge/download-url",
   projectExports: "/v1/projects/:projectId/exports",
   projectAuditEvents: "/v1/projects/:projectId/audit-events",
   projectVersions: "/v1/projects/:projectId/versions",

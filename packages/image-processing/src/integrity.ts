@@ -7,6 +7,7 @@ import {
   isImagePanel,
   type SampleInfoV3,
 } from "@figlab/figure-schema";
+import { cropKDaRange, isLoadingControl } from "./mw.js";
 import { cropSourceRect, luminance, panelCrop, type SourceSizes } from "./panel-render.js";
 import type { RasterRegion, RasterSourceResolver, SourcePixelRect } from "./raster.js";
 
@@ -304,6 +305,25 @@ export async function buildIntegrityReport(input: {
         code: "flip",
         message: `Mirrored ${[crop.flipX ? "horizontally" : "", crop.flipY ? "vertically" : ""].filter(Boolean).join(" and ")}.`,
       });
+    const expectedKDa = object.sampleInfo?.expectedKDa;
+    if (object.type === "image-view" && expectedKDa !== undefined) {
+      const source = document.sources.find((entry) => entry.assetId === object.view.sourceAssetId);
+      const range = source
+        ? cropKDaRange(object.view, await sizes(source.assetId), source.markers)
+        : undefined;
+      if (!range)
+        findings.push({
+          severity: "info",
+          code: "unchecked-mw",
+          message: `Expected band at ${expectedKDa} kDa; mark at least two ladder bands on the original to check it.`,
+        });
+      else if (expectedKDa < range.lowKDa || expectedKDa > range.highKDa)
+        findings.push({
+          severity: "warn",
+          code: "unexpected-mw",
+          message: `Expected band at ${expectedKDa} kDa lies outside this crop's ladder range (${range.lowKDa.toFixed(0)}–${range.highKDa.toFixed(0)} kDa).`,
+        });
+    }
     if (object.type === "composite")
       findings.push({
         severity: "info",
@@ -389,6 +409,25 @@ export async function buildIntegrityReport(input: {
           },
     );
   }
+
+  // Blot panels are those with lane labels or MW labels attached.
+  const blotIds = new Set(
+    document.objects.flatMap((object) =>
+      object.type === "lane-table"
+        ? [object.laneTable.targetObjectId]
+        : object.type === "mw-labels"
+          ? [object.mwLabels.targetObjectId]
+          : [],
+    ),
+  );
+  const blots = panels.filter((panel) => blotIds.has(panel.objectId));
+  if (blots.length > 0 && !panels.some((panel) => isLoadingControl(panel.sampleInfo)))
+    findings.push({
+      severity: "warn",
+      code: "missing-loading-control",
+      message:
+        "No blot panel is marked as a loading control (for example β-actin, GAPDH, or total protein). Record it in the panel's sample info.",
+    });
 
   return {
     schema: INTEGRITY_REPORT_SCHEMA,

@@ -194,3 +194,14 @@
 .quantification-chart path {
   fill: #0f4cbd;
 }
+.derived-preview {
+  margin: 0;
+}
+.derived-preview img {
+  display: block;
+  max-width: 100%;
+  height: auto;
+}
+.derived-preview figcaption {
+  font-size: 11px;
+}

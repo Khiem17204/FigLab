@@ -693,6 +693,12 @@ paths:
                                   notes:
                                     maxLength: 1000
                                     type: string
+                                  loadingControl:
+                                    type: boolean
+                                  expectedKDa:
+                                    exclusiveMinimum: 0
+                                    maximum: 10000
+                                    type: number
                           - additionalProperties: false
                             type: object
                             required:
@@ -905,6 +911,12 @@ paths:
                                   notes:
                                     maxLength: 1000
                                     type: string
+                                  loadingControl:
+                                    type: boolean
+                                  expectedKDa:
+                                    exclusiveMinimum: 0
+                                    maximum: 10000
+                                    type: number
                           - additionalProperties: false
                             type: object
                             required:
@@ -2009,6 +2021,12 @@ paths:
                                   notes:
                                     maxLength: 1000
                                     type: string
+                                  loadingControl:
+                                    type: boolean
+                                  expectedKDa:
+                                    exclusiveMinimum: 0
+                                    maximum: 10000
+                                    type: number
                           - additionalProperties: false
                             type: object
                             required:
@@ -2221,6 +2239,12 @@ paths:
                                   notes:
                                     maxLength: 1000
                                     type: string
+                                  loadingControl:
+                                    type: boolean
+                                  expectedKDa:
+                                    exclusiveMinimum: 0
+                                    maximum: 10000
+                                    type: number
                           - additionalProperties: false
                             type: object
                             required:
@@ -4035,6 +4059,12 @@ paths:
                                   notes:
                                     maxLength: 1000
                                     type: string
+                                  loadingControl:
+                                    type: boolean
+                                  expectedKDa:
+                                    exclusiveMinimum: 0
+                                    maximum: 10000
+                                    type: number
                           - additionalProperties: false
                             type: object
                             required:
@@ -4247,6 +4277,12 @@ paths:
                                   notes:
                                     maxLength: 1000
                                     type: string
+                                  loadingControl:
+                                    type: boolean
+                                  expectedKDa:
+                                    exclusiveMinimum: 0
+                                    maximum: 10000
+                                    type: number
                           - additionalProperties: false
                             type: object
                             required:
@@ -5334,6 +5370,39 @@ paths:
                   createdAt:
                     minLength: 1
                     type: string
+  "/v1/assets/{assetId}/previews/{maxEdge}/download-url":
+    post:
+      parameters:
+      - schema:
+          minLength: 1
+          type: string
+        in: path
+        name: assetId
+        required: true
+      - schema:
+          minimum: 1
+          type: integer
+        in: path
+        name: maxEdge
+        required: true
+      responses:
+        '201':
+          description: Default Response
+          content:
+            application/json:
+              schema:
+                additionalProperties: false
+                type: object
+                required:
+                - url
+                - expiresAt
+                properties:
+                  url:
+                    minLength: 1
+                    type: string
+                  expiresAt:
+                    minLength: 1
+                    type: string
   "/v1/assets/{assetId}/download-url":
     post:
       parameters:
@@ -6062,6 +6131,12 @@ paths:
                                   notes:
                                     maxLength: 1000
                                     type: string
+                                  loadingControl:
+                                    type: boolean
+                                  expectedKDa:
+                                    exclusiveMinimum: 0
+                                    maximum: 10000
+                                    type: number
                           - additionalProperties: false
                             type: object
                             required:
@@ -6274,6 +6349,12 @@ paths:
                                   notes:
                                     maxLength: 1000
                                     type: string
+                                  loadingControl:
+                                    type: boolean
+                                  expectedKDa:
+                                    exclusiveMinimum: 0
+                                    maximum: 10000
+                                    type: number
                           - additionalProperties: false
                             type: object
                             required:

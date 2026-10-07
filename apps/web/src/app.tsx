@@ -15,6 +15,7 @@ import { BrowserRasterRepository, type SupportedRasterMime } from "./editor/rast
 import { createEditorSession } from "./editor/session-store";
 import { ArrangePanel } from "./figure-tools/arrange-panel";
 import { CommentsPanel, TemplatePanel } from "./figure-tools/comments-panel";
+import { DerivedThumbnail } from "./figure-tools/derived-preview";
 import { useDerivedSync } from "./figure-tools/derived-sync";
 import { exportFigures } from "./figure-tools/export-figure";
 import { ExportPanel } from "./figure-tools/export-panel";
@@ -327,6 +328,8 @@ export function FigLabEditor({
   const state = useStore(session);
   const [revision, setRevision] = useState(initial.revision);
   const [assets, setAssets] = useState<AssetDescriptor[]>([]);
+  // Originals still downloading; their derived previews show meanwhile.
+  const [loadingAssets, setLoadingAssets] = useState<AssetDescriptor[]>([]);
   const [selectedAssetId, setSelectedAssetId] = useState(
     initial.document.objects.find(isImageView)?.view.sourceAssetId,
   );
@@ -411,10 +414,16 @@ export function FigLabEditor({
         if (rasterSources.has(assetId)) return;
         const asset = await client.getAsset(assetId);
         if (asset.status !== "ready") return;
-        const download = await client.downloadAsset(assetId);
-        await rasterSources.add(assetId, download.bytes, asset.mimeType as SupportedRasterMime);
-        if (!cancelled)
-          setAssets((current) => [...current.filter((item) => item.id !== asset.id), asset]);
+        if (!cancelled) setLoadingAssets((current) => [...current, asset]);
+        try {
+          const download = await client.downloadAsset(assetId);
+          await rasterSources.add(assetId, download.bytes, asset.mimeType as SupportedRasterMime);
+          if (!cancelled)
+            setAssets((current) => [...current.filter((item) => item.id !== asset.id), asset]);
+        } finally {
+          if (!cancelled)
+            setLoadingAssets((current) => current.filter((item) => item.id !== asset.id));
+        }
       }),
     ).catch((error: unknown) => {
       if (!cancelled)
@@ -533,6 +542,12 @@ export function FigLabEditor({
             </label>
           )}
           <p role="status">{uploadStatus}</p>
+          {loadingAssets.map((asset) => (
+            <div className="source-item" key={`loading-${asset.id}`}>
+              <DerivedThumbnail asset={asset} client={client} />
+              <span role="status">{`Loading original · ${asset.filename}…`}</span>
+            </div>
+          ))}
           {assets.map((asset) => (
             <button
               className="source-item"

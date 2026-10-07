@@ -1,6 +1,7 @@
 import type { ImageViewObjectV3 } from "@figlab/figure-schema";
 import {
   documentSourceSizes,
+  isLoadingControl,
   normalizeToControl,
   type QuantificationResult,
   quantificationCsv,
@@ -66,7 +67,17 @@ export function QuantifyPanel({
       for (let span = 0; span < cell.span; span += 1) labelsByLane.push(cell.text);
     return labelsByLane;
   })();
-  const control = views.find((view) => view.id === controlId);
+  // Default to the panel recorded as the loading control, when it has matching lanes.
+  const control =
+    views.find((view) => view.id === controlId) ??
+    (controlId === ""
+      ? views.find(
+          (view) =>
+            view.id !== target.id &&
+            isLoadingControl(view.sampleInfo) &&
+            tableFor(view)?.laneTable.lanes === lanes,
+        )
+      : undefined);
 
   return (
     <section aria-label="Quantification" className="figure-tools-panel">
@@ -86,8 +97,11 @@ export function QuantifyPanel({
           </label>
           <label>
             Loading control
-            <select onChange={(event) => setControlId(event.target.value)} value={controlId}>
-              <option value="">None</option>
+            <select
+              onChange={(event) => setControlId(event.target.value)}
+              value={control?.id ?? "none"}
+            >
+              <option value="none">None</option>
               {views
                 .filter(
                   (view) => view.id !== target.id && tableFor(view)?.laneTable.lanes === lanes,

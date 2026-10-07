@@ -221,6 +221,73 @@ describe("integrity report", () => {
   });
 });
 
+describe("screener checks", () => {
+  const lanes = (target: string): FigureObject => ({
+    ...base,
+    id: `lanes-${target}`,
+    type: "lane-table",
+    zIndex: 3,
+    transform: { xPt: 0, yPt: 0, widthPt: 100, heightPt: 10, rotationDeg: 0 },
+    laneTable: {
+      targetObjectId: target,
+      lanes: 2,
+      laneCenters: null,
+      placement: "above",
+      rows: [{ cells: [{ text: "A", span: 2, underline: false }] }],
+      fontSizePt: 7,
+      colorHex: "#000000",
+      gapPt: 2,
+    },
+  });
+  const report = (objects: FigureObject[], markers: { yPx: number; kDa: number }[] = []) =>
+    buildIntegrityReport({
+      document: decodeFigureDocument(
+        documentWith(objects, [
+          { assetId: "blot", widthPx: 10, heightPx: 10, calibration: null, markers },
+        ]),
+      ),
+      revision: 1,
+      projectName: "Blots",
+      resolver,
+      sizes,
+    });
+  const withInfo = (object: FigureObject, sampleInfo: Record<string, unknown>) =>
+    ({ ...object, sampleInfo }) as FigureObject;
+
+  it("asks for a loading control when blot panels have none", async () => {
+    const target = withInfo(panel("p"), { target: "p-ERK" });
+    expect((await report([target, lanes("p")])).findings.map((finding) => finding.code)).toEqual([
+      "missing-loading-control",
+    ]);
+    const actin = withInfo(panel("c"), { target: "β-actin" });
+    const codes = async (objects: FigureObject[]) =>
+      (await report(objects)).findings.map((finding) => finding.code);
+    expect(await codes([target, lanes("p"), actin, lanes("c")])).not.toContain(
+      "missing-loading-control",
+    );
+    const marked = withInfo(panel("c"), { target: "Ponceau S", loadingControl: true });
+    expect(await codes([target, lanes("p"), marked])).not.toContain("missing-loading-control");
+    // Panels without lane or MW labels are not blots.
+    expect((await report([panel("micro")])).findings).toEqual([]);
+  });
+
+  it("checks the expected band size against the crop's ladder range", async () => {
+    const ladder = [
+      { yPx: 2, kDa: 100 },
+      { yPx: 8, kDa: 10 },
+    ];
+    // Rows 4–6 span about 21–46 kDa on this ladder.
+    const crop = { x: 0, y: 0.4, width: 1, height: 0.2 };
+    const codes = async (expectedKDa: number, marks = ladder) =>
+      (await report([withInfo(panel("p", crop), { expectedKDa })], marks)).panels[0]?.findings.map(
+        (finding) => finding.code,
+      );
+    expect(await codes(70)).toContain("unexpected-mw");
+    expect(await codes(30)).not.toContain("unexpected-mw");
+    expect(await codes(30, [])).toContain("unchecked-mw");
+  });
+});
+
 describe("uncropped originals sheet", () => {
   it("outlines every crop on its original with valid, renderable objects", async () => {
     const sources = [

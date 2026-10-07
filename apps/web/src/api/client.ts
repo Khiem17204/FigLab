@@ -115,6 +115,15 @@ export class FigLabClient {
     return this.json(path(apiRoutes.asset, { assetId }));
   }
 
+  /** A signed URL for a derived (display-only) preview; never use it for measurement or export. */
+  async previewUrl(assetId: string, maxEdge: number): Promise<string> {
+    const instruction = await this.json<{ url: string }>(
+      path(apiRoutes.assetPreviewDownloadUrl, { assetId, maxEdge: String(maxEdge) }),
+      { method: "POST" },
+    );
+    return instruction.url;
+  }
+
   async downloadAsset(assetId: string): Promise<{ bytes: ArrayBuffer; mimeType: string }> {
     const instruction = await this.json<{ url: string; expiresAt: string }>(
       path(apiRoutes.assetDownloadUrl, { assetId }),

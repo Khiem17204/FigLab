@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { InMemoryFigLabRepository } from "@figlab/database";
-import { FakeObjectStore } from "@figlab/storage";
+import { derivedPreviewKey, FakeObjectStore } from "@figlab/storage";
 import sharp from "sharp";
 import { describe, expect, it } from "vitest";
 import { createTaskList, deleteProject, verifyAsset } from "./index.js";
@@ -56,6 +56,76 @@ describe("verifyAsset", () => {
     await repository.markProjectDeleting(project.id);
     await deleteProject(repository, store, project.id);
     expect(await store.stat("object")).toBeUndefined();
+  });
+
+  it("writes a derived preview pyramid beside large originals and deletes it with the project", async () => {
+    const repository = new InMemoryFigLabRepository();
+    const principal = await repository.bootstrapSingleUser();
+    const project = await repository.createProject(principal.workspaceId, "Big");
+    const store = new FakeObjectStore();
+    const bytes = new Uint8Array(
+      await sharp({ create: { width: 1500, height: 600, channels: 3, background: "#204080" } })
+        .png()
+        .toBuffer(),
+    );
+    const key = "workspaces/w/projects/p/assets/a/original";
+    const upload = await repository.createUpload({
+      projectId: project.id,
+      filename: "big.png",
+      mimeType: "image/png",
+      contentLength: bytes.byteLength,
+      checksumSha256: createHash("sha256").update(bytes).digest("hex"),
+      storageKey: key,
+    });
+    await store.putForTest(key, bytes, "image/png");
+    await verifyAsset(repository, store, upload.assetId);
+    const asset = await repository.getAsset(upload.assetId);
+    expect(asset.metadata.previews).toEqual([
+      { maxEdge: 1024, widthPx: 1024, heightPx: 410, stretched: false },
+      { maxEdge: 256, widthPx: 256, heightPx: 102, stretched: false },
+    ]);
+    expect(store.keys().sort()).toEqual([
+      key,
+      "workspaces/w/projects/p/assets/a/preview-1024.png",
+      "workspaces/w/projects/p/assets/a/preview-256.png",
+    ]);
+    // The original's bytes are untouched.
+    const chunks: Uint8Array[] = [];
+    for await (const chunk of await store.read(key)) chunks.push(chunk);
+    expect(
+      createHash("sha256")
+        .update(chunks[0] as Uint8Array)
+        .digest("hex"),
+    ).toBe(asset.checksumSha256);
+    await repository.markProjectDeleting(project.id);
+    await deleteProject(repository, store, project.id);
+    expect(store.keys()).toEqual([]);
+  });
+
+  it("stretches 16-bit previews for display and skips previews of small originals", async () => {
+    const samples = Array.from({ length: 400 }, (_, index) => 1000 + index);
+    const bytes = grayscaleTiff({ width: 400, height: 1, bitDepth: 16, samples });
+    const { repository, store, assetId } = await uploadedTiff(bytes, "wide");
+    await verifyAsset(repository, store, assetId);
+    const asset = await repository.getAsset(assetId);
+    expect(asset.metadata.previews).toEqual([
+      { maxEdge: 256, widthPx: 256, heightPx: 1, stretched: true },
+    ]);
+    const previewBytes: Uint8Array[] = [];
+    for await (const chunk of await store.read(derivedPreviewKey(asset.storageKey, 256)))
+      previewBytes.push(chunk);
+    expect((await sharp(previewBytes[0]).metadata()).channels).toBe(1);
+    const { data } = await sharp(previewBytes[0])
+      .extractChannel(0)
+      .raw()
+      .toBuffer({ resolveWithObject: true });
+    expect(Math.min(...data)).toBeLessThan(5);
+    expect(Math.max(...data)).toBeGreaterThan(250);
+
+    const small = grayscaleTiff({ width: 2, height: 1, bitDepth: 16, samples: [0, 32_768] });
+    const tiny = await uploadedTiff(small, "tiny");
+    await verifyAsset(tiny.repository, tiny.store, tiny.assetId);
+    expect((await tiny.repository.getAsset(tiny.assetId)).metadata.previews).toBeUndefined();
   });
 
   it("rejects images over the configured decoded-pixel limit", async () => {

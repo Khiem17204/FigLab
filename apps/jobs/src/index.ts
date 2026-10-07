@@ -2,12 +2,72 @@ import { createHash } from "node:crypto";
 import { pathToFileURL } from "node:url";
 import { createPgPool, createPostgresRepository, type FigLabRepository } from "@figlab/database";
 import { type TiffDescription, verifyTiff } from "@figlab/image-processing";
-import { createObjectStoreFromEnv, type ObjectStore } from "@figlab/storage";
+import { createObjectStoreFromEnv, derivedPreviewKey, type ObjectStore } from "@figlab/storage";
 import { type Runner, run, runMigrations, runOnce, type TaskList } from "graphile-worker";
 import sharp from "sharp";
 import { computeIntegrityReport } from "./integrity.js";
 
 const DEFAULT_MAX_IMAGE_PIXELS = 100_000_000;
+/** Long-edge sizes of the derived preview pyramid, largest first. */
+export const PREVIEW_EDGES = [1024, 256] as const;
+
+export type DerivedPreview = {
+  maxEdge: number;
+  widthPx: number;
+  heightPx: number;
+  /** 16-bit originals are contrast-stretched for display; previews are never measured. */
+  stretched: boolean;
+};
+
+/**
+ * Writes downsampled PNG previews of the first page for display while large originals load.
+ * They are derived data: export, integrity checks, and quantification always read the original.
+ * A failure leaves the original usable and simply records fewer previews.
+ */
+export async function buildPreviewPyramid(
+  store: ObjectStore,
+  storageKey: string,
+  bytes: Uint8Array,
+  original: { widthPx: number; heightPx: number; bitDepth: number; channels: number },
+): Promise<DerivedPreview[]> {
+  const previews: DerivedPreview[] = [];
+  const longEdge = Math.max(original.widthPx, original.heightPx);
+  for (const maxEdge of PREVIEW_EDGES) {
+    if (maxEdge >= longEdge) continue;
+    try {
+      let pipeline = sharp(bytes, { pages: 1, limitInputPixels: false }).resize({
+        width: maxEdge,
+        height: maxEdge,
+        fit: "inside",
+      });
+      if (original.bitDepth === 16) {
+        // Scientific 16-bit data often fills a small part of the range; stretch the sample range
+        // to the full 16-bit scale so the 8-bit preview is visible.
+        const stats = await sharp(bytes, { pages: 1, limitInputPixels: false }).stats();
+        const low = Math.min(...stats.channels.map((channel) => channel.min));
+        const high = Math.max(...stats.channels.map((channel) => channel.max));
+        if (high > low) {
+          const scale = 65_535 / (high - low);
+          pipeline = pipeline.linear(scale, -low * scale);
+        }
+      }
+      const { data, info } = await pipeline
+        .toColourspace(original.channels === 1 ? "b-w" : "srgb")
+        .png({ compressionLevel: 9 })
+        .toBuffer({ resolveWithObject: true });
+      await store.putDerived(derivedPreviewKey(storageKey, maxEdge), data, "image/png");
+      previews.push({
+        maxEdge,
+        widthPx: info.width,
+        heightPx: info.height,
+        stretched: original.bitDepth === 16,
+      });
+    } catch {
+      break;
+    }
+  }
+  return previews;
+}
 
 export async function verifyAsset(
   repository: FigLabRepository,
@@ -26,6 +86,12 @@ export async function verifyAsset(
       const description = await decodeTiffAuthoritatively(bytes);
       if (description.widthPx * description.heightPx > maxImagePixels)
         return reject(repository, assetId, pixelLimitMessage(maxImagePixels));
+      const previews = await buildPreviewPyramid(store, asset.storageKey, bytes, {
+        widthPx: description.widthPx,
+        heightPx: description.heightPx,
+        bitDepth: description.bitDepth,
+        channels: description.channels,
+      });
       await repository.updateAsset(assetId, {
         status: "ready",
         widthPx: description.widthPx,
@@ -40,6 +106,7 @@ export async function verifyAsset(
           tiled: description.tiled,
           bigTiff: description.bigTiff,
           ...(description.calibration ? { calibration: description.calibration } : {}),
+          ...(previews.length > 0 ? { previews } : {}),
         },
       });
       return;
@@ -53,13 +120,24 @@ export async function verifyAsset(
     const channelCount = metadata.channels;
     if (!bitDepth || (channelCount !== 1 && channelCount !== 3 && channelCount !== 4))
       return reject(repository, assetId, "Unsupported image sample format");
+    const previews = await buildPreviewPyramid(store, asset.storageKey, bytes, {
+      widthPx: metadata.width,
+      heightPx: metadata.height,
+      bitDepth,
+      channels: channelCount,
+    });
     await repository.updateAsset(assetId, {
       status: "ready",
       widthPx: metadata.width,
       heightPx: metadata.height,
       bitDepth,
       channelCount,
-      metadata: { format: metadata.format, space: metadata.space, density: metadata.density },
+      metadata: {
+        format: metadata.format,
+        space: metadata.space,
+        density: metadata.density,
+        ...(previews.length > 0 ? { previews } : {}),
+      },
     });
   } catch (error) {
     await reject(repository, assetId, error instanceof Error ? error.message : "Unsupported image");
@@ -71,8 +149,11 @@ export async function deleteProject(
   store: ObjectStore,
   projectId: string,
 ): Promise<void> {
-  for (const asset of await repository.listProjectAssets(projectId))
+  for (const asset of await repository.listProjectAssets(projectId)) {
+    for (const maxEdge of PREVIEW_EDGES)
+      await store.delete(derivedPreviewKey(asset.storageKey, maxEdge));
     await store.delete(asset.storageKey);
+  }
   await repository.deleteProjectData(projectId);
 }
 

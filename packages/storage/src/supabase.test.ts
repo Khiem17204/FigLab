@@ -69,4 +69,16 @@ describe("SupabaseObjectStore", () => {
     for await (const chunk of await store.read(KEY)) chunks.push(chunk);
     expect(chunks).toEqual([new Uint8Array([1, 2, 3])]);
   });
+
+  it("writes derived previews with upsert and refuses original keys", async () => {
+    const { store, calls } = storeWith(() => json({ Key: "figlab/x", Id: "1" }));
+    const preview = KEY.replace(/original$/, "preview-1024.png");
+    await store.putDerived(preview, new Uint8Array([9]), "image/png");
+    expect(calls[0]?.url.pathname).toBe(`/storage/v1/object/figlab/${preview}`);
+    expect(new Headers(calls[0]?.init.headers).get("x-upsert")).toBe("true");
+    await expect(store.putDerived(KEY, new Uint8Array([9]), "image/png")).rejects.toThrow(
+      "cannot be written over originals",
+    );
+    expect(calls).toHaveLength(1);
+  });
 });
