@@ -192,6 +192,11 @@ Error codes: `BAD_REQUEST`, `UNAUTHORIZED`, `NOT_FOUND`, `UPLOAD_INVALID`, `UPLO
 - Build command: `corepack pnpm --filter @figlab/web... build && node scripts/build-netlify-functions.mjs`.
 - Deploy: `npx netlify-cli deploy [--prod] --filter @figlab/web`.
 - Check offline: `npx netlify-cli build --offline --filter @figlab/web`.
+- From a git worktree under `.worktrees/`, the CLI does not detect `apps/web/netlify.toml`: it
+  deploys the repository root and, if unlinked, creates a new site. Deploy from a regular clone
+  of the branch (`git clone --local --branch <branch> <repo> <dir>`, install, then
+  `npx netlify-cli deploy --site ed495dc1-1e13-43d9-a8c8-a021b7e07950 --filter @figlab/web`)
+  and confirm the log says `Deploy path: …/apps/web/dist`.
 - Logs: `npx netlify-cli logs --filter @figlab/web --source functions --since 1h`.
 - Env vars are plain site variables; scoped/secret variables need a paid plan.
 - `netlify env:set --filter` silently does nothing in this monorepo, so use
@@ -272,7 +277,7 @@ corepack pnpm build && corepack pnpm test:e2e && corepack pnpm test:visual && co
   Sciugo; owns schema, editor-core, API, jobs, export). The UI branch lands first.
 - `feat/sciugo-parity` P0 (see `docs/superpowers/plans/2026-10-06-sciugo-parity-p0.md`): schema
   v2, figures and journal presets, text/lines/arrows/shapes/brackets, panel lettering, arrange
-  tools, PNG/TIFF/SVG/PDF export with DPI, and audit/version/export history. It needs migration
-  `0003` on Supabase before it is deployed.
+  tools, PNG/TIFF/SVG/PDF export with DPI, and audit/version/export history. Migration `0003` is
+  applied to Supabase (2026-10-06); the live suite passes against a draft deploy of this branch.
 - Out of scope so far: shared workspaces, admin screens, OAuth/SSO, blot tools, microscopy
   channels, pyramids, offline use, densitometry, and mobile layout.
