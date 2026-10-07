@@ -44,6 +44,8 @@ Production: https://figlab.netlify.app (Netlify site `figlab`) on Supabase proje
 - Tests rely on accessible names ("Upload original", "Create project", "Export PNG",
   "Brightness", "Invert", "Move view-…", "Show in Original", "Original · <file>", the
   "Rename project" dialog with "Save name", the "Delete “<name>”?" dialog with "Delete project",
+  the "Restore revision N?" dialog with "Restore", the toolbar's "Export…" (the format buttons
+  "Export PNG/TIFF/SVG/PDF" live in the inspector's Export section),
   …) and on the exact "Saved" status in `.editor-header`. If one changes, update `apps/web/e2e`,
   `tests/e2e`, and `tests/live` together.
 - UI uses `@figlab/ui` tokens and components; `apps/web/e2e/a11y.spec.ts` runs axe (WCAG 2.2 AA)

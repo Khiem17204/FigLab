@@ -35,14 +35,18 @@ over the dashboard, dialogs and editor in light and dark; add new screens to it.
 | `Toolbar`, `ToolbarGroup`, `ToolbarSeparator` | `role="toolbar"`; arrow keys move between controls. |
 | `ToastProvider`, `useToast` | One polite live region. Toasts carry no status/alert role, so keep persistent inline status text for anything tests or screen readers must find. |
 | `Dialog`, `DialogContent`, `ConfirmDialog` | Radix Dialog. Focus returns to the control that opened it, even without `DialogTrigger`. |
+| `DialogsProvider`, `useDialogs` | Promise-based `confirm()` and `prompt()`; use these instead of `window.confirm`/`prompt`. |
 | `EmptyState`, `Mascot` | Friendly empty states with Pip, the pipette-drop mascot (`mood`: happy, sleepy, working, oops, proud). Pip is decorative (`aria-hidden`). |
 | `DropZone` | Drag-and-drop plus a real file input named by `inputLabel`. |
 | `ProgressBar`, `Badge`, `Avatar`, `AccountMenu` | Progress takes 0–1 or nothing for indeterminate. |
 
 ## Adding an editor tool
 
-The inspector in `apps/web/src/editor-ui/figlab-editor.tsx` is a stack of `Section`s. A new tool
-is a component under `apps/web/src/editor-ui/inspector/` that renders one `Section` (title,
-controls, optional `actions`) and receives the selected object plus a callback that issues an
-editor command. Toolbar actions go in `editor-toolbar.tsx` as `IconButton`s with a `shortcut`,
-and new shortcuts belong in `shortcuts-dialog.tsx`.
+The inspector in `apps/web/src/editor-ui/figlab-editor.tsx` is a stack of `Section`s; the left
+library holds the originals and figure tools. A new tool is a component (in
+`apps/web/src/figure-tools/` or `editor-ui/inspector/`) whose root is one
+`<Section className="figure-tools-panel" label="…" title="…">`. Inside it, plain labelled
+`input`/`select`/`fieldset` elements and `Button`s pick up the tool-panel styles from
+`figure-tools.css`; pressed toggles use `aria-pressed`. Toolbar actions go in
+`editor-toolbar.tsx` as `IconButton`s with a `shortcut`, new shortcuts belong in
+`shortcuts-dialog.tsx`, and confirmations go through `useDialogs()`.

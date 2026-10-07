@@ -29,6 +29,68 @@ const png = Buffer.from(
   "base64",
 );
 
+const personalWorkspace = {
+  id: "workspace-1",
+  name: "Personal workspace",
+  kind: "personal",
+  role: "owner",
+  memberCount: 1,
+  createdAt: "2026-10-01T00:00:00.000Z",
+};
+const labWorkspace = { ...personalWorkspace, id: "lab-1", name: "Ramos Lab", kind: "lab" };
+
+async function mockLabs(page: Page) {
+  await page.route(/\/v1\/me$/, (route) =>
+    route.fulfill({
+      json: {
+        email: "pi@lab.test",
+        role: "admin",
+        userId: "user-1",
+        personalWorkspaceId: "workspace-1",
+      },
+    }),
+  );
+  await page.route(/\/v1\/workspaces$/, (route) =>
+    route.fulfill({ json: { workspaces: [personalWorkspace, labWorkspace] } }),
+  );
+  await page.route(/\/v1\/workspaces\/[^/]+\/folders$/, (route) =>
+    route.fulfill({
+      json: { folders: [{ id: "f1", name: "Paper 1", parentId: null, archived: false }] },
+    }),
+  );
+  await page.route(/\/v1\/workspaces\/[^/]+\/templates$/, (route) =>
+    route.fulfill({ json: { templates: [{ id: "t1", name: "4-panel blot" }] } }),
+  );
+  await page.route(/\/v1\/workspaces\/lab-1\/projects(\?.*)?$/, (route) =>
+    route.fulfill({
+      json: { projects: [{ ...project, id: "project-lab", workspaceId: "lab-1" }] },
+    }),
+  );
+  await page.route(/\/v1\/workspaces\/lab-1\/members$/, (route) =>
+    route.fulfill({
+      json: {
+        members: [
+          {
+            userId: "user-1",
+            email: "pi@lab.test",
+            role: "owner",
+            joinedAt: "2026-10-02T00:00:00Z",
+          },
+          {
+            userId: "user-2",
+            email: "student@lab.test",
+            role: "editor",
+            joinedAt: "2026-10-03T00:00:00Z",
+          },
+        ],
+      },
+    }),
+  );
+  await page.route(/\/v1\/workspaces\/lab-1\/invites$/, (route) =>
+    route.fulfill({ json: { invites: [] } }),
+  );
+}
+
 async function mockApi(page: Page) {
   await page.route(/\/v1\/projects$/, (route) => route.fulfill({ json: { projects: [project] } }));
   await page.route(new RegExp(`/v1/projects/${project.id}/document$`), (route) =>
@@ -104,11 +166,18 @@ for (const colorScheme of ["light", "dark"] as const) {
     // Measure settled colors: entrance animations fade in, and reduced motion skips them.
     test.use({ colorScheme, contextOptions: { reducedMotion: "reduce" } });
 
-    test("dashboard, dialogs and editor meet WCAG 2.2 AA checks", async ({ page }) => {
+    test("dashboard, labs, dialogs and editor meet WCAG 2.2 AA checks", async ({ page }) => {
+      await mockLabs(page);
       await mockApi(page);
       await page.goto("/");
       await expect(page.getByRole("button", { name: "Open Cell Atlas" })).toBeVisible();
       await expectNoViolations(page);
+
+      await page.getByLabel("Workspace").selectOption("lab-1");
+      await page.getByRole("button", { name: "Lab members" }).click();
+      await expect(page.getByRole("table", { name: "Members" })).toBeVisible();
+      await expectNoViolations(page);
+      await page.getByLabel("Workspace").selectOption("workspace-1");
 
       await page.getByRole("button", { name: "Rename Cell Atlas" }).click();
       await expect(page.getByRole("dialog", { name: "Rename project" })).toBeVisible();
