@@ -1,20 +1,20 @@
-import type { FigureDocumentV1 } from "@figlab/figure-schema";
+import type { FigureDocument } from "@figlab/figure-schema";
 
 export type SaveStatus = "saved" | "saving" | "error" | "conflict";
-export type SavedDocument = { document: FigureDocumentV1; revision: number };
+export type SavedDocument = { document: FigureDocument; revision: number };
 
 export class AutosaveController {
   private status: SaveStatus = "saved";
   private timer: ReturnType<typeof setTimeout> | undefined;
-  private localDocument: FigureDocumentV1 | undefined;
+  private localDocument: FigureDocument | undefined;
   private generation = 0;
   private savedGeneration = -1;
   private lastSaved: SavedDocument | undefined;
   private inFlight: Promise<SavedDocument | undefined> | undefined;
 
   constructor(
-    private readonly save: (baseRevision: number, document: FigureDocumentV1) => Promise<number>,
-    private readonly readDocument: () => FigureDocumentV1,
+    private readonly save: (baseRevision: number, document: FigureDocument) => Promise<number>,
+    private readonly readDocument: () => FigureDocument,
     private readonly readRevision: () => number,
     private readonly onStatus?: (status: SaveStatus) => void,
   ) {}
@@ -62,7 +62,7 @@ export class AutosaveController {
     return this.status;
   }
 
-  getLocalDocument(): FigureDocumentV1 | undefined {
+  getLocalDocument(): FigureDocument | undefined {
     return this.localDocument && structuredClone(this.localDocument);
   }
 
@@ -80,7 +80,7 @@ export class AutosaveController {
 
   private async performSave(
     generation: number,
-    document: FigureDocumentV1,
+    document: FigureDocument,
   ): Promise<SavedDocument | undefined> {
     try {
       const revision = await this.save(this.readRevision(), document);

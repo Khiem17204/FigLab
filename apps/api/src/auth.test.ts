@@ -138,10 +138,14 @@ describe("buildApp with Supabase auth", () => {
     expect((await app.inject({ method: "GET", url: "/v1/me", headers: alice })).json()).toEqual({
       email: "alice@example.test",
       role: "admin",
+      userId: ALICE,
+      personalWorkspaceId: expect.any(String),
     });
     expect((await app.inject({ method: "GET", url: "/v1/me", headers: bob })).json()).toEqual({
       email: "bob@example.test",
       role: "member",
+      userId: BOB,
+      personalWorkspaceId: expect.any(String),
     });
     await app.close();
   });

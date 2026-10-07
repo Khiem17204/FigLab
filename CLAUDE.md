@@ -36,9 +36,9 @@ Production: https://figlab.netlify.app (Netlify site `figlab`) on Supabase proje
   `pnpm-lock.yaml` committed. Match the surrounding style and comment density.
 - Domain logic stays in pure packages (`figure-schema`, `editor-core`, `image-processing`)
   with no browser or database dependencies.
-- HTTP changes go in `packages/api-contract` first. Then regenerate `openapi/openapi-v1.yaml`:
-  build the app with the in-memory repository, call `app.swagger({ yaml: true })`, and pipe it
-  through `ruby -ryaml -e 'print YAML.dump(YAML.load(STDIN.read))'` to keep the existing format.
+- HTTP changes go in `packages/api-contract` first. Then regenerate `openapi/openapi-v1.yaml`
+  with `corepack pnpm openapi` (`apps/api/scripts/generate-openapi.ts`, piped through Ruby's YAML
+  dumper to keep the existing format).
 - Document changes need a new schema version plus the migration entry point in
   `packages/figure-schema`; old documents must still open.
 - Tests rely on accessible names ("Upload original", "Create project", "Export PNG",
@@ -56,7 +56,7 @@ Production: https://figlab.netlify.app (Netlify site `figlab`) on Supabase proje
 | `apps/web` | React 19 + Vite 8 app: dashboard, editor (PixiJS 8 artboard, accessible DOM/SVG controls), Zustand session, autosave, browser raster resolver, PNG export. `src/auth` is the Supabase sign-in gate; `netlify.toml` defines the Netlify site. |
 | `apps/api` | Fastify 5 + TypeBox HTTP boundary. Handles projects, documents, upload reservations, asset status, signed URLs, and export records; never proxies image bytes. `src/auth.ts` resolves the caller per request; `src/fetch-adapter.ts` runs Fastify behind fetch-style runtimes. |
 | `apps/jobs` | Graphile Worker tasks `verify_asset` and `delete_project`. Runs as a long-lived worker (Compose) or `drainJobsOnce` (Netlify). |
-| `packages/figure-schema` | Strict `FigureDocumentV1`, semantic validation, typed decode errors, migration entry point. |
+| `packages/figure-schema` | Strict v1 and v2 documents, semantic validation, typed decode errors, `migrateFigureDocument`, journal size presets. |
 | `packages/editor-core` | Pure crop, transform, history, and provenance commands. |
 | `packages/image-processing` | Raster sources, TIFF validation and window reads, display math, CPU PNG composition. |
 | `packages/database` | Drizzle tables, `pg` repository, in-memory repository, `Principal`/`Authorizer`, SQL migrations. |
@@ -111,19 +111,36 @@ There is no Redis or separate queue. Graphile Worker keeps jobs in Postgres in b
 
 ## Domain details
 
-**Document.** `FigureDocumentV1` has `schemaVersion: 1`, artboards, and image-view objects;
-`groups`, `constraints`, and `styles` are empty. The default artboard is white US Letter,
-612×792 pt at 72 pt/in.
+**Document.** The current schema is v3 (`packages/figure-schema/src/v3.ts`); v1 and v2 are
+frozen in `v1.ts`/`v2.ts`. Every read and every received save goes through
+`migrateFigureDocument` (v1 → v2 → v3), which validates the stored version and upgrades it;
+saves always store the current version.
+- v3 adds a `sources` registry (each original's size, calibration in µm/px with its origin
+  `metadata` or `manual`, and ladder marks `{yPx, kDa}`), checked by the API against the
+  verified asset; image views gain `plane`, `channel`, crop `rotationDeg`, `flipX/flipY`,
+  `display.levels` and `display.lut`, and optional `sampleInfo` (target, antibody, dilution,
+  lot, supplier, notes, `loadingControl`, `expectedKDa`). New objects: `composite` (additive
+  channel merge), `scale-bar`, `zoom-link`, `lane-table`, `mw-labels`. `attachedTargetIds`
+  lists what an object is attached to; deleting, duplicating, and templating follow it.
+- A document has one or more artboards (each a "figure"), objects, and `groups`
+  (`constraints`/`styles` stay empty). The default artboard is white US Letter, 612×792 pt.
+- Object kinds: `image-view`, `text` (optionally a panel label linked to a target), `line`
+  (arrowheads; one zero-size dimension allowed), and `shape` (rect, ellipse, bracket).
 - Each image view has a `sourceAssetId`, a top-left normalized viewport, and display settings:
-  brightness [-1,1], contrast [0,4], gamma [0.1,10], invert. Position and size are in points.
-  Rotation is fixed at 0 in v1, and resizing keeps the crop's aspect ratio.
+  levels, brightness [-1,1], contrast [0,4], gamma [0.1,10], invert, LUT. Position and size are
+  in points. A crop may rotate (band crops follow a tilted lane) and is then resampled
+  bilinearly; axis-aligned crops keep the nearest-neighbour rule below. Resizing keeps the
+  crop's aspect ratio. Text and shapes may rotate about their center.
 - Crop → source pixels: `floor` left/top, `ceil` right/bottom. Validation rejects malformed,
   out-of-bounds, duplicate-ID, and future-version documents.
 - Editing: pointer-move previews, pointer-up commits one command. Undo keeps at most 100
   snapshots. Autosave debounce is 1000 ms.
 - Storage: `project_documents` holds the current document, `project_versions` the history.
-- Audit events are derived on the server from document diffs (crop, display, transform/remove,
-  upload, export). There is no read endpoint yet.
+- Audit events are derived on the server from document diffs. Image views report crop, display,
+  and transform changes; other objects report create/change/transform/remove; artboards and
+  groups report their own changes; uploads, exports, renames, and deletion are recorded too.
+  Each event records its actor (`actor_user_id`) and a monotonic `seq`. Deleting a project
+  tombstones it (`status = 'deleted'`): content goes, the audit trail and export records stay.
 
 **Assets.** `AssetDescriptor` lives outside the document: verified MIME type, SHA-256,
 dimensions, bit depth, channels. States are `pending-verification` → `ready` | `rejected`, and
@@ -134,27 +151,56 @@ only `ready` assets may be saved into a document.
   recomputes SHA-256 and checks the signature and metadata (sharp; geotiff for TIFF).
 - Limits: the API caps uploads at 100 MiB (50 MB hosted on Supabase Free) and decoded images
   at 100 Mpx.
-- TIFF v1 accepts single-plane, strip-based grayscale/RGB, 8/16-bit unsigned, with
-  none/LZW/Deflate compression. It rejects tiled, multipage, OME, BigTIFF, palette/CMYK,
-  float/signed, and other compressions. The browser fetches the whole TIFF, then does
-  in-worker windowed reads.
+- TIFF: strip or tiled, multi-page, OME, and BigTIFF; grayscale/RGB, 8/16-bit unsigned;
+  lossless compression only (none, LZW, Deflate, PackBits). Reduced-resolution pages are
+  skipped. Calibration comes from OME physical size, ImageJ `unit=` with resolution tags, or a
+  centimetre resolution unit (inch units are ignored); pages are labelled from OME/ImageJ.
+  The browser fetches the whole TIFF, then does in-worker windowed reads per page.
+- Verification also writes a derived preview pyramid (1024 px and 256 px PNG beside the
+  original; 16-bit data contrast-stretched) recorded in `metadata.previews`. Previews are for
+  display while originals load; export, integrity checks, and quantification read originals.
 - Delete: the project is marked `deleting`, then a retryable job removes objects, then rows.
 
 **Preview and export.**
 - Pixi draws the preview textures; DOM/SVG handles interaction and accessibility.
-- Display math: normalize the sample, apply contrast around 0.5, add brightness, clamp to
-  [0,1], raise to 1/gamma, then invert.
-- Export re-reads source regions, applies the same math, composites in z-order, and writes an
-  8-bit PNG (16-bit TIFF values are kept until this step). Limits are 16,384 px per edge and
-  100 Mpx.
-- Export flushes autosave first. The API records the format, exact revision, size, and SHA-256,
-  never the bytes.
+- Display math (v3, `applyDisplayV3`): normalize, apply levels, contrast around 0.5, add
+  brightness, clamp to [0,1], raise to 1/gamma, invert, then the LUT. A LUT on RGB without a
+  channel uses Rec. 709 luminance. One sampler (`panel-render.ts`) serves preview and export.
+- `buildArtboardScene` (`packages/image-processing/src/scene.ts`) resolves an artboard to an
+  ordered draw list; the preview and every export format draw from it. Text is laid out with
+  the bundled Arimo font (`packages/image-processing/fonts`, SIL OFL 1.1) without kerning or
+  ligatures.
+- Raster export (PNG with pHYs, TIFF with resolution tags) re-reads source regions, applies the
+  same math, and composites in z-order; text and shapes are rasterized by the browser and
+  composited between panels. 16-bit values are kept until this step. Limits are 16,384 px per
+  edge and 100 Mpx. Pixel size is the figure's physical size × DPI (300 by default).
+- SVG and PDF stay vector and embed each panel as a lossless PNG rendered from originals at the
+  export DPI. fontkit and pdf-lib load from `@figlab/image-processing/vector` on demand.
+- Export flushes autosave first. The API records the format, figure, DPI, exact revision, size,
+  and SHA-256 of every exported figure, never the bytes.
 - "Show in Original" uses the view's asset and viewport. Views sharing an asset are
   provenance siblings.
 
+**Integrity and quantification.** `buildIntegrityReport` (pure; shared by the browser and the
+`integrity_report` job) records each panel's crop in source pixels, adjustments, clipping and
+saturation measured on original samples, rotation/flip, calibration origin, zoom insets,
+duplicate originals, missing loading controls, and expected band sizes outside the crop's ladder
+range, plus suggested legend text. The browser builds a provenance bundle (figures PDF, exact
+document, report JSON/HTML, crops CSV, uncropped originals PDF). Densitometry integrates lane
+density from raw samples above a straight baseline and normalizes to a loading control.
+
+**Labs.** Each user has a personal workspace; labs are shared workspaces with roles `owner`,
+`admin`, `editor`, `viewer`. `MembershipAuthorizer` returns 404 to non-members and 403 to members
+whose role is too low. Viewers read, export, check integrity, and comment; editors save, upload,
+file projects in folders, and make templates; admins manage members and invite links; only
+owners grant or remove owners and admins, and a lab always keeps an owner. Invite links carry a
+random token (only its SHA-256 is stored), may be limited to one email, expire, and work once.
+Templates are documents with images stripped (panels become placeholder frames). Deleting a lab
+requires its projects to be deleted first and keeps a tombstone row.
+
 **Auth.** `AUTH_MODE=single-user` (the default) bootstraps one admin. `AUTH_MODE=supabase`
 requires a Bearer token on every `/v1/*` request (401 `UNAUTHORIZED`) and maps each user to a
-personal workspace. Shared workspaces are not built yet.
+personal workspace; labs are described above. `/v1/admin/*` needs the `admin` role claim.
 
 ## HTTP contract
 
@@ -168,10 +214,26 @@ personal workspace. Shared workspaces are not built yet.
 | `POST /v1/uploads/:id/complete` | Finalize and enqueue verification. |
 | `GET /v1/assets/:id` | Asset status and descriptor. |
 | `POST /v1/assets/:id/download-url` | Short-lived signed GET. |
-| `POST /v1/projects/:id/exports` | Record export metadata. |
+| `GET/POST /v1/projects/:id/exports` | List / record export metadata (format, figure, DPI). |
+| `GET /v1/projects/:id/audit-events` | Audit trail, newest first (`limit`, `beforeSequence`). |
+| `GET /v1/projects/:id/versions[/:revision]` | Saved revisions; a revision's document is migrated to current. |
+| `GET/POST /v1/projects/:id/integrity-reports[/:reportId]` | Server integrity reports for a revision (job). |
+| `POST /v1/assets/:id/previews/:maxEdge/download-url` | Signed GET for a derived preview. |
+| `PUT /v1/projects/:id/folder` | Move a project into a folder (or `null`). |
+| `GET/POST /v1/projects/:id/comments`, `PATCH/DELETE …/comments/:commentId` | Comment threads; resolve. |
+| `GET/POST /v1/workspaces`, `PATCH/DELETE /v1/workspaces/:id` | My workspaces; create, rename, delete a lab. |
+| `GET/POST /v1/workspaces/:id/projects` | List (`q`, `folderId`, `createdBy`) / create (`folderId`, `templateId`). |
+| `GET /v1/workspaces/:id/members`, `PUT/DELETE …/members/:userId` | Members, roles, removal, leaving. |
+| `GET/POST /v1/workspaces/:id/invites`, `DELETE …/invites/:inviteId` | Invite links. |
+| `GET /v1/invites/:token`, `POST /v1/invites/:token/accept` | Preview / accept an invite link. |
+| `GET/POST /v1/workspaces/:id/folders`, `PATCH …/folders/:folderId` | Folder tree; rename, move, archive. |
+| `GET/POST /v1/workspaces/:id/templates`, `DELETE …/templates/:templateId` | Templates. |
+| `GET /v1/search?q=` | Projects by name or original filename across my workspaces. |
+| `GET /v1/admin/overview\|users\|workspaces\|jobs` | Read-only administration. |
 
-Error codes: `BAD_REQUEST`, `UNAUTHORIZED`, `NOT_FOUND`, `UPLOAD_INVALID`, `UPLOAD_EXPIRED`,
-`ASSET_NOT_READY`, `UNSUPPORTED_IMAGE`, `REVISION_CONFLICT`, `INTERNAL_ERROR`.
+Error codes: `BAD_REQUEST`, `UNAUTHORIZED`, `FORBIDDEN`, `NOT_FOUND`, `CONFLICT`,
+`INVITE_UNAVAILABLE`, `UPLOAD_INVALID`, `UPLOAD_EXPIRED`, `ASSET_NOT_READY`, `UNSUPPORTED_IMAGE`,
+`REVISION_CONFLICT`, `INTERNAL_ERROR`.
 
 ## Hosted operations
 
@@ -179,6 +241,11 @@ Error codes: `BAD_REQUEST`, `UNAUTHORIZED`, `NOT_FOUND`, `UPLOAD_INVALID`, `UPLO
 - Build command: `corepack pnpm --filter @figlab/web... build && node scripts/build-netlify-functions.mjs`.
 - Deploy: `npx netlify-cli deploy [--prod] --filter @figlab/web`.
 - Check offline: `npx netlify-cli build --offline --filter @figlab/web`.
+- From a git worktree under `.worktrees/`, the CLI does not detect `apps/web/netlify.toml`: it
+  deploys the repository root and, if unlinked, creates a new site. Deploy from a regular clone
+  of the branch (`git clone --local --branch <branch> <repo> <dir>`, install, then
+  `npx netlify-cli deploy --site ed495dc1-1e13-43d9-a8c8-a021b7e07950 --filter @figlab/web`)
+  and confirm the log says `Deploy path: …/apps/web/dist`.
 - Logs: `npx netlify-cli logs --filter @figlab/web --source functions --since 1h`.
 - Env vars are plain site variables; scoped/secret variables need a paid plan.
 - `netlify env:set --filter` silently does nothing in this monorepo, so use
@@ -257,5 +324,18 @@ corepack pnpm build && corepack pnpm test:e2e && corepack pnpm test:visual && co
 - Worktrees: `.worktrees/ui-refresh` (`feat/ui-refresh`, visual redesign; owns `apps/web` look
   and `packages/ui`) and `.worktrees/sciugo-parity` (`feat/sciugo-parity`, feature parity with
   Sciugo; owns schema, editor-core, API, jobs, export). The UI branch lands first.
-- Out of scope so far: shared workspaces, admin screens, OAuth/SSO, text/shapes, blot tools,
-  TIFF/PDF export, pyramids, offline use, densitometry, and mobile layout.
+- `feat/sciugo-parity` P0 (see `docs/superpowers/plans/2026-10-06-sciugo-parity-p0.md`): schema
+  v2, figures and journal presets, text/lines/arrows/shapes/brackets, panel lettering, arrange
+  tools, PNG/TIFF/SVG/PDF export with DPI, and audit/version/export history. Migration `0003` is
+  applied to Supabase (2026-10-06); the live suite passes against a draft deploy of this branch.
+- P1 (`docs/superpowers/plans/2026-10-06-sciugo-parity-p1.md`): schema v3; band crops, ladders,
+  calibration and scale bars, lane labels, MW labels, zoom insets; multi-page/tiled/OME/BigTIFF;
+  levels, LUTs, channels, split and merge; integrity reports (browser and job, migration `0004`)
+  and provenance bundles.
+- P2 (`docs/superpowers/plans/2026-10-06-sciugo-parity-p2.md`): densitometry and sample info;
+  labs with invite links and roles, folders, search, templates, comments, admin views
+  (migration `0005`); derived preview pyramid; loading-control and expected-MW checks.
+- Migrations `0004` and `0005` must be applied to Supabase (with the user's approval) before
+  this branch's API runs against it.
+- Out of scope: lab-notebook modules (D1), per-project sharing (D3), email invites (D2),
+  OAuth/SSO, offline use, and mobile layout.

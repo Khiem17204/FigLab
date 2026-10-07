@@ -4,7 +4,9 @@
   "private": true,
   "type": "module",
   "exports": {
-    ".": "./src/index.ts"
+    ".": "./src/index.ts",
+    "./vector": "./src/vector.ts",
+    "./fonts/*": "./fonts/*"
   },
   "scripts": {
     "build": "tsc -p tsconfig.json",
@@ -15,7 +17,9 @@
   "dependencies": {
     "@figlab/api-contract": "workspace:*",
     "@figlab/figure-schema": "workspace:*",
-    "geotiff": "3.0.5"
+    "@pdf-lib/fontkit": "1.1.1",
+    "geotiff": "3.0.5",
+    "pdf-lib": "1.17.1"
   },
   "devDependencies": {
     "@types/pngjs": "6.0.5",

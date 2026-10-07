@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { InMemoryFigLabRepository } from "@figlab/database";
-import { FakeObjectStore } from "@figlab/storage";
+import { derivedPreviewKey, FakeObjectStore } from "@figlab/storage";
 import sharp from "sharp";
 import { describe, expect, it } from "vitest";
 import { createTaskList, deleteProject, verifyAsset } from "./index.js";
@@ -58,6 +58,76 @@ describe("verifyAsset", () => {
     expect(await store.stat("object")).toBeUndefined();
   });
 
+  it("writes a derived preview pyramid beside large originals and deletes it with the project", async () => {
+    const repository = new InMemoryFigLabRepository();
+    const principal = await repository.bootstrapSingleUser();
+    const project = await repository.createProject(principal.workspaceId, "Big");
+    const store = new FakeObjectStore();
+    const bytes = new Uint8Array(
+      await sharp({ create: { width: 1500, height: 600, channels: 3, background: "#204080" } })
+        .png()
+        .toBuffer(),
+    );
+    const key = "workspaces/w/projects/p/assets/a/original";
+    const upload = await repository.createUpload({
+      projectId: project.id,
+      filename: "big.png",
+      mimeType: "image/png",
+      contentLength: bytes.byteLength,
+      checksumSha256: createHash("sha256").update(bytes).digest("hex"),
+      storageKey: key,
+    });
+    await store.putForTest(key, bytes, "image/png");
+    await verifyAsset(repository, store, upload.assetId);
+    const asset = await repository.getAsset(upload.assetId);
+    expect(asset.metadata.previews).toEqual([
+      { maxEdge: 1024, widthPx: 1024, heightPx: 410, stretched: false },
+      { maxEdge: 256, widthPx: 256, heightPx: 102, stretched: false },
+    ]);
+    expect(store.keys().sort()).toEqual([
+      key,
+      "workspaces/w/projects/p/assets/a/preview-1024.png",
+      "workspaces/w/projects/p/assets/a/preview-256.png",
+    ]);
+    // The original's bytes are untouched.
+    const chunks: Uint8Array[] = [];
+    for await (const chunk of await store.read(key)) chunks.push(chunk);
+    expect(
+      createHash("sha256")
+        .update(chunks[0] as Uint8Array)
+        .digest("hex"),
+    ).toBe(asset.checksumSha256);
+    await repository.markProjectDeleting(project.id);
+    await deleteProject(repository, store, project.id);
+    expect(store.keys()).toEqual([]);
+  });
+
+  it("stretches 16-bit previews for display and skips previews of small originals", async () => {
+    const samples = Array.from({ length: 400 }, (_, index) => 1000 + index);
+    const bytes = grayscaleTiff({ width: 400, height: 1, bitDepth: 16, samples });
+    const { repository, store, assetId } = await uploadedTiff(bytes, "wide");
+    await verifyAsset(repository, store, assetId);
+    const asset = await repository.getAsset(assetId);
+    expect(asset.metadata.previews).toEqual([
+      { maxEdge: 256, widthPx: 256, heightPx: 1, stretched: true },
+    ]);
+    const previewBytes: Uint8Array[] = [];
+    for await (const chunk of await store.read(derivedPreviewKey(asset.storageKey, 256)))
+      previewBytes.push(chunk);
+    expect((await sharp(previewBytes[0]).metadata()).channels).toBe(1);
+    const { data } = await sharp(previewBytes[0])
+      .extractChannel(0)
+      .raw()
+      .toBuffer({ resolveWithObject: true });
+    expect(Math.min(...data)).toBeLessThan(5);
+    expect(Math.max(...data)).toBeGreaterThan(250);
+
+    const small = grayscaleTiff({ width: 2, height: 1, bitDepth: 16, samples: [0, 32_768] });
+    const tiny = await uploadedTiff(small, "tiny");
+    await verifyAsset(tiny.repository, tiny.store, tiny.assetId);
+    expect((await tiny.repository.getAsset(tiny.assetId)).metadata.previews).toBeUndefined();
+  });
+
   it("rejects images over the configured decoded-pixel limit", async () => {
     const repository = new InMemoryFigLabRepository();
     const principal = await repository.bootstrapSingleUser();
@@ -88,10 +158,14 @@ describe("verifyAsset", () => {
 
   it("routes durable Graphile jobs to verification and deletion handlers", () => {
     const tasks = createTaskList(new InMemoryFigLabRepository(), new FakeObjectStore());
-    expect(Object.keys(tasks).sort()).toEqual(["delete_project", "verify_asset"]);
+    expect(Object.keys(tasks).sort()).toEqual([
+      "delete_project",
+      "integrity_report",
+      "verify_asset",
+    ]);
   });
 
-  it("rejects BigTIFF through the shared TIFF decoder contract", async () => {
+  it("rejects an undecodable BigTIFF through the shared TIFF decoder", async () => {
     const repository = new InMemoryFigLabRepository();
     const principal = await repository.bootstrapSingleUser();
     const project = await repository.createProject(principal.workspaceId, "Cells");
@@ -108,7 +182,8 @@ describe("verifyAsset", () => {
     });
     await store.putForTest("bigtiff", bytes, "image/tiff");
     await verifyAsset(repository, store, upload.assetId);
-    expect((await repository.getAsset(upload.assetId)).rejectionReason).toMatch(/BigTIFF/);
+    // A truncated BigTIFF header cannot be decoded, so the original is rejected.
+    expect(await repository.getAsset(upload.assetId)).toMatchObject({ status: "rejected" });
   });
 
   it("marks a supported real 16-bit grayscale TIFF ready from shared authoritative metadata", async () => {
@@ -146,7 +221,7 @@ describe("verifyAsset", () => {
     expect((await repository.getAsset(assetId)).rejectionReason).toMatch(reason);
   });
 
-  it("rejects a tiled TIFF through the shared decoder", async () => {
+  it("accepts a tiled TIFF and records its layout", async () => {
     const bytes = new Uint8Array(
       await sharp({ create: { width: 32, height: 32, channels: 3, background: "#808080" } })
         .tiff({ tile: true, tileWidth: 16, tileHeight: 16, compression: "lzw" })
@@ -154,7 +229,13 @@ describe("verifyAsset", () => {
     );
     const { repository, store, assetId } = await uploadedTiff(bytes, "tiled");
     await verifyAsset(repository, store, assetId);
-    expect((await repository.getAsset(assetId)).rejectionReason).toMatch(/tiled/);
+    expect(await repository.getAsset(assetId)).toMatchObject({
+      status: "ready",
+      widthPx: 32,
+      heightPx: 32,
+      channelCount: 3,
+      metadata: { format: "tiff", planes: 1, tiled: true, bigTiff: false },
+    });
   });
 });
 

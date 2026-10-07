@@ -23,6 +23,19 @@ import { AccountArea } from "../shell/account-menu";
 import { Brand } from "../shell/brand";
 import { ProjectThumbnail } from "../shell/project-thumbnail";
 import { relativeTime } from "../shell/relative-time";
+import {
+  AdminPanel,
+  canWrite,
+  InviteBanner,
+  LabMembers,
+  ProjectFolderSelect,
+  ProjectSearch,
+  TemplatePicker,
+  useFolders,
+  useTemplates,
+  useWorkspaceSelection,
+  WorkspaceNav,
+} from "../workspaces/workspaces";
 
 /** Mirrors the API contract's project-name limit so the form can explain it up front. */
 export const PROJECT_NAME_MAX = 120;
@@ -46,14 +59,41 @@ export function Dashboard({
   onOpen: (project: Project) => void;
 }) {
   const toast = useToast();
-  const projects = useQuery({ queryKey: ["projects"], queryFn: () => client.listProjects() });
+  const me = useQuery({ queryKey: ["me"], queryFn: () => client.me() });
+  const selection = useWorkspaceSelection(client);
+  const workspace = selection.current;
+  const folders = useFolders(client, workspace?.id);
+  const templates = useTemplates(client, workspace?.id);
+  // The personal workspace's full list is also served by /v1/projects.
+  const simpleList = !workspace || (workspace.kind === "personal" && selection.folder === "all");
+  const projects = useQuery({
+    queryKey: ["projects", workspace?.id ?? "personal", selection.folder],
+    queryFn: () =>
+      simpleList || !workspace
+        ? client.listProjects()
+        : client.listWorkspaceProjects(
+            workspace.id,
+            selection.folder === "all" ? {} : { folderId: selection.folder },
+          ),
+  });
+  const [templateId, setTemplateId] = useState("");
+  const [panel, setPanel] = useState<"members" | "admin">();
+  const folderId =
+    selection.folder !== "all" && selection.folder !== "root" ? selection.folder : undefined;
   const [name, setName] = useState("");
   const [nameError, setNameError] = useState<string>();
   const nameInput = useRef<HTMLInputElement>(null);
   const [renaming, setRenaming] = useState<Project>();
   const [deleting, setDeleting] = useState<Project>();
   const create = useMutation({
-    mutationFn: (projectName: string) => client.createProject(projectName),
+    mutationFn: (projectName: string) =>
+      workspace && (workspace.kind === "lab" || folderId || templateId)
+        ? client.createWorkspaceProject(workspace.id, {
+            name: projectName,
+            ...(folderId ? { folderId } : {}),
+            ...(templateId ? { templateId } : {}),
+          })
+        : client.createProject(projectName),
     onSuccess: (created) => onOpen(created),
     onError: (error) =>
       setNameError(
@@ -106,126 +146,196 @@ export function Dashboard({
         <span className="app-header-spacer" />
         <AccountArea account={account} client={client} />
       </header>
-      <section aria-labelledby="projects-heading" className="dashboard">
-        <div className="dashboard-hero">
-          <div className="dashboard-title">
-            <p className="eyebrow">Workspace</p>
-            <h1 id="projects-heading">
-              <span className="fl-highlight">Projects</span>
-            </h1>
-            <p className="dashboard-lede">
-              Crop originals, arrange panels and export. Every panel stays linked to its source
-              pixels.
-            </p>
-          </div>
-          <form className="create-form" noValidate onSubmit={submit}>
-            <Field error={nameError} label="New project name">
-              <Input
-                maxLength={PROJECT_NAME_MAX + 1}
-                onChange={(event) => {
-                  setName(event.target.value);
-                  if (nameError) setNameError(undefined);
-                }}
-                placeholder="e.g. Fig. 2 · siRNA knockdown"
-                ref={nameInput}
-                value={name}
+      <div className="dashboard-layout" data-sidebar={workspace ? "" : undefined}>
+        {workspace && (
+          <nav aria-label="Project navigation" className="side-nav">
+            <WorkspaceNav client={client} selection={selection} />
+          </nav>
+        )}
+        <section aria-labelledby="projects-heading" className="dashboard">
+          <div className="dashboard-hero">
+            <div className="dashboard-title">
+              <p className="eyebrow">
+                {workspace?.kind === "lab" ? `Lab · ${workspace.name}` : "Workspace"}
+              </p>
+              <h1 id="projects-heading">
+                <span className="fl-highlight">Projects</span>
+              </h1>
+              <p className="dashboard-lede">
+                Crop originals, arrange panels and export. Every panel stays linked to its source
+                pixels.
+              </p>
+            </div>
+            <form className="create-form" noValidate onSubmit={submit}>
+              <Field error={nameError} label="New project name">
+                <Input
+                  maxLength={PROJECT_NAME_MAX + 1}
+                  onChange={(event) => {
+                    setName(event.target.value);
+                    if (nameError) setNameError(undefined);
+                  }}
+                  placeholder="e.g. Fig. 2 · siRNA knockdown"
+                  ref={nameInput}
+                  value={name}
+                />
+              </Field>
+              <TemplatePicker
+                onChange={setTemplateId}
+                templates={templates.data ?? []}
+                value={templateId}
               />
-            </Field>
-            <Button
-              icon={<PlusIcon size={16} />}
-              loading={create.isPending}
-              type="submit"
-              variant="primary"
-            >
-              Create project
-            </Button>
-          </form>
-        </div>
-
-        {projects.isLoading && (
-          <div className="project-grid">
-            <p className="fl-visually-hidden" role="status">
-              Loading projects…
-            </p>
-            {[0, 1, 2].map((index) => (
-              <div aria-hidden="true" className="project-card skeleton" key={index} />
-            ))}
-          </div>
-        )}
-        {projects.isError && (
-          <div role="alert">
-            <EmptyState
-              actions={<Button onClick={() => void projects.refetch()}>Try again</Button>}
-              mood="oops"
-              title="Could not load projects"
-            >
-              Retry when the server is available. Nothing in your workspace has changed.
-            </EmptyState>
-          </div>
-        )}
-        {projects.data?.length === 0 && (
-          <EmptyState
-            actions={
               <Button
                 icon={<PlusIcon size={16} />}
-                onClick={() => nameInput.current?.focus()}
+                loading={create.isPending}
+                type="submit"
                 variant="primary"
               >
-                Name your first figure
+                Create project
               </Button>
-            }
-            className="dashboard-empty"
-            title="No projects yet"
-          >
-            Create one to begin a figure. Drop in your blots and micrographs, and every crop keeps a
-            link back to its original.
-          </EmptyState>
-        )}
-        {!!projects.data?.length && (
-          <ul className="project-grid">
-            {projects.data.map((item) => (
-              <li className="project-card" key={item.id}>
-                <button
-                  aria-label={`Open ${item.name}`}
-                  className="project-open"
-                  onClick={() => onOpen(item)}
-                  type="button"
-                />
-                <ProjectThumbnail seed={item.id} />
-                <div className="project-meta">
-                  <h2>{item.name}</h2>
-                  <p>
-                    Edited{" "}
-                    <time
-                      dateTime={item.updatedAt}
-                      title={new Date(item.updatedAt).toLocaleString()}
-                    >
-                      {relativeTime(item.updatedAt)}
-                    </time>
-                  </p>
-                </div>
-                <div className="project-actions">
-                  <IconButton
-                    icon={<PencilIcon size={16} />}
-                    label={`Rename ${item.name}`}
-                    onClick={() => setRenaming(item)}
+            </form>
+          </div>
+          <InviteBanner
+            client={client}
+            onJoined={async (joined) => {
+              await selection.refetch();
+              selection.select(joined.id);
+            }}
+          />
+          {(workspace?.kind === "lab" || me.data?.role === "admin" || workspace) && (
+            <div className="dashboard-tools">
+              {workspace && <ProjectSearch client={client} onOpen={onOpen} />}
+              <div className="folder-actions">
+                {workspace?.kind === "lab" && (
+                  <Button
+                    aria-pressed={panel === "members"}
+                    onClick={() => setPanel(panel === "members" ? undefined : "members")}
                     size="sm"
-                    tooltip={false}
-                  />
-                  <IconButton
-                    icon={<TrashIcon size={16} />}
-                    label={`Delete ${item.name}`}
-                    onClick={() => setDeleting(item)}
+                  >
+                    Lab members
+                  </Button>
+                )}
+                {me.data?.role === "admin" && (
+                  <Button
+                    aria-pressed={panel === "admin"}
+                    onClick={() => setPanel(panel === "admin" ? undefined : "admin")}
                     size="sm"
-                    tooltip={false}
-                    variant="danger"
+                  >
+                    Administration
+                  </Button>
+                )}
+              </div>
+            </div>
+          )}
+          {panel === "members" && workspace?.kind === "lab" && (
+            <LabMembers
+              client={client}
+              currentUserId={me.data?.userId}
+              onLeft={async () => {
+                setPanel(undefined);
+                const remaining = await selection.refetch();
+                const personal = remaining.data?.find((entry) => entry.kind === "personal");
+                if (personal) selection.select(personal.id);
+              }}
+              workspace={workspace}
+            />
+          )}
+          {panel === "admin" && <AdminPanel client={client} />}
+
+          {projects.isLoading && (
+            <div className="project-grid">
+              <p className="fl-visually-hidden" role="status">
+                Loading projects…
+              </p>
+              {[0, 1, 2].map((index) => (
+                <div aria-hidden="true" className="project-card skeleton" key={index} />
+              ))}
+            </div>
+          )}
+          {projects.isError && (
+            <div role="alert">
+              <EmptyState
+                actions={<Button onClick={() => void projects.refetch()}>Try again</Button>}
+                mood="oops"
+                title="Could not load projects"
+              >
+                Retry when the server is available. Nothing in your workspace has changed.
+              </EmptyState>
+            </div>
+          )}
+          {projects.data?.length === 0 && (
+            <EmptyState
+              actions={
+                <Button
+                  icon={<PlusIcon size={16} />}
+                  onClick={() => nameInput.current?.focus()}
+                  variant="primary"
+                >
+                  Name your first figure
+                </Button>
+              }
+              className="dashboard-empty"
+              title="No projects yet"
+            >
+              Create one to begin a figure. Drop in your blots and micrographs, and every crop keeps
+              a link back to its original.
+            </EmptyState>
+          )}
+          {!!projects.data?.length && (
+            <ul className="project-grid">
+              {projects.data.map((item) => (
+                <li className="project-card" key={item.id}>
+                  <button
+                    aria-label={`Open ${item.name}`}
+                    className="project-open"
+                    onClick={() => onOpen(item)}
+                    type="button"
                   />
-                </div>
-              </li>
-            ))}
-          </ul>
-        )}
-      </section>
+                  <ProjectThumbnail seed={item.id} />
+                  <div className="project-meta">
+                    <h2>{item.name}</h2>
+                    <p>
+                      Edited{" "}
+                      <time
+                        dateTime={item.updatedAt}
+                        title={new Date(item.updatedAt).toLocaleString()}
+                      >
+                        {relativeTime(item.updatedAt)}
+                      </time>
+                    </p>
+                  </div>
+                  {workspace && canWrite(workspace.role) && (folders.data?.length ?? 0) > 0 && (
+                    <div className="project-folder">
+                      <ProjectFolderSelect
+                        client={client}
+                        folders={folders.data ?? []}
+                        onMoved={() => void projects.refetch()}
+                        project={item}
+                      />
+                    </div>
+                  )}
+                  <div className="project-actions">
+                    <IconButton
+                      icon={<PencilIcon size={16} />}
+                      label={`Rename ${item.name}`}
+                      onClick={() => setRenaming(item)}
+                      size="sm"
+                      tooltip={false}
+                    />
+                    <IconButton
+                      icon={<TrashIcon size={16} />}
+                      label={`Delete ${item.name}`}
+                      onClick={() => setDeleting(item)}
+                      size="sm"
+                      tooltip={false}
+                      variant="danger"
+                    />
+                  </div>
+                </li>
+              ))}
+            </ul>
+          )}
+        </section>
+      </div>
 
       <RenameDialog
         error={rename.error instanceof Error ? rename.error.message : undefined}

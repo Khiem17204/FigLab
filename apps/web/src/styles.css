@@ -427,6 +427,7 @@
 
 /* ---------- Editor ---------- */
 .editor-shell {
+  position: relative;
   height: 100vh;
   min-height: 560px;
   display: flex;
@@ -487,17 +488,33 @@
 .editor-tools > .fl-button {
   margin-left: 4px;
 }
+/* Floats over the workspace so the figure never rescales when a save problem appears. */
 .conflict-banner {
+  position: absolute;
+  z-index: 40;
+  top: 64px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: min(780px, calc(100% - 32px));
   display: flex;
   flex-wrap: wrap;
   gap: 10px 12px;
   align-items: center;
-  padding: 10px 20px;
+  padding: 10px 14px;
+  border-radius: var(--fl-r-md);
   background: var(--fl-warning-bg);
   color: var(--fl-warning-ink);
-  border-bottom: var(--fl-bw) solid currentColor;
+  border: var(--fl-bw) solid currentColor;
+  box-shadow: var(--fl-sticker-lg);
   font-weight: 600;
   font-size: var(--fl-text-md);
+  animation: banner-in 0.35s var(--fl-ease-spring);
+}
+@keyframes banner-in {
+  from {
+    opacity: 0;
+    transform: translate(-50%, -8px);
+  }
 }
 .conflict-banner p {
   margin: 0;
@@ -727,9 +744,27 @@
 .original-toggle[aria-expanded="false"] {
   transform: rotate(-90deg);
 }
+.original-body {
+  display: grid;
+  grid-template-columns: minmax(200px, 236px) minmax(0, 1fr);
+  gap: 10px;
+  height: clamp(150px, 26vh, 280px);
+  min-height: 0;
+}
+.original-body > .source-tools {
+  min-height: 0;
+  overflow: auto;
+  padding-right: 2px;
+}
+.figure-stage {
+  min-height: 0;
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  gap: 8px;
+}
 .source-canvas {
   position: relative;
-  height: clamp(150px, 26vh, 280px);
+  height: 100%;
   display: grid;
   place-items: center;
   overflow: hidden;

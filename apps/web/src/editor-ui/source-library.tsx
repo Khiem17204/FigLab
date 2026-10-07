@@ -10,7 +10,10 @@ import {
   PanelLeftIcon,
   ProgressBar,
 } from "@figlab/ui";
+import type { ReactNode } from "react";
 
+import type { FigLabClient } from "../api/client";
+import { DerivedThumbnail } from "../figure-tools/derived-preview";
 import type { UploadItem } from "./uploads";
 import { uploadProgress, uploadStageLabel } from "./uploads";
 
@@ -19,6 +22,9 @@ export const IDLE_UPLOAD_STATUS = "Choose a PNG, JPEG, or TIFF original to uploa
 
 export function SourceLibrary({
   assets,
+  loadingAssets = [],
+  client,
+  children,
   selectedAssetId,
   previewUrl,
   uploads,
@@ -30,11 +36,17 @@ export function SourceLibrary({
   onCollapse,
 }: {
   assets: AssetDescriptor[];
+  /** Originals still downloading; their derived previews show meanwhile. */
+  loadingAssets?: AssetDescriptor[];
+  client: FigLabClient;
+  /** Further library tools, such as the arrange panel. */
+  children?: ReactNode;
   selectedAssetId: string | undefined;
   previewUrl: (assetId: string) => string | undefined;
   uploads: UploadItem[];
   uploadStatus: string;
-  onUpload: (files: File[]) => void;
+  /** Omitted for viewers, who cannot add originals. */
+  onUpload?: (files: File[]) => void;
   onRejectedFiles: (files: File[]) => void;
   onSelect: (assetId: string) => void;
   onDismissUpload: (key: string) => void;
@@ -55,16 +67,18 @@ export function SourceLibrary({
           size="sm"
         />
       </div>
-      <DropZone
-        accept={ACCEPTED_ORIGINALS}
-        buttonLabel="Choose files"
-        hint="PNG, JPEG or TIFF. Originals are never changed."
-        illustration={<Mascot mood={working ? "working" : "happy"} size={40} />}
-        inputLabel="Upload original"
-        onFiles={onUpload}
-        onRejectedFiles={onRejectedFiles}
-        title="Drop originals here"
-      />
+      {onUpload && (
+        <DropZone
+          accept={ACCEPTED_ORIGINALS}
+          buttonLabel="Choose files"
+          hint="PNG, JPEG or TIFF. Originals are never changed."
+          illustration={<Mascot mood={working ? "working" : "happy"} size={40} />}
+          inputLabel="Upload original"
+          onFiles={onUpload}
+          onRejectedFiles={onRejectedFiles}
+          title="Drop originals here"
+        />
+      )}
       <p
         className={needsAttention(uploadStatus) ? "library-status" : "fl-visually-hidden"}
         role="status"
@@ -102,6 +116,22 @@ export function SourceLibrary({
           ))}
         </ul>
       )}
+      {loadingAssets.length > 0 && (
+        <ul aria-label="Originals loading" className="upload-list">
+          {loadingAssets.map((asset) => (
+            <li className="upload-row loading-row" key={`loading-${asset.id}`}>
+              <span className="thumb derived">
+                <DerivedThumbnail asset={asset} client={client} minEdge={64} />
+              </span>
+              <span className="file-text">
+                <b title={asset.filename}>{asset.filename}</b>
+                <small>Downloading the original…</small>
+                <ProgressBar label={`Loading original ${asset.filename}`} />
+              </span>
+            </li>
+          ))}
+        </ul>
+      )}
       {assets.length > 0 ? (
         <ul aria-label="Originals" className="asset-list">
           {assets.map((asset) => {
@@ -133,10 +163,12 @@ export function SourceLibrary({
           })}
         </ul>
       ) : (
-        !uploads.length && (
+        !uploads.length &&
+        !loadingAssets.length && (
           <p className="library-note fl-hand-note">your originals will live here ✿</p>
         )
       )}
+      {children}
     </aside>
   );
 }

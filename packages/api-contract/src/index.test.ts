@@ -21,7 +21,34 @@ describe("public API contracts", () => {
       uploadComplete: "/v1/uploads/:uploadId/complete",
       asset: "/v1/assets/:assetId",
       assetDownloadUrl: "/v1/assets/:assetId/download-url",
+      assetPreviewDownloadUrl: "/v1/assets/:assetId/previews/:maxEdge/download-url",
       projectExports: "/v1/projects/:projectId/exports",
+      projectAuditEvents: "/v1/projects/:projectId/audit-events",
+      projectVersions: "/v1/projects/:projectId/versions",
+      projectVersion: "/v1/projects/:projectId/versions/:revision",
+      projectIntegrityReports: "/v1/projects/:projectId/integrity-reports",
+      projectIntegrityReport: "/v1/projects/:projectId/integrity-reports/:reportId",
+      projectFolder: "/v1/projects/:projectId/folder",
+      projectComments: "/v1/projects/:projectId/comments",
+      projectComment: "/v1/projects/:projectId/comments/:commentId",
+      workspaces: "/v1/workspaces",
+      workspace: "/v1/workspaces/:workspaceId",
+      workspaceProjects: "/v1/workspaces/:workspaceId/projects",
+      workspaceMembers: "/v1/workspaces/:workspaceId/members",
+      workspaceMember: "/v1/workspaces/:workspaceId/members/:userId",
+      workspaceInvites: "/v1/workspaces/:workspaceId/invites",
+      workspaceInvite: "/v1/workspaces/:workspaceId/invites/:inviteId",
+      workspaceFolders: "/v1/workspaces/:workspaceId/folders",
+      workspaceFolder: "/v1/workspaces/:workspaceId/folders/:folderId",
+      workspaceTemplates: "/v1/workspaces/:workspaceId/templates",
+      workspaceTemplate: "/v1/workspaces/:workspaceId/templates/:templateId",
+      invite: "/v1/invites/:token",
+      inviteAccept: "/v1/invites/:token/accept",
+      search: "/v1/search",
+      adminOverview: "/v1/admin/overview",
+      adminUsers: "/v1/admin/users",
+      adminWorkspaces: "/v1/admin/workspaces",
+      adminJobs: "/v1/admin/jobs",
     });
   });
 
@@ -88,6 +115,22 @@ describe("public API contracts", () => {
 
     expect(Value.Check(RecordExportRequestSchema, request)).toBe(true);
     expect(Value.Check(RecordExportRequestSchema, { ...request, widthPx: 10_001 })).toBe(false);
+  });
+
+  it("records TIFF, PDF, and SVG exports with an optional figure and DPI", () => {
+    const request = {
+      format: "tiff",
+      artboardId: "board-2",
+      dpi: 600,
+      revision: 3,
+      widthPx: 2102,
+      heightPx: 4016,
+      checksumSha256: "d".repeat(64),
+    };
+    expect(Value.Check(RecordExportRequestSchema, request)).toBe(true);
+    expect(Value.Check(RecordExportRequestSchema, { ...request, format: "pdf" })).toBe(true);
+    expect(Value.Check(RecordExportRequestSchema, { ...request, format: "eps" })).toBe(false);
+    expect(Value.Check(RecordExportRequestSchema, { ...request, dpi: 2401 })).toBe(false);
   });
 
   it("uses the typed revision-conflict error envelope", () => {

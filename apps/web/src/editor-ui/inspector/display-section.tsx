@@ -1,11 +1,12 @@
-import type { ImageViewObjectV1 } from "@figlab/figure-schema";
+import type { ImageViewObjectV3 } from "@figlab/figure-schema";
 import { Button, Section, Slider, Switch } from "@figlab/ui";
 
-type Display = ImageViewObjectV1["view"]["display"];
+type Display = ImageViewObjectV3["view"]["display"];
 
-export const NEUTRAL_DISPLAY: Display = { brightness: 0, contrast: 1, gamma: 1, invert: false };
+/** The settings this section owns; levels and LUT live in the panel inspector. */
+export const NEUTRAL_DISPLAY = { brightness: 0, contrast: 1, gamma: 1, invert: false } as const;
 
-export function isNeutralDisplay(display: Display): boolean {
+export function isNeutralDisplay(display: Pick<Display, keyof typeof NEUTRAL_DISPLAY>): boolean {
   return (
     display.brightness === NEUTRAL_DISPLAY.brightness &&
     display.contrast === NEUTRAL_DISPLAY.contrast &&
@@ -19,7 +20,7 @@ export function DisplaySection({
   object,
   onChange,
 }: {
-  object: ImageViewObjectV1;
+  object: ImageViewObjectV3;
   onChange: (display: Display) => void;
 }) {
   const display = object.view.display;
@@ -28,7 +29,7 @@ export function DisplaySection({
       actions={
         <Button
           disabled={isNeutralDisplay(display)}
-          onClick={() => onChange(NEUTRAL_DISPLAY)}
+          onClick={() => onChange({ ...display, ...NEUTRAL_DISPLAY })}
           size="sm"
           variant="ghost"
         >

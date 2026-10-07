@@ -132,6 +132,20 @@ async function dragCrop(page: Page, aspect: number) {
   await page.mouse.up();
 }
 
+/** A point at fractions of the figure canvas, scrolled to the middle of the viewport. */
+async function canvasPoint(page: Page, fx: number, fy: number) {
+  const canvas = page.locator(".figure-canvas");
+  const before = await canvas.boundingBox();
+  if (!before) throw new Error("figure canvas has no box");
+  await page.evaluate(
+    (y) => window.scrollBy(0, y - window.innerHeight / 2),
+    before.y + before.height * fy,
+  );
+  const box = await canvas.boundingBox();
+  if (!box) throw new Error("figure canvas has no box");
+  return { x: box.x + box.width * fx, y: box.y + box.height * fy };
+}
+
 async function openProject(page: Page) {
   await page.getByRole("button", { name: `Open ${projectName}` }).click();
   await expect(page.getByRole("heading", { name: projectName })).toBeVisible();
@@ -231,11 +245,14 @@ test.describe
       const download = page.waitForEvent("download");
       await page.getByRole("button", { name: "Export PNG" }).click();
       const file = await download;
-      expect(file.suggestedFilename()).toMatch(/^figlab-\d+x\d+\.png$/);
+      expect(file.suggestedFilename()).toMatch(/^live-smoke-[a-z0-9]+-figure-1-300dpi\.png$/);
       const path = await file.path();
       const exported = await sharp(await readFile(path ?? "")).metadata();
       expect(exported.format).toBe("png");
-      await expect(page.getByText("PNG downloaded and provenance recorded.")).toBeVisible();
+      expect([exported.width, exported.height, exported.density]).toEqual([2550, 3300, 300]);
+      await expect(
+        page.getByText(/downloaded and provenance recorded for 1 figure\./),
+      ).toBeVisible();
 
       // A fresh load restores the saved document and re-downloads originals from storage.
       await page.reload();
@@ -251,6 +268,184 @@ test.describe
         .last()
         .click();
       await expect(page.getByRole("checkbox", { name: "Invert" })).toBeChecked();
+    });
+
+    test("admin annotates, labels panels, adds a journal-sized figure, and exports TIFF and PDF", async ({
+      page,
+    }) => {
+      await signIn(page, admin.email, admin.password);
+      await openProject(page);
+      await expect(page.getByRole("button", { name: /Move view-/ })).toHaveCount(2);
+
+      await page.getByRole("button", { name: "Text", exact: true }).click();
+      const at = await canvasPoint(page, 0.5, 0.08);
+      await page.mouse.click(at.x, at.y);
+      const content = page.getByLabel("Text content");
+      await content.fill("IL-6 10 \\muM");
+      await content.blur();
+      await expect(content).toHaveValue("IL-6 10 μM");
+      await page.keyboard.press("Escape");
+      await page.getByRole("button", { name: "Label panels" }).click();
+      await expect(page.getByRole("button", { name: /Move label-/ })).toHaveCount(2);
+
+      await page.getByRole("button", { name: "Add figure" }).click();
+      await page.getByLabel("Figure size").selectOption("nature-double");
+      await expect(page.getByLabel("Width (mm)")).toHaveValue("183");
+      await page.getByRole("button", { name: "Figure 1", exact: true }).click();
+      await expect(page.locator(".editor-header").getByRole("status")).toHaveText("Saved", {
+        timeout: 15_000,
+      });
+
+      await page.getByLabel("Format").selectOption("tiff");
+      const tiffDownload = page.waitForEvent("download");
+      await page.getByRole("button", { name: "Export TIFF" }).click();
+      const tiff = await sharp(
+        await readFile((await (await tiffDownload).path()) ?? ""),
+      ).metadata();
+      expect([tiff.format, tiff.width, tiff.height, tiff.density]).toEqual([
+        "tiff",
+        2550,
+        3300,
+        300,
+      ]);
+
+      await page.getByLabel("Format").selectOption("pdf");
+      await page.getByLabel(/All figures/).check();
+      const pdfDownload = page.waitForEvent("download");
+      await page.getByRole("button", { name: "Export PDF" }).click();
+      const pdf = (await readFile((await (await pdfDownload).path()) ?? "")).toString("latin1");
+      expect(pdf.startsWith("%PDF-")).toBe(true);
+      expect(pdf.match(/\/Type \/Page\b/g)).toHaveLength(2);
+      expect(pdf).toContain("/FontFile2");
+
+      const trail = page.getByRole("list", { name: "Audit trail" });
+      await expect(trail).toContainText("Exported: PDF at 300 dpi", { timeout: 15_000 });
+      await expect(trail).toContainText(admin.email);
+
+      const token = await accessToken(admin.email, admin.password);
+      const events = (await (
+        await api(`/v1/projects/${projectId}/audit-events?limit=200`, token)
+      ).json()) as {
+        events: { action: string; actor?: { email: string } }[];
+      };
+      const created = events.events.filter((event) => event.action === "OBJECT_CREATED");
+      expect(created.length).toBeGreaterThanOrEqual(3);
+      expect(created.every((event) => event.actor?.email === admin.email)).toBe(true);
+      const exports = (await (await api(`/v1/projects/${projectId}/exports`, token)).json()) as {
+        exports: { format: string; dpi?: number }[];
+      };
+      expect(exports.exports.filter((record) => record.format === "pdf")).toHaveLength(2);
+      expect(exports.exports.some((record) => record.format === "tiff" && record.dpi === 300)).toBe(
+        true,
+      );
+      const versions = (await (await api(`/v1/projects/${projectId}/versions`, token)).json()) as {
+        versions: { revision: number }[];
+      };
+      const first = versions.versions.at(-1)?.revision ?? 1;
+      const old = (await (
+        await api(`/v1/projects/${projectId}/versions/${first}`, token)
+      ).json()) as {
+        document: { schemaVersion: number };
+      };
+      expect(old.document.schemaVersion).toBe(2);
+    });
+
+    test("admin band-crops a blot, calibrates, annotates, and gets integrity evidence", async ({
+      page,
+    }) => {
+      await signIn(page, admin.email, admin.password);
+      await openProject(page);
+      await page.getByRole("button", { name: "Original · gradient.png" }).click();
+      await page.getByRole("button", { name: "Band (line) crop" }).click();
+      await page.getByLabel("Band height (px)").fill("20");
+      const canvas = page.getByTestId("source-canvas");
+      await canvas.scrollIntoViewIfNeeded();
+      const box = await canvas.evaluate((element) => {
+        const rect = element.getBoundingClientRect();
+        return {
+          left: rect.left,
+          top: rect.top,
+          width: (element as HTMLElement).clientWidth,
+          height: (element as HTMLElement).clientHeight,
+        };
+      });
+      const scale = Math.min(box.width / 160, box.height / 120);
+      const at = (x: number, y: number) => ({
+        x: box.left + (box.width - 160 * scale) / 2 + x * scale,
+        y: box.top + (box.height - 120 * scale) / 2 + y * scale,
+      });
+      const from = at(30, 50);
+      const to = at(130, 65);
+      await page.mouse.move(from.x, from.y);
+      await page.mouse.down();
+      await page.mouse.move(to.x, to.y, { steps: 5 });
+      await page.mouse.up();
+      await expect(
+        page.getByRole("status").filter({ hasText: /Band crop rotated 8\.5/ }),
+      ).toBeVisible();
+
+      await page.getByLabel("Pixel size (µm/px)").fill("0.25");
+      await page.getByRole("button", { name: "Set pixel size" }).click();
+      await page
+        .getByRole("button", { name: /Move view-/ })
+        .last()
+        .click();
+      await page.getByRole("button", { name: "Add scale bar" }).click();
+      await page
+        .getByRole("button", { name: /Move view-/ })
+        .last()
+        .click();
+      await page.getByRole("button", { name: "Add lane labels" }).click();
+      await expect(page.locator(".editor-header").getByRole("status")).toHaveText("Saved", {
+        timeout: 15_000,
+      });
+
+      await page.getByRole("button", { name: "Request server report" }).click();
+      await expect(page.getByRole("list", { name: "Server reports" })).toBeVisible();
+      await expect
+        .poll(
+          async () => {
+            await page.getByRole("button", { name: "Refresh server reports" }).click();
+            return page.getByRole("list", { name: "Server reports" }).innerText();
+          },
+          { timeout: 420_000, intervals: [5_000] },
+        )
+        .toMatch(/ready/);
+      await page
+        .getByRole("button", { name: /Open report for revision/ })
+        .first()
+        .click();
+      const findings = page.getByRole("list", { name: "Integrity findings" });
+      await expect(findings).toContainText("rotated 8.5° with bilinear resampling");
+      await expect(findings).toContainText("manually entered pixel size");
+
+      const download = page.waitForEvent("download");
+      await page.getByRole("button", { name: "Download provenance bundle" }).click();
+      const bundle = await readFile((await (await download).path()) ?? "");
+      for (const name of [
+        "README.txt",
+        "figure.json",
+        "figures.pdf",
+        "integrity-report.json",
+        "integrity-report.html",
+        "crops.csv",
+        "uncropped-originals.pdf",
+      ])
+        expect(bundle.includes(Buffer.from(name))).toBe(true);
+
+      const token = await accessToken(admin.email, admin.password);
+      const stored = (await (await api(`/v1/projects/${projectId}/document`, token)).json()) as {
+        document: {
+          sources: { calibration: { origin: string } | null }[];
+          objects: { type: string }[];
+        };
+      };
+      expect(
+        stored.document.sources.some((source) => source.calibration?.origin === "manual"),
+      ).toBe(true);
+      expect(stored.document.objects.map((object) => object.type)).toEqual(
+        expect.arrayContaining(["scale-bar", "lane-table"]),
+      );
     });
 
     test("a stale tab gets a revision conflict and keeps local work", async ({ browser }) => {
@@ -285,7 +480,7 @@ test.describe
 
     test("other users cannot see or open the project", async () => {
       const token = await accessToken(member.email, member.password);
-      expect(await (await api("/v1/me", token)).json()).toEqual({
+      expect(await (await api("/v1/me", token)).json()).toMatchObject({
         email: member.email,
         role: "member",
       });
@@ -293,10 +488,99 @@ test.describe
       expect((await api(`/v1/projects/${projectId}`, token)).status).toBe(404);
       expect((await api(`/v1/projects/${projectId}/document`, token)).status).toBe(404);
       const adminToken = await accessToken(admin.email, admin.password);
-      expect(await (await api("/v1/me", adminToken)).json()).toEqual({
+      expect(await (await api("/v1/me", adminToken)).json()).toMatchObject({
         email: admin.email,
         role: "admin",
       });
+    });
+
+    test("a lab shares a project by invite link with a view-only member who comments", async ({
+      page,
+      browser,
+    }) => {
+      const labName = `Live lab ${runId}`;
+      const labProject = `Lab project ${runId}`;
+      await signIn(page, admin.email, admin.password);
+      await page.getByLabel("New lab name").fill(labName);
+      await page.getByRole("button", { name: "Create lab" }).click();
+      await expect(page.getByText(`Lab · ${labName}`)).toBeVisible();
+      await page.getByLabel("New project name").fill(labProject);
+      await page.getByRole("button", { name: "Create project" }).click();
+      await expect(page.getByRole("heading", { name: labProject })).toBeVisible();
+      await page.getByRole("button", { name: "Projects" }).click();
+      await page.getByRole("button", { name: "Lab members" }).click();
+      await page.getByLabel("Invite role").selectOption("viewer");
+      await page.getByLabel("Only for email (optional)").fill(member.email);
+      await page.getByRole("button", { name: "Create invite link" }).click();
+      const link = await page.getByLabel("Invite link").inputValue();
+      expect(link).toMatch(/\?invite=[A-Za-z0-9_-]{43}$/);
+
+      // The member opens the link signed out, signs in, and joins.
+      const memberContext = await browser.newContext();
+      const memberPage = await memberContext.newPage();
+      await memberPage.goto(link);
+      await memberPage.getByLabel("Email").fill(member.email);
+      await memberPage.getByLabel("Password").fill(member.password);
+      await memberPage.getByRole("button", { name: "Sign in", exact: true }).click();
+      await expect(memberPage.getByRole("region", { name: "Lab invite" })).toContainText(
+        `join ${labName} as viewer`,
+      );
+      await memberPage.getByRole("button", { name: `Join ${labName}` }).click();
+      await expect(memberPage.getByText(`Lab · ${labName}`)).toBeVisible();
+      await memberPage.getByRole("button", { name: `Open ${labProject}` }).click();
+      await expect(memberPage.getByRole("note")).toContainText("View only");
+      await memberPage.getByLabel("Comment", { exact: true }).fill(`Live comment ${runId}`);
+      await memberPage.getByRole("button", { name: "Add comment" }).click();
+      await expect(memberPage.getByRole("list", { name: "Comment threads" })).toContainText(
+        `Live comment ${runId}`,
+      );
+      await memberContext.close();
+
+      const memberToken = await accessToken(member.email, member.password);
+      const adminToken = await accessToken(admin.email, admin.password);
+      const workspaces = (await (await api("/v1/workspaces", adminToken)).json()) as {
+        workspaces: { id: string; name: string }[];
+      };
+      const lab = workspaces.workspaces.find((workspace) => workspace.name === labName);
+      if (!lab) throw new Error("lab missing");
+      const projects = (await (
+        await api(`/v1/workspaces/${lab.id}/projects`, adminToken)
+      ).json()) as { projects: { id: string }[] };
+      const sharedId = projects.projects[0]?.id ?? "";
+      const document = await (await api(`/v1/projects/${sharedId}/document`, memberToken)).json();
+      const save = await api(`/v1/projects/${sharedId}/document`, memberToken, {
+        method: "PUT",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ baseRevision: document.revision, document: document.document }),
+      });
+      expect(save.status).toBe(403);
+      const comments = (await (
+        await api(`/v1/projects/${sharedId}/comments`, adminToken)
+      ).json()) as { comments: { body: string; author: { email: string } }[] };
+      expect(comments.comments).toEqual([
+        expect.objectContaining({
+          body: `Live comment ${runId}`,
+          author: expect.objectContaining({ email: member.email }),
+        }),
+      ]);
+      expect((await api("/v1/admin/overview", adminToken)).status).toBe(200);
+      expect((await api("/v1/admin/overview", memberToken)).status).toBe(403);
+
+      // Clean up: delete the project, then the lab once the deletion job has run.
+      expect((await api(`/v1/projects/${sharedId}`, adminToken, { method: "DELETE" })).status).toBe(
+        202,
+      );
+      await expect
+        .poll(
+          async () =>
+            (await api(`/v1/workspaces/${lab.id}`, adminToken, { method: "DELETE" })).status,
+          { timeout: 420_000, intervals: [5_000] },
+        )
+        .toBe(204);
+      expect(
+        ((await (await api("/v1/workspaces", memberToken)).json()) as { workspaces: unknown[] })
+          .workspaces,
+      ).toHaveLength(1);
     });
 
     test("rename and delete remove the project and its originals", async ({ page }) => {
@@ -332,5 +616,7 @@ test.describe
           timeout: 60_000,
         })
         .toBe(404);
+      // The project is a tombstone now: its history is no longer reachable through the API.
+      expect((await api(`/v1/projects/${projectId}/audit-events`, adminToken)).status).toBe(404);
     });
   });

@@ -3,35 +3,56 @@ import { pathToFileURL } from "node:url";
 import swagger from "@fastify/swagger";
 import {
   AssetDescriptorSchema,
+  AuditEventPageSchema,
+  AuditEventsQuerySchema,
   apiRoutes,
   CreateProjectRequestSchema,
   CurrentUserResponseSchema,
   DownloadUrlResponseSchema,
   ErrorEnvelopeSchema,
+  type ExportFormat,
+  ExportListResponseSchema,
+  ExportRecordSchema,
+  IntegrityReportListSchema,
+  IntegrityReportRecordSchema,
   MAX_UPLOAD_BYTES,
   PrepareUploadRequestSchema,
   ProjectDocumentResponseSchema,
   ProjectListResponseSchema,
   ProjectSchema,
   RecordExportRequestSchema,
+  RequestIntegrityReportSchema,
   SaveDocumentRequestSchema,
   SaveDocumentResponseSchema,
   UpdateProjectRequestSchema,
+  VersionListResponseSchema,
+  VersionResponseSchema,
+  VersionsQuerySchema,
   validateRecordExportRequest,
 } from "@figlab/api-contract";
 import {
   type AssetRecord,
   type Authorizer,
   assertResourceId,
+  ConflictError,
   createPostgresRepository,
   type FigLabRepository,
+  ForbiddenError,
+  InviteUnavailableError,
+  MembershipAuthorizer,
   NotFoundError,
   type Principal,
-  SingleUserAuthorizer,
+  roleAllows,
   UploadExpiredError,
+  type WorkspaceAccess,
 } from "@figlab/database";
-import { decodeFigureDocument, FigureDocumentDecodeError } from "@figlab/figure-schema";
-import { createObjectStoreFromEnv, type ObjectStore } from "@figlab/storage";
+import {
+  type FigureDocument,
+  FigureDocumentDecodeError,
+  migrateFigureDocument,
+  panelAssetIds,
+} from "@figlab/figure-schema";
+import { createObjectStoreFromEnv, derivedPreviewKey, type ObjectStore } from "@figlab/storage";
 import { Type } from "@sinclair/typebox";
 import Fastify, { type FastifyInstance } from "fastify";
 import {
@@ -40,6 +61,7 @@ import {
   supabaseResolver,
   UnauthorizedError,
 } from "./auth.js";
+import { createWorkspaceProject, registerCollaborationRoutes } from "./collaboration.js";
 
 const params = Type.Object({ projectId: Type.String({ minLength: 1 }) });
 const uploadParams = Type.Object({ uploadId: Type.String({ minLength: 1 }) });
@@ -62,15 +84,14 @@ const uploadSchema = Type.Object({
     expiresAt: Type.String(),
   }),
 });
-const exportSchema = Type.Object({
-  id: Type.String(),
-  projectId: Type.String(),
-  revision: Type.Integer(),
-  format: Type.Literal("png"),
-  widthPx: Type.Integer(),
-  heightPx: Type.Integer(),
-  checksumSha256: Type.String(),
-  createdAt: Type.String(),
+const versionParams = Type.Object({
+  projectId: Type.String({ minLength: 1 }),
+  revision: Type.Integer({ minimum: 1 }),
+});
+const DEFAULT_PAGE_SIZE = 50;
+const reportParams = Type.Object({
+  projectId: Type.String({ minLength: 1 }),
+  reportId: Type.String({ minLength: 1 }),
 });
 const DEFAULT_SINGLE_USER_EMAIL = "local-admin@figlab.invalid";
 
@@ -121,7 +142,7 @@ export async function buildApp(dependencies: AppDependencies): Promise<FastifyIn
     resolvePrincipal = singleUserResolver(dependencies.principal);
   }
   const app = Fastify({ logger: false, ajv: { customOptions: { removeAdditional: false } } });
-  const authorizer = dependencies.authorizer ?? new SingleUserAuthorizer();
+  const authorizer = dependencies.authorizer ?? new MembershipAuthorizer(dependencies.repository);
   const jobsEnqueued = () => {
     try {
       dependencies.onJobsEnqueued?.();
@@ -143,17 +164,36 @@ export async function buildApp(dependencies: AppDependencies): Promise<FastifyIn
       },
     },
   });
-  const projectFor = async (principal: Principal, projectId: string) => {
+  const projectAccess = async (
+    principal: Principal,
+    projectId: string,
+    access: WorkspaceAccess,
+  ) => {
     assertResourceId(projectId);
     const project = await dependencies.repository.getProject(projectId);
-    await authorizer.requireProject(principal, project);
-    return project;
+    const role = await authorizer.requireProject(principal, project, access);
+    return { project, role };
+  };
+  const projectFor = async (principal: Principal, projectId: string, access: WorkspaceAccess) =>
+    (await projectAccess(principal, projectId, access)).project;
+  const collaboration = {
+    repository: dependencies.repository,
+    authorizer,
+    projectFor: projectAccess,
   };
   app.setErrorHandler((error, request, reply) => {
     if (error instanceof UnauthorizedError)
       return reply.status(401).send({ code: "UNAUTHORIZED", message: error.message });
     if (error instanceof NotFoundError)
       return reply.status(404).send({ code: "NOT_FOUND", message: "Resource not found" });
+    if (error instanceof ForbiddenError)
+      return reply.status(403).send({ code: "FORBIDDEN", message: error.message });
+    if (error instanceof InviteUnavailableError)
+      return reply
+        .status(409)
+        .send({ code: "INVITE_UNAVAILABLE", message: error.message, details: [error.reason] });
+    if (error instanceof ConflictError)
+      return reply.status(409).send({ code: "CONFLICT", message: error.message });
     if (error instanceof UploadExpiredError)
       return reply.status(400).send({ code: "UPLOAD_EXPIRED", message: error.message });
     if (error instanceof FigureDocumentDecodeError)
@@ -180,6 +220,8 @@ export async function buildApp(dependencies: AppDependencies): Promise<FastifyIn
     async (request) => ({
       email: request.principal.email,
       role: request.principal.role ?? "admin",
+      userId: request.principal.id,
+      personalWorkspaceId: request.principal.workspaceId,
     }),
   );
   app.get(
@@ -193,10 +235,11 @@ export async function buildApp(dependencies: AppDependencies): Promise<FastifyIn
     apiRoutes.projects,
     { schema: { body: CreateProjectRequestSchema, response: { 201: ProjectSchema } } },
     async (request, reply) => {
-      const body = request.body as { name: string };
-      const project = await dependencies.repository.createProject(
+      const project = await createWorkspaceProject(
+        collaboration,
+        request.principal,
         request.principal.workspaceId,
-        body.name,
+        request.body as { name: string; folderId?: string; templateId?: string },
       );
       return reply.status(201).send(project);
     },
@@ -205,15 +248,19 @@ export async function buildApp(dependencies: AppDependencies): Promise<FastifyIn
     apiRoutes.project,
     { schema: { params, response: { 200: ProjectSchema } } },
     async (request) =>
-      projectFor(request.principal, (request.params as { projectId: string }).projectId),
+      projectFor(request.principal, (request.params as { projectId: string }).projectId, "read"),
   );
   app.put(
     apiRoutes.project,
     { schema: { params, body: UpdateProjectRequestSchema, response: { 200: ProjectSchema } } },
     async (request) => {
       const id = (request.params as { projectId: string }).projectId;
-      await projectFor(request.principal, id);
-      return dependencies.repository.renameProject(id, (request.body as { name: string }).name);
+      await projectFor(request.principal, id, "write");
+      return dependencies.repository.renameProject(
+        id,
+        (request.body as { name: string }).name,
+        actor(request.principal),
+      );
     },
   );
   app.delete(
@@ -221,8 +268,13 @@ export async function buildApp(dependencies: AppDependencies): Promise<FastifyIn
     { schema: { params, response: { 202: ProjectSchema } } },
     async (request, reply) => {
       const id = (request.params as { projectId: string }).projectId;
-      await projectFor(request.principal, id);
-      const deleting = await dependencies.repository.markProjectDeleting(id);
+      const { project, role } = await projectAccess(request.principal, id, "write");
+      if (!roleAllows(role, "manage") && project.createdBy !== request.principal.id)
+        throw new ForbiddenError("Only the project's creator or a workspace admin can delete it");
+      const deleting = await dependencies.repository.markProjectDeleting(
+        id,
+        actor(request.principal),
+      );
       jobsEnqueued();
       return reply.status(202).send(deleting);
     },
@@ -232,8 +284,8 @@ export async function buildApp(dependencies: AppDependencies): Promise<FastifyIn
     { schema: { params, response: { 200: ProjectDocumentResponseSchema } } },
     async (request) => {
       const id = (request.params as { projectId: string }).projectId;
-      await projectFor(request.principal, id);
-      return dependencies.repository.getDocument(id);
+      await projectFor(request.principal, id, "read");
+      return currentDocument(await dependencies.repository.getDocument(id));
     },
   );
   app.put(
@@ -255,18 +307,25 @@ export async function buildApp(dependencies: AppDependencies): Promise<FastifyIn
     },
     async (request, reply) => {
       const id = (request.params as { projectId: string }).projectId;
-      await projectFor(request.principal, id);
+      await projectFor(request.principal, id, "write");
       const body = request.body as { baseRevision: number; document: unknown };
-      const document = decodeFigureDocument(body.document);
+      const document = migrateFigureDocument(body.document);
       await dependencies.repository.assertReadyAssets(id, sourceAssetIds(document));
-      const saved = await dependencies.repository.saveDocument(id, body.baseRevision, document);
+      const mismatch = await sourceRegistryMismatch(dependencies.repository, id, document);
+      if (mismatch) return reply.status(400).send({ code: "BAD_REQUEST", message: mismatch });
+      const saved = await dependencies.repository.saveDocument(
+        id,
+        body.baseRevision,
+        document,
+        actor(request.principal),
+      );
       if (saved.kind === "conflict")
         return reply.status(409).send({
           code: "REVISION_CONFLICT",
           message: "Document revision conflict",
           currentRevision: saved.currentRevision,
         });
-      return saved.document;
+      return currentDocument(saved.document);
     },
   );
   app.post(
@@ -289,14 +348,14 @@ export async function buildApp(dependencies: AppDependencies): Promise<FastifyIn
         contentLength: number;
         checksumSha256: string;
       };
-      await projectFor(request.principal, id);
+      const project = await projectFor(request.principal, id, "write");
       if (!isValidUpload(body, dependencies.maxUploadBytes ?? MAX_UPLOAD_BYTES))
         return reply
           .status(400)
           .send({ code: "UPLOAD_INVALID", message: "Unsupported upload claim" });
       const assetId = randomUUID();
       const uploadTtlSeconds = Math.min(600, Math.max(1, dependencies.uploadTtlSeconds ?? 600));
-      const key = `workspaces/${request.principal.workspaceId}/projects/${id}/assets/${assetId}/original`;
+      const key = `workspaces/${project.workspaceId}/projects/${id}/assets/${assetId}/original`;
       const upload = await dependencies.repository.createUpload({
         projectId: id,
         ...body,
@@ -334,7 +393,7 @@ export async function buildApp(dependencies: AppDependencies): Promise<FastifyIn
       const upload = await dependencies.repository.getUpload(
         resourceId((request.params as { uploadId: string }).uploadId),
       );
-      await projectFor(request.principal, upload.projectId);
+      await projectFor(request.principal, upload.projectId, "write");
       if (
         upload.status === "expired" ||
         (upload.status === "reserved" && new Date(upload.expiresAt).getTime() <= Date.now())
@@ -362,6 +421,31 @@ export async function buildApp(dependencies: AppDependencies): Promise<FastifyIn
         request.principal,
         (request.params as { assetId: string }).assetId,
       ),
+  );
+  app.post(
+    apiRoutes.assetPreviewDownloadUrl,
+    {
+      schema: {
+        params: Type.Object({
+          assetId: Type.String({ minLength: 1 }),
+          maxEdge: Type.Integer({ minimum: 1 }),
+        }),
+        response: { 201: DownloadUrlResponseSchema },
+      },
+    },
+    async (request, reply) => {
+      const { assetId, maxEdge } = request.params as { assetId: string; maxEdge: number };
+      const asset = await assetFor(dependencies, authorizer, request.principal, assetId);
+      const previews = Array.isArray(asset.metadata.previews)
+        ? (asset.metadata.previews as { maxEdge?: unknown }[])
+        : [];
+      if (asset.status !== "ready" || !previews.some((preview) => preview.maxEdge === maxEdge))
+        throw new NotFoundError();
+      const signed = await dependencies.store.presignDownload(
+        derivedPreviewKey(asset.storageKey, maxEdge),
+      );
+      return reply.status(201).send({ url: signed.url, expiresAt: signed.expiresAt });
+    },
   );
   app.post(
     apiRoutes.assetDownloadUrl,
@@ -394,16 +478,18 @@ export async function buildApp(dependencies: AppDependencies): Promise<FastifyIn
         params,
         body: RecordExportRequestSchema,
         response: {
-          201: exportSchema,
+          201: ExportRecordSchema,
           400: Type.Object({ code: Type.Literal("BAD_REQUEST"), message: Type.String() }),
         },
       },
     },
     async (request, reply) => {
       const id = (request.params as { projectId: string }).projectId;
-      await projectFor(request.principal, id);
+      await projectFor(request.principal, id, "read");
       const body = request.body as {
-        format: "png";
+        format: ExportFormat;
+        artboardId?: string;
+        dpi?: number;
         revision: number;
         widthPx: number;
         heightPx: number;
@@ -411,11 +497,128 @@ export async function buildApp(dependencies: AppDependencies): Promise<FastifyIn
       };
       if (!validateRecordExportRequest(body))
         return reply.status(400).send({ code: "BAD_REQUEST", message: "Invalid export metadata" });
+      if (body.artboardId !== undefined) {
+        const current = await dependencies.repository.getDocument(id);
+        const document = migrateFigureDocument(current.document);
+        if (!document.artboards.some((artboard) => artboard.id === body.artboardId))
+          return reply
+            .status(400)
+            .send({ code: "BAD_REQUEST", message: "Export names an unknown figure" });
+      }
       return reply
         .status(201)
-        .send(await dependencies.repository.recordExport({ projectId: id, ...body }));
+        .send(
+          await dependencies.repository.recordExport(
+            { projectId: id, ...body },
+            actor(request.principal),
+          ),
+        );
     },
   );
+  app.get(
+    apiRoutes.projectExports,
+    { schema: { params, response: { 200: ExportListResponseSchema } } },
+    async (request) => {
+      const id = (request.params as { projectId: string }).projectId;
+      await projectFor(request.principal, id, "read");
+      return { exports: await dependencies.repository.listExports(id) };
+    },
+  );
+  app.get(
+    apiRoutes.projectAuditEvents,
+    {
+      schema: {
+        params,
+        querystring: AuditEventsQuerySchema,
+        response: { 200: AuditEventPageSchema },
+      },
+    },
+    async (request) => {
+      const id = (request.params as { projectId: string }).projectId;
+      await projectFor(request.principal, id, "read");
+      const query = request.query as { limit?: number; beforeSequence?: number };
+      return dependencies.repository.pageAuditEvents(id, {
+        limit: query.limit ?? DEFAULT_PAGE_SIZE,
+        ...(query.beforeSequence === undefined ? {} : { beforeSequence: query.beforeSequence }),
+      });
+    },
+  );
+  app.get(
+    apiRoutes.projectVersions,
+    {
+      schema: {
+        params,
+        querystring: VersionsQuerySchema,
+        response: { 200: VersionListResponseSchema },
+      },
+    },
+    async (request) => {
+      const id = (request.params as { projectId: string }).projectId;
+      await projectFor(request.principal, id, "read");
+      const query = request.query as { limit?: number; beforeRevision?: number };
+      return {
+        versions: await dependencies.repository.listVersions(id, {
+          limit: query.limit ?? DEFAULT_PAGE_SIZE,
+          ...(query.beforeRevision === undefined ? {} : { beforeRevision: query.beforeRevision }),
+        }),
+      };
+    },
+  );
+  app.get(
+    apiRoutes.projectVersion,
+    { schema: { params: versionParams, response: { 200: VersionResponseSchema } } },
+    async (request) => {
+      const { projectId, revision } = request.params as { projectId: string; revision: number };
+      await projectFor(request.principal, projectId, "read");
+      return currentDocument(await dependencies.repository.getVersion(projectId, revision));
+    },
+  );
+  app.post(
+    apiRoutes.projectIntegrityReports,
+    {
+      schema: {
+        params,
+        body: RequestIntegrityReportSchema,
+        response: { 202: IntegrityReportRecordSchema },
+      },
+    },
+    async (request, reply) => {
+      const id = (request.params as { projectId: string }).projectId;
+      await projectFor(request.principal, id, "read");
+      const body = (request.body ?? {}) as { revision?: number };
+      const revision = body.revision ?? (await dependencies.repository.getDocument(id)).revision;
+      const record = await dependencies.repository.requestIntegrityReport(
+        id,
+        revision,
+        actor(request.principal),
+      );
+      jobsEnqueued();
+      return reply.status(202).send(record);
+    },
+  );
+  app.get(
+    apiRoutes.projectIntegrityReports,
+    { schema: { params, response: { 200: IntegrityReportListSchema } } },
+    async (request) => {
+      const id = (request.params as { projectId: string }).projectId;
+      await projectFor(request.principal, id, "read");
+      const records = await dependencies.repository.listIntegrityReports(id, 20);
+      return { reports: records.map(({ report: _body, ...summary }) => summary) };
+    },
+  );
+  app.get(
+    apiRoutes.projectIntegrityReport,
+    { schema: { params: reportParams, response: { 200: IntegrityReportRecordSchema } } },
+    async (request) => {
+      const { projectId, reportId } = request.params as { projectId: string; reportId: string };
+      await projectFor(request.principal, projectId, "read");
+      assertResourceId(reportId);
+      const record = await dependencies.repository.getIntegrityReport(reportId);
+      if (record.projectId !== projectId) throw new NotFoundError();
+      return record;
+    },
+  );
+  registerCollaborationRoutes(app, collaboration);
   return app;
 }
 
@@ -503,19 +706,62 @@ async function assetFor(
   await authorizer.requireProject(
     principal,
     await dependencies.repository.getProject(asset.projectId),
+    "read",
   );
   return asset;
+}
+function actor(principal: Principal): { actorUserId: string } {
+  return { actorUserId: principal.id };
 }
 function resourceId(value: string): string {
   assertResourceId(value);
   return value;
 }
-function sourceAssetIds(document: {
-  objects: { type: string; view?: { sourceAssetId: string } }[];
-}): string[] {
-  return document.objects
-    .filter((object) => object.type === "image-view" && object.view)
-    .map((object) => object.view?.sourceAssetId ?? "");
+function sourceAssetIds(document: FigureDocument): string[] {
+  return [
+    ...document.objects.flatMap(panelAssetIds),
+    ...document.sources.map((source) => source.assetId),
+  ];
+}
+/**
+ * The document records each source's size and calibration so figures render deterministically;
+ * those records must agree with what the verifier measured from the immutable original.
+ */
+async function sourceRegistryMismatch(
+  repository: FigLabRepository,
+  projectId: string,
+  document: FigureDocument,
+): Promise<string | undefined> {
+  if (document.sources.length === 0) return undefined;
+  const assets = new Map(
+    (await repository.listProjectAssets(projectId)).map((asset) => [asset.id, asset]),
+  );
+  for (const source of document.sources) {
+    const asset = assets.get(source.assetId);
+    if (!asset) return `Source ${source.assetId} is not an asset of this project`;
+    if (asset.widthPx !== source.widthPx || asset.heightPx !== source.heightPx)
+      return `Source ${source.assetId} size does not match the verified original`;
+    if (source.calibration?.origin === "metadata") {
+      const measured = asset.metadata.calibration as
+        | { umPerPxX?: unknown; umPerPxY?: unknown }
+        | undefined;
+      const same = (left: unknown, right: number) =>
+        typeof left === "number" && Math.abs(left - right) <= Math.abs(right) * 1e-9;
+      if (
+        !measured ||
+        !same(measured.umPerPxX, source.calibration.umPerPxX) ||
+        !same(measured.umPerPxY, source.calibration.umPerPxY)
+      )
+        return `Source ${source.assetId} calibration is marked as file metadata but differs from it`;
+    }
+  }
+  return undefined;
+}
+/** Stored documents may be older versions; responses always carry the current version. */
+function currentDocument<T extends { document: unknown }>(
+  record: T,
+): T & { document: FigureDocument } {
+  return { ...record, document: migrateFigureDocument(record.document) };
 }
 function isValidUpload(
   input: {

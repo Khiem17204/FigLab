@@ -21,6 +21,9 @@ export function EditorLoader({
     queryKey: ["document", project.id],
     queryFn: () => client.getDocument(project.id),
   });
+  const me = useQuery({ queryKey: ["me"], queryFn: () => client.me() });
+  const workspaces = useQuery({ queryKey: ["workspaces"], queryFn: () => client.listWorkspaces() });
+  const role = workspaces.data?.find((workspace) => workspace.id === project.workspaceId)?.role;
   if (loaded.isLoading)
     return (
       <main className="loading-page">
@@ -40,6 +43,12 @@ export function EditorLoader({
     );
   return (
     <FigLabEditor
+      access={{
+        // Until the role is known, behave as before; the server enforces roles regardless.
+        readOnly: role === "viewer",
+        canModerate: role === "owner" || role === "admin" || role === undefined,
+        ...(me.data?.userId ? { currentUserId: me.data.userId } : {}),
+      }}
       account={account}
       client={client}
       initial={loaded.data}

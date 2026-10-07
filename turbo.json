@@ -21,7 +21,8 @@
     },
     "test:integration": {
       "dependsOn": ["^build"],
-      "outputs": ["coverage/**"]
+      "outputs": ["coverage/**"],
+      "env": ["TEST_DATABASE_URL"]
     },
     "test:unit": {
       "dependsOn": ["^build"],

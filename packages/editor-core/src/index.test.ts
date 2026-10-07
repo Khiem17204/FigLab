@@ -1,4 +1,9 @@
-import { createDefaultFigureDocument, type FigureDocumentV1 } from "@figlab/figure-schema";
+import {
+  createDefaultFigureDocument,
+  type FigureDocument,
+  type ImageViewObjectV3,
+  isImageView,
+} from "@figlab/figure-schema";
 import { describe, expect, it } from "vitest";
 import {
   commitCommand,
@@ -16,7 +21,15 @@ import {
   undo,
 } from "./index.js";
 
-const display = { brightness: 0, contrast: 1, gamma: 1, invert: false };
+const display = {
+  levels: { black: 0, white: 1 },
+  brightness: 0,
+  contrast: 1,
+  gamma: 1,
+  invert: false,
+  lut: "none" as const,
+};
+const reading = { plane: 0, channel: null, rotationDeg: 0, flipX: false, flipY: false };
 const viewport = { x: 0.25, y: 0.5, width: 0.75, height: 0.5 };
 
 describe("editor core commands", () => {
@@ -36,9 +49,14 @@ describe("editor core commands", () => {
     );
 
     expect(original.objects).toEqual([]);
-    expect(created.objects[0]?.view.viewport).toEqual(viewport);
-    expect(changed.objects[0]?.view).toEqual({
+    const createdView = created.objects[0];
+    const changedView = changed.objects[0];
+    if (!createdView || !isImageView(createdView) || !changedView || !isImageView(changedView))
+      throw new Error("expected image views");
+    expect(createdView.view.viewport).toEqual(viewport);
+    expect(changedView.view).toEqual({
       sourceAssetId: "asset-a",
+      ...reading,
       viewport: { x: 0, y: 0, width: 0.5, height: 0.5 },
       display: { ...display, invert: true },
     });
@@ -111,24 +129,21 @@ describe("editor core commands", () => {
     expect(provenance).toEqual({
       assetId: "asset-a",
       viewport: { x: 0, y: 0, width: 0.5, height: 0.5 },
+      rotationDeg: 0,
       display,
       siblingImageViewIds: ["view-b"],
     });
   });
 });
 
-function documentWithTwoViews(): FigureDocumentV1 {
+function documentWithTwoViews(): FigureDocument {
   return {
     ...createDefaultFigureDocument("board"),
     objects: [imageView("view-a", "asset-a", 0), imageView("view-b", "asset-a", 10)],
   };
 }
 
-function imageView(
-  id: string,
-  sourceAssetId: string,
-  xPt: number,
-): FigureDocumentV1["objects"][number] {
+function imageView(id: string, sourceAssetId: string, xPt: number): ImageViewObjectV3 {
   return {
     id,
     type: "image-view",
@@ -137,6 +152,11 @@ function imageView(
     zIndex: 0,
     locked: false,
     hidden: false,
-    view: { sourceAssetId, viewport: { x: 0, y: 0, width: 0.5, height: 0.5 }, display },
+    view: {
+      sourceAssetId,
+      ...reading,
+      viewport: { x: 0, y: 0, width: 0.5, height: 0.5 },
+      display,
+    },
   };
 }

@@ -24,7 +24,7 @@ describe("buildApp", () => {
     expect(principal.email).toBe("scientist@example.test");
   });
 
-  it("creates a schema-v1 project document and returns a typed stale-save conflict", async () => {
+  it("creates a current-schema project document and returns a typed stale-save conflict", async () => {
     const repository = new InMemoryFigLabRepository();
     const principal = await repository.bootstrapSingleUser();
     const app = await buildApp({ repository, store: new FakeObjectStore(), principal });
@@ -39,7 +39,7 @@ describe("buildApp", () => {
       method: "GET",
       url: `/v1/projects/${project.id}/document`,
     });
-    expect(document.json()).toMatchObject({ revision: 0, document: { schemaVersion: 1 } });
+    expect(document.json()).toMatchObject({ revision: 0, document: { schemaVersion: 3 } });
     const first = await app.inject({
       method: "PUT",
       url: `/v1/projects/${project.id}/document`,
@@ -57,6 +57,44 @@ describe("buildApp", () => {
       message: "Document revision conflict",
       currentRevision: 1,
     });
+    await app.close();
+  });
+
+  it("serves stored v1 documents as current and stores v1 saves as current", async () => {
+    const repository = new InMemoryFigLabRepository();
+    const principal = await repository.bootstrapSingleUser();
+    const project = await repository.createProject(principal.workspaceId, "Legacy");
+    const v1 = {
+      schemaVersion: 1,
+      artboards: [
+        { id: "board", name: "Figure 1", widthPt: 612, heightPt: 792, backgroundHex: "#FFFFFF" },
+      ],
+      objects: [],
+      groups: [],
+      constraints: [],
+      styles: [],
+    };
+    await repository.saveDocument(project.id, 0, v1);
+    const app = await buildApp({ repository, store: new FakeObjectStore(), principal });
+    const read = await app.inject({ method: "GET", url: `/v1/projects/${project.id}/document` });
+    expect(read.statusCode).toBe(200);
+    expect(read.json().document).toEqual({ ...v1, schemaVersion: 3, sources: [] });
+
+    const saved = await app.inject({
+      method: "PUT",
+      url: `/v1/projects/${project.id}/document`,
+      payload: { baseRevision: 1, document: v1 },
+    });
+    expect(saved.statusCode).toBe(200);
+    expect(saved.json().document.schemaVersion).toBe(3);
+    expect((await repository.getDocument(project.id)).schemaVersion).toBe(3);
+
+    const future = await app.inject({
+      method: "PUT",
+      url: `/v1/projects/${project.id}/document`,
+      payload: { baseRevision: 2, document: { ...v1, schemaVersion: 4 } },
+    });
+    expect(future.statusCode).toBe(400);
     await app.close();
   });
 
@@ -113,8 +151,20 @@ describe("buildApp", () => {
       hidden: false,
       view: {
         sourceAssetId: "asset-1",
+        plane: 0,
+        channel: null,
         viewport: { x: 0.8, y: 0.2, width: 0.3, height: 0.5 },
-        display: { brightness: 0, contrast: 1, gamma: 1, invert: false },
+        rotationDeg: 0,
+        flipX: false,
+        flipY: false,
+        display: {
+          levels: { black: 0, white: 1 },
+          brightness: 0,
+          contrast: 1,
+          gamma: 1,
+          invert: false,
+          lut: "none",
+        },
       },
     });
     const app = await buildApp({ repository, store: new FakeObjectStore(), principal });
@@ -331,6 +381,268 @@ describe("buildApp", () => {
       payload: { assetId: upload.assetId },
     });
     expect(await repository.dequeue()).toBeUndefined();
+    await app.close();
+  });
+
+  it("serves the audit trail newest first with actors and paging", async () => {
+    const repository = new InMemoryFigLabRepository();
+    const principal = await repository.bootstrapSingleUser("pi@example.test");
+    const app = await buildApp({ repository, store: new FakeObjectStore(), principal });
+    const project = (
+      await app.inject({ method: "POST", url: "/v1/projects", payload: { name: "Audit" } })
+    ).json();
+    await app.inject({
+      method: "PUT",
+      url: `/v1/projects/${project.id}`,
+      payload: { name: "Audit 2" },
+    });
+    const page = await app.inject({
+      method: "GET",
+      url: `/v1/projects/${project.id}/audit-events?limit=1`,
+    });
+    expect(page.statusCode).toBe(200);
+    expect(page.json()).toMatchObject({
+      events: [
+        {
+          action: "PROJECT_RENAMED",
+          details: { name: "Audit 2" },
+          actor: { id: principal.id, email: "pi@example.test" },
+        },
+      ],
+      nextBeforeSequence: expect.any(Number),
+    });
+    const older = await app.inject({
+      method: "GET",
+      url: `/v1/projects/${project.id}/audit-events?beforeSequence=${page.json().nextBeforeSequence}`,
+    });
+    expect(older.json().events.map((event: { action: string }) => event.action)).toEqual([
+      "PROJECT_CREATED",
+    ]);
+    expect(
+      (await app.inject({ method: "GET", url: `/v1/projects/${project.id}/audit-events?limit=0` }))
+        .statusCode,
+    ).toBe(400);
+    await app.close();
+  });
+
+  it("lists versions and returns each revision migrated to the current schema", async () => {
+    const repository = new InMemoryFigLabRepository();
+    const principal = await repository.bootstrapSingleUser();
+    const project = await repository.createProject(principal.workspaceId, "Versions");
+    const v1 = {
+      schemaVersion: 1,
+      artboards: [
+        { id: "b", name: "Figure 1", widthPt: 612, heightPt: 792, backgroundHex: "#FFFFFF" },
+      ],
+      objects: [],
+      groups: [],
+      constraints: [],
+      styles: [],
+    };
+    await repository.saveDocument(project.id, 0, v1);
+    await repository.saveDocument(project.id, 1, { ...v1, schemaVersion: 2 });
+    const app = await buildApp({ repository, store: new FakeObjectStore(), principal });
+    const list = await app.inject({ method: "GET", url: `/v1/projects/${project.id}/versions` });
+    expect(list.json().versions.map((version: { revision: number }) => version.revision)).toEqual([
+      2, 1,
+    ]);
+    const first = await app.inject({ method: "GET", url: `/v1/projects/${project.id}/versions/1` });
+    expect(first.statusCode).toBe(200);
+    expect(first.json()).toMatchObject({
+      revision: 1,
+      schemaVersion: 1,
+      document: { schemaVersion: 3 },
+    });
+    expect(
+      (await app.inject({ method: "GET", url: `/v1/projects/${project.id}/versions/7` }))
+        .statusCode,
+    ).toBe(404);
+    await app.close();
+  });
+
+  it("records exports per figure and lists them, rejecting unknown figures", async () => {
+    const repository = new InMemoryFigLabRepository();
+    const principal = await repository.bootstrapSingleUser();
+    const project = await repository.createProject(principal.workspaceId, "Exports");
+    const artboardId = (
+      (await repository.getDocument(project.id)).document as { artboards: { id: string }[] }
+    ).artboards[0]?.id;
+    const app = await buildApp({ repository, store: new FakeObjectStore(), principal });
+    const payload = {
+      format: "tiff",
+      artboardId,
+      dpi: 300,
+      revision: 0,
+      widthPx: 2550,
+      heightPx: 3300,
+      checksumSha256: "a".repeat(64),
+    };
+    const created = await app.inject({
+      method: "POST",
+      url: `/v1/projects/${project.id}/exports`,
+      payload,
+    });
+    expect(created.statusCode).toBe(201);
+    expect(created.json()).toMatchObject({ format: "tiff", artboardId, dpi: 300 });
+    const unknown = await app.inject({
+      method: "POST",
+      url: `/v1/projects/${project.id}/exports`,
+      payload: { ...payload, artboardId: "elsewhere" },
+    });
+    expect(unknown.statusCode).toBe(400);
+    const listed = await app.inject({ method: "GET", url: `/v1/projects/${project.id}/exports` });
+    expect(listed.json().exports).toHaveLength(1);
+    await app.close();
+  });
+
+  it("hides deleted projects and another workspace's history", async () => {
+    const repository = new InMemoryFigLabRepository();
+    const principal = await repository.bootstrapSingleUser();
+    const project = await repository.createProject(principal.workspaceId, "Gone");
+    const stranger = await repository.ensureAuthUser({
+      id: "00000000-0000-4000-8000-0000000000aa",
+      email: "stranger@example.test",
+    });
+    const strangerApp = await buildApp({
+      repository,
+      store: new FakeObjectStore(),
+      principal: stranger,
+    });
+    for (const path of ["audit-events", "versions", "exports"])
+      expect(
+        (await strangerApp.inject({ method: "GET", url: `/v1/projects/${project.id}/${path}` }))
+          .statusCode,
+      ).toBe(404);
+    await strangerApp.close();
+
+    await repository.markProjectDeleting(project.id);
+    await repository.deleteProjectData(project.id);
+    const app = await buildApp({ repository, store: new FakeObjectStore(), principal });
+    expect(
+      (await app.inject({ method: "GET", url: `/v1/projects/${project.id}` })).statusCode,
+    ).toBe(404);
+    expect(
+      (await app.inject({ method: "GET", url: `/v1/projects/${project.id}/audit-events` }))
+        .statusCode,
+    ).toBe(404);
+    expect((await repository.listAuditEvents(project.id)).at(-1)?.action).toBe("PROJECT_DELETED");
+    await app.close();
+  });
+
+  it("checks the document's source registry against verified originals", async () => {
+    const repository = new InMemoryFigLabRepository();
+    const principal = await repository.bootstrapSingleUser();
+    const project = await repository.createProject(principal.workspaceId, "Registry");
+    const upload = await repository.createUpload({
+      projectId: project.id,
+      filename: "stack.tif",
+      mimeType: "image/tiff",
+      contentLength: 10,
+      checksumSha256: "a".repeat(64),
+      storageKey: "registry-key",
+    });
+    await repository.updateAsset(upload.assetId, {
+      status: "ready",
+      widthPx: 400,
+      heightPx: 200,
+      metadata: { calibration: { umPerPxX: 0.5, umPerPxY: 0.5, source: "imagej" } },
+    });
+    const current = (await repository.getDocument(project.id)).document as {
+      artboards: { id: string }[];
+    };
+    const app = await buildApp({ repository, store: new FakeObjectStore(), principal });
+    const save = (sources: unknown[], baseRevision: number) =>
+      app.inject({
+        method: "PUT",
+        url: `/v1/projects/${project.id}/document`,
+        payload: {
+          baseRevision,
+          document: {
+            ...current,
+            schemaVersion: 3,
+            sources,
+            objects: [],
+            groups: [],
+            constraints: [],
+            styles: [],
+          },
+        },
+      });
+    const source = (extra: Record<string, unknown> = {}) => ({
+      assetId: upload.assetId,
+      widthPx: 400,
+      heightPx: 200,
+      calibration: null,
+      markers: [],
+      ...extra,
+    });
+    expect((await save([source()], 0)).statusCode).toBe(200);
+    const wrongSize = await save([source({ widthPx: 401 })], 1);
+    expect(wrongSize.statusCode).toBe(400);
+    expect(wrongSize.json().message).toMatch(/size does not match/);
+    const metadata = { umPerPxX: 0.5, umPerPxY: 0.5, origin: "metadata" };
+    expect((await save([source({ calibration: metadata })], 1)).statusCode).toBe(200);
+    const forged = await save([source({ calibration: { ...metadata, umPerPxX: 0.1 } })], 2);
+    expect(forged.statusCode).toBe(400);
+    expect(forged.json().message).toMatch(/marked as file metadata/);
+    const manual = { umPerPxX: 0.1, umPerPxY: 0.1, origin: "manual" };
+    expect((await save([source({ calibration: manual })], 2)).statusCode).toBe(200);
+    const elsewhere = await save([source({ assetId: "00000000-0000-4000-8000-0000000000ff" })], 3);
+    expect(elsewhere.statusCode).toBe(404);
+    await app.close();
+  });
+
+  it("requests integrity reports for saved revisions and hides other projects' reports", async () => {
+    const repository = new InMemoryFigLabRepository();
+    const principal = await repository.bootstrapSingleUser();
+    const project = await repository.createProject(principal.workspaceId, "Integrity");
+    const other = await repository.createProject(principal.workspaceId, "Other");
+    let triggered = 0;
+    const app = await buildApp({
+      repository,
+      store: new FakeObjectStore(),
+      principal,
+      onJobsEnqueued: () => {
+        triggered += 1;
+      },
+    });
+    const requested = await app.inject({
+      method: "POST",
+      url: `/v1/projects/${project.id}/integrity-reports`,
+      payload: {},
+    });
+    expect(requested.statusCode).toBe(202);
+    expect(requested.json()).toMatchObject({
+      revision: 0,
+      status: "pending",
+      requestedBy: principal.id,
+    });
+    expect(triggered).toBe(1);
+    expect(await repository.dequeue()).toMatchObject({ name: "integrity_report" });
+    await repository.completeIntegrityReport(requested.json().id, { report: { panels: [] } });
+    const list = await app.inject({
+      method: "GET",
+      url: `/v1/projects/${project.id}/integrity-reports`,
+    });
+    expect(list.json().reports).toEqual([
+      expect.not.objectContaining({ report: expect.anything() }),
+    ]);
+    const read = await app.inject({
+      method: "GET",
+      url: `/v1/projects/${project.id}/integrity-reports/${requested.json().id}`,
+    });
+    expect(read.json()).toMatchObject({ status: "ready", report: { panels: [] } });
+    const wrongProject = await app.inject({
+      method: "GET",
+      url: `/v1/projects/${other.id}/integrity-reports/${requested.json().id}`,
+    });
+    expect(wrongProject.statusCode).toBe(404);
+    const missingRevision = await app.inject({
+      method: "POST",
+      url: `/v1/projects/${project.id}/integrity-reports`,
+      payload: { revision: 5 },
+    });
+    expect(missingRevision.statusCode).toBe(404);
     await app.close();
   });
 

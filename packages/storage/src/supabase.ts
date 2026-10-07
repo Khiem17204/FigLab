@@ -1,5 +1,10 @@
 import { StorageClient } from "@supabase/storage-js";
-import type { ObjectStat, ObjectStore, SignedObjectUrl } from "./index.js";
+import {
+  assertDerivedKey,
+  type ObjectStat,
+  type ObjectStore,
+  type SignedObjectUrl,
+} from "./index.js";
 
 export interface SupabaseObjectStoreOptions {
   /** Project URL, for example `https://<ref>.supabase.co`. */
@@ -75,6 +80,11 @@ export class SupabaseObjectStore implements ObjectStore {
   async delete(key: string): Promise<void> {
     const { error } = await this.bucket.remove([key]);
     if (error && !isMissing(error)) throw error;
+  }
+  async putDerived(key: string, bytes: Uint8Array, contentType: string): Promise<void> {
+    assertDerivedKey(key);
+    const { error } = await this.bucket.upload(key, bytes, { contentType, upsert: true });
+    if (error) throw error;
   }
 }
 

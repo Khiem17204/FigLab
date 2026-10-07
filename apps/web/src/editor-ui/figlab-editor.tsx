@@ -1,25 +1,39 @@
 import type { AssetDescriptor, Project, ProjectDocumentResponse } from "@figlab/api-contract";
 import { selectImageProvenance } from "@figlab/editor-core";
-import { Badge, EmptyState, IconButton, TrashIcon, useToast } from "@figlab/ui";
+import { isImageView } from "@figlab/figure-schema";
+import { Badge, EmptyState, IconButton, InfoIcon, TrashIcon, useToast } from "@figlab/ui";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useStore } from "zustand";
 
 import { FigLabClient } from "../api/client";
-import { createArtboardPngExporter, downloadBlob, exportPng } from "../api/export";
+import { downloadBlob } from "../api/export";
 import type { SignedInAccount } from "../auth/auth-gate";
 import { AutosaveController, type SaveStatus } from "../editor/autosave";
 import { bindAutosave } from "../editor/autosave-binding";
 import { BrowserRasterRepository, type SupportedRasterMime } from "../editor/raster-sources";
 import { createEditorSession } from "../editor/session-store";
+import { ArrangePanel } from "../figure-tools/arrange-panel";
+import { CommentsPanel, TemplatePanel } from "../figure-tools/comments-panel";
+import { useDerivedSync } from "../figure-tools/derived-sync";
+import { exportFigures } from "../figure-tools/export-figure";
+import { ExportPanel } from "../figure-tools/export-panel";
+import { FigureCanvas } from "../figure-tools/figure-canvas";
+import { FiguresBar } from "../figure-tools/figures-bar";
+import { FALLBACK_TEXT_METRICS, loadFigureFonts, useFigureFonts } from "../figure-tools/fonts";
+import { HistoryPanel } from "../figure-tools/history-panel";
+import { IntegrityPanel } from "../figure-tools/integrity-panel";
+import { handleFigureShortcut } from "../figure-tools/keyboard";
+import { ObjectInspector } from "../figure-tools/object-inspector";
+import { PanelInspector } from "../figure-tools/panel-inspector";
+import { QuantifyPanel } from "../figure-tools/quantify-panel";
+import { rasterizeVectorItems } from "../figure-tools/rasterize";
+import { SourceInspector } from "../figure-tools/source-inspector";
 import { AccountArea } from "../shell/account-menu";
-import { ArtboardEditor } from "./artboard-editor";
 import { isTextEntryTarget } from "./dom-helpers";
 import { EditorToolbar, SaveProblemBanner } from "./editor-toolbar";
 import { DisplaySection } from "./inspector/display-section";
-import { type ExportScale, ExportSection, exportDimensions } from "./inspector/export-panel";
 import { ProvenanceSection } from "./inspector/provenance-section";
 import { useEditorLayout } from "./layout-preferences";
-import { OriginalInspector } from "./original-inspector";
 import { ShortcutsDialog } from "./shortcuts-dialog";
 import { SourceLibrary } from "./source-library";
 import { type UploadItem, updateUpload } from "./uploads";
@@ -28,6 +42,7 @@ import type { ZoomLevel } from "./zoom";
 const defaultClient = new FigLabClient();
 
 export function FigLabEditor({
+  access = { readOnly: false, canModerate: true },
   client = defaultClient,
   account,
   initial,
@@ -35,6 +50,8 @@ export function FigLabEditor({
   project,
   reload,
 }: {
+  /** The caller's workspace role: viewers comment and export but never save. */
+  access?: { readOnly: boolean; canModerate: boolean; currentUserId?: string };
   client?: FigLabClient;
   account?: SignedInAccount | undefined;
   initial: ProjectDocumentResponse;
@@ -46,13 +63,16 @@ export function FigLabEditor({
   const state = useStore(session);
   const [revision, setRevision] = useState(initial.revision);
   const [assets, setAssets] = useState<AssetDescriptor[]>([]);
+  // Originals still downloading; their derived previews show meanwhile.
+  const [loadingAssets, setLoadingAssets] = useState<AssetDescriptor[]>([]);
   const [selectedAssetId, setSelectedAssetId] = useState(
-    initial.document.objects[0]?.view.sourceAssetId,
+    initial.document.objects.find(isImageView)?.view.sourceAssetId,
   );
   const [uploadStatus, setUploadStatus] = useState(
     "Choose a PNG, JPEG, or TIFF original to upload.",
   );
   const [exportStatus, setExportStatus] = useState("");
+  const [exportCount, setExportCount] = useState(0);
   const [saveStatus, setSaveStatus] = useState<SaveStatus>("saved");
   const [rasterSources] = useState(() => new BrowserRasterRepository());
   const saveState = useRef({ document: initial.document, revision: initial.revision });
@@ -72,13 +92,29 @@ export function FigLabEditor({
       ),
     [client, project.id],
   );
-  useEffect(() => bindAutosave(session, autosave), [autosave, session]);
+  useEffect(
+    () => (access.readOnly ? undefined : bindAutosave(session, autosave)),
+    [access.readOnly, autosave, session],
+  );
+  // Viewers check and export the revision they loaded, never local edits.
+  const loadedRevision = useRef({ document: initial.document, revision: initial.revision });
+  const saveExact = useCallback(
+    async () =>
+      access.readOnly
+        ? {
+            document: structuredClone(loadedRevision.current.document),
+            revision: loadedRevision.current.revision,
+          }
+        : autosave.saveNow(),
+    [access.readOnly, autosave],
+  );
   useEffect(() => () => rasterSources.dispose(), [rasterSources]);
 
   const navigateBack = useCallback(async () => {
+    if (access.readOnly) return onBack();
     const saved = await autosave.flushBeforeNavigation();
     if (saved) onBack();
-  }, [autosave, onBack]);
+  }, [access.readOnly, autosave, onBack]);
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
       if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "z") {
@@ -93,7 +129,10 @@ export function FigLabEditor({
       ) {
         event.preventDefault();
         session.getState().deleteSelectedObject();
+        return;
       }
+      if (!isTextEntryTarget(event.target) && handleFigureShortcut(event, session))
+        event.preventDefault();
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
@@ -101,17 +140,25 @@ export function FigLabEditor({
   useEffect(() => {
     let cancelled = false;
     const referencedAssetIds = [
-      ...new Set(initial.document.objects.map((object) => object.view.sourceAssetId)),
+      ...new Set(
+        initial.document.objects.filter(isImageView).map((object) => object.view.sourceAssetId),
+      ),
     ];
     void Promise.all(
       referencedAssetIds.map(async (assetId) => {
         if (rasterSources.has(assetId)) return;
         const asset = await client.getAsset(assetId);
         if (asset.status !== "ready") return;
-        const download = await client.downloadAsset(assetId);
-        await rasterSources.add(assetId, download.bytes, asset.mimeType as SupportedRasterMime);
-        if (!cancelled)
-          setAssets((current) => [...current.filter((item) => item.id !== asset.id), asset]);
+        if (!cancelled) setLoadingAssets((current) => [...current, asset]);
+        try {
+          const download = await client.downloadAsset(assetId);
+          await rasterSources.add(assetId, download.bytes, asset.mimeType as SupportedRasterMime);
+          if (!cancelled)
+            setAssets((current) => [...current.filter((item) => item.id !== asset.id), asset]);
+        } finally {
+          if (!cancelled)
+            setLoadingAssets((current) => current.filter((item) => item.id !== asset.id));
+        }
       }),
     ).catch((error: unknown) => {
       if (!cancelled)
@@ -132,10 +179,6 @@ export function FigLabEditor({
   const [zoom, setZoom] = useState<ZoomLevel>("fit");
   const [layout, setLayout] = useEditorLayout();
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
-  const [exportScale, setExportScale] = useState<ExportScale>("1");
-  const [customWidth, setCustomWidth] = useState("1200");
-  const [exporting, setExporting] = useState(false);
-  const [exportTone, setExportTone] = useState<"info" | "success" | "error">("info");
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
       if (event.metaKey || event.ctrlKey || event.altKey || isTextEntryTarget(event.target)) return;
@@ -149,17 +192,14 @@ export function FigLabEditor({
     return () => window.removeEventListener("keydown", onKey);
   }, [layout, setLayout]);
 
-  const selected = state.document.objects.find((object) => object.id === state.selectedObjectId);
+  const selected = state.document.objects
+    .filter(isImageView)
+    .find((object) => object.id === state.selectedObjectId);
   const selectedAsset = assets.find((asset) => asset.id === selectedAssetId);
-  const selectedPreviewUrl = selectedAssetId
-    ? rasterSources.getPreviewUrl(selectedAssetId)
-    : undefined;
+  const fonts = useFigureFonts();
+  const metrics = fonts?.metrics ?? FALLBACK_TEXT_METRICS;
+  useDerivedSync(session, metrics);
   const provenance = selected ? selectImageProvenance(state.document, selected.id) : undefined;
-  // Only outline the selected panel's crop when its own original is the one on screen.
-  const highlightedViewport =
-    provenance && provenance.assetId === selectedAssetId ? provenance.viewport : undefined;
-  const artboard = state.document.artboards[0];
-  const dimensions = exportDimensions(artboard, exportScale, customWidth);
 
   const trackUpload = (key: string, patch: Partial<Omit<UploadItem, "key">>) =>
     setUploads((current) => updateUpload(current, key, patch));
@@ -221,77 +261,44 @@ export function FigLabEditor({
     if (!result.data) return;
     session.getState().replaceDocument(result.data.document);
     setRevision(result.data.revision);
+    loadedRevision.current = { document: result.data.document, revision: result.data.revision };
     autosave.resetAfterReload();
   };
 
-  const exportArtboard = async (widthPx: number, heightPx: number) => {
-    setExportStatus("Saving the exact revision for export…");
-    setExportTone("info");
-    setExporting(true);
-    try {
-      const saved = await autosave.saveNow();
-      if (!saved) {
-        setExportStatus("Save the project before exporting. Recover your local work first.");
-        setExportTone("error");
-        toast.show({
-          tone: "error",
-          title: "Export paused",
-          description: "Resolve the save problem first, so the PNG matches a saved revision.",
-        });
-        return;
-      }
-      const artboardId = saved.document.artboards[0]?.id;
-      if (!artboardId) return;
-      setExportStatus("Preparing original-source PNG…");
-      await exportPng({
-        document: saved.document,
-        revision: saved.revision,
-        widthPx,
-        heightPx,
-        sourceExporter: createArtboardPngExporter(artboardId, rasterSources),
-        record: (metadata) => client.recordExport(project.id, metadata),
-        download: downloadBlob,
-      });
-      setExportStatus("PNG downloaded and provenance recorded.");
-      setExportTone("success");
-      toast.show({
-        tone: "success",
-        title: "PNG exported",
-        description: `${widthPx} × ${heightPx} px from revision ${saved.revision}, rendered from the originals.`,
-      });
-    } catch (error) {
-      setExportStatus(error instanceof Error ? error.message : "PNG export failed.");
-      setExportTone("error");
-      toast.show({
-        tone: "error",
-        title: "Export failed",
-        description: error instanceof Error ? error.message : "Try again in a moment.",
-      });
-    } finally {
-      setExporting(false);
-    }
+  const revealExport = () => {
+    if (!layout.inspectorOpen) setLayout({ inspectorOpen: true });
+    requestAnimationFrame(() => {
+      const section = document.getElementById("figure-export")?.closest("section");
+      section?.scrollIntoView({ behavior: "smooth", block: "nearest" });
+      section?.querySelector<HTMLElement>("select, input")?.focus();
+    });
   };
 
   return (
     <main className="editor-shell">
       <EditorToolbar
         account={account ? <AccountArea account={account} client={client} compact /> : undefined}
-        canExport={dimensions.valid}
         canRedo={state.future.length > 0}
         canUndo={state.history.length > 0}
-        exporting={exporting}
         inspectorOpen={layout.inspectorOpen}
         libraryOpen={layout.libraryOpen}
         onBack={() => void navigateBack()}
-        onExport={() => void exportArtboard(dimensions.width, dimensions.height)}
+        onExport={revealExport}
         onRedo={() => session.getState().redo()}
         onShowShortcuts={() => setShortcutsOpen(true)}
         onToggleInspector={() => setLayout({ inspectorOpen: !layout.inspectorOpen })}
         onToggleLibrary={() => setLayout({ libraryOpen: !layout.libraryOpen })}
         onUndo={() => session.getState().undo()}
         projectName={project.name}
+        readOnly={access.readOnly}
         saveStatus={saveStatus}
       />
+      {access.readOnly && (
+        <p className="read-only-banner" role="note">
+          <InfoIcon size={18} />
+          View only: you can comment, check integrity, and export; edits here are not saved.
+        </p>
+      )}
       <SaveProblemBanner
         onDownloadJson={() => downloadBlob(autosave.downloadMyJson(), `${project.name}-local.json`)}
         onReload={() => void recoverLatest()}
@@ -305,6 +312,8 @@ export function FigLabEditor({
         {layout.libraryOpen && (
           <SourceLibrary
             assets={assets}
+            client={client}
+            loadingAssets={loadingAssets}
             onCollapse={() => setLayout({ libraryOpen: false })}
             onDismissUpload={(key) =>
               setUploads((current) => current.filter((item) => item.key !== key))
@@ -317,106 +326,191 @@ export function FigLabEditor({
               })
             }
             onSelect={setSelectedAssetId}
-            onUpload={enqueueUploads}
             previewUrl={(assetId) => rasterSources.getPreviewUrl(assetId)}
             selectedAssetId={selectedAssetId}
             uploadStatus={uploadStatus}
             uploads={uploads}
-          />
+            {...(access.readOnly ? {} : { onUpload: enqueueUploads })}
+          >
+            <ArrangePanel metrics={metrics} session={session} />
+          </SourceLibrary>
         )}
         <section aria-label="Figure editor" className="workspace">
-          <OriginalInspector
-            {...(selectedAsset ? { asset: selectedAsset } : {})}
+          <SourceInspector
+            asset={selectedAsset}
             collapsed={layout.originalCollapsed}
-            {...(highlightedViewport ? { highlightedViewport } : {})}
             onCollapsedChange={(originalCollapsed) => setLayout({ originalCollapsed })}
-            onCrop={(viewport) => {
+            onCrop={(viewport, plane) => {
               if (!selectedAssetId) return;
               session.getState().beginCrop({ x: viewport.x, y: viewport.y });
               session
                 .getState()
                 .previewCrop({ x: viewport.x + viewport.width, y: viewport.y + viewport.height });
-              session.getState().commitCrop(selectedAssetId, `view-${crypto.randomUUID()}`);
+              session
+                .getState()
+                .commitCrop(
+                  selectedAssetId,
+                  `view-${crypto.randomUUID()}`,
+                  selectedAsset
+                    ? { widthPx: selectedAsset.widthPx, heightPx: selectedAsset.heightPx }
+                    : undefined,
+                  plane,
+                );
             }}
-            {...(selectedPreviewUrl ? { previewUrl: selectedPreviewUrl } : {})}
-          />
-          <ArtboardEditor
-            document={state.document}
-            {...(state.objectGesture ? { gesture: state.objectGesture } : {})}
-            onCommit={() => session.getState().commitObjectTransform()}
-            onMove={(id, delta) => {
-              if (state.objectGesture?.objectId !== id) session.getState().beginObjectGesture(id);
-              session.getState().previewObjectDelta(delta);
-            }}
-            onResize={(id, delta, anchor) => {
-              if (state.objectGesture?.objectId !== id) session.getState().beginObjectGesture(id);
-              session.getState().previewObjectResize(delta, anchor);
-            }}
-            onSelect={(id) => session.getState().selectObject(id)}
-            onZoomChange={setZoom}
             rasterSources={rasterSources}
-            {...(state.selectedObjectId ? { selectedId: state.selectedObjectId } : {})}
-            zoom={zoom}
+            session={session}
           />
+          <div className="figure-stage">
+            <FiguresBar session={session} />
+            <FigureCanvas
+              metrics={metrics}
+              onZoomChange={setZoom}
+              rasterSources={rasterSources}
+              session={session}
+              zoom={zoom}
+            />
+          </div>
         </section>
         {layout.inspectorOpen && (
           <aside aria-label="Inspector" className="inspector">
-            {selected ? (
-              <div className="pane-header">
-                <h2>
-                  Panel{" "}
-                  <Badge mono title={selected.id} tone="primary">
-                    {selected.id.slice(0, 13)}
-                  </Badge>
-                </h2>
-                <IconButton
-                  icon={<TrashIcon size={16} />}
-                  label="Delete selected panel"
-                  onClick={() => session.getState().deleteSelectedObject()}
-                  shortcut="Delete"
-                  size="sm"
-                  tooltipAlign="end"
-                  variant="danger"
-                />
-              </div>
-            ) : (
-              <div className="pane-header">
-                <h2>Inspector</h2>
-              </div>
-            )}
-            {selected ? (
-              <>
-                <DisplaySection
-                  object={selected}
-                  onChange={(display) => session.getState().setDisplay(selected.id, display)}
-                />
-                {provenance && (
-                  <ProvenanceSection
-                    asset={assets.find((asset) => asset.id === provenance.assetId)}
-                    onShowInOriginal={(assetId) => {
-                      setSelectedAssetId(assetId);
-                      if (layout.originalCollapsed) setLayout({ originalCollapsed: false });
-                    }}
-                    provenance={provenance}
+            <div className="pane-header">
+              {selected ? (
+                <>
+                  <h2>
+                    Panel{" "}
+                    <Badge mono title={selected.id} tone="primary">
+                      {selected.id.slice(0, 13)}
+                    </Badge>
+                  </h2>
+                  <IconButton
+                    icon={<TrashIcon size={16} />}
+                    label="Delete selected panel"
+                    onClick={() => session.getState().deleteSelectedObject()}
+                    shortcut="Delete"
+                    size="sm"
+                    tooltipAlign="end"
+                    variant="danger"
                   />
-                )}
-              </>
-            ) : (
-              <EmptyState headingLevel={3} mood="sleepy" plain title="No panel selected">
-                Drag across the original to crop a panel, or click a panel on the artboard to adjust
+                </>
+              ) : (
+                <h2>Inspector</h2>
+              )}
+            </div>
+            {selected && (
+              <DisplaySection
+                object={selected}
+                onChange={(display) => session.getState().setDisplay(selected.id, display)}
+              />
+            )}
+            <ObjectInspector metrics={metrics} session={session} />
+            <PanelInspector assets={assets} rasterSources={rasterSources} session={session} />
+            {provenance && (
+              <ProvenanceSection
+                asset={assets.find((asset) => asset.id === provenance.assetId)}
+                onShowInOriginal={(assetId) => {
+                  setSelectedAssetId(assetId);
+                  if (layout.originalCollapsed) setLayout({ originalCollapsed: false });
+                }}
+                provenance={provenance}
+              />
+            )}
+            {state.selectedIds.length === 0 && (
+              <EmptyState headingLevel={3} mood="sleepy" plain title="Nothing selected">
+                Drag across the original to crop a panel, or click something on the figure to adjust
                 it.
               </EmptyState>
             )}
-            <ExportSection
-              customWidth={customWidth}
-              height={dimensions.height}
-              onCustomWidthChange={setCustomWidth}
-              onScaleChange={setExportScale}
-              scale={exportScale}
+            <QuantifyPanel
+              download={downloadBlob}
+              rasterSources={rasterSources}
+              session={session}
+            />
+            <ExportPanel
+              activeArtboardId={state.activeArtboardId}
+              document={state.document}
+              onExport={async (choice) => {
+                setExportStatus("Saving the exact revision for export…");
+                try {
+                  const saved = await saveExact();
+                  if (!saved) {
+                    setExportStatus(
+                      "Save the project before exporting. Recover your local work first.",
+                    );
+                    toast.show({
+                      tone: "error",
+                      title: "Export paused",
+                      description:
+                        "Resolve the save problem first, so the file matches a saved revision.",
+                    });
+                    return;
+                  }
+                  setExportStatus(`Preparing ${choice.format.toUpperCase()} from original pixels…`);
+                  const result = await exportFigures(
+                    {
+                      ...choice,
+                      document: saved.document,
+                      revision: saved.revision,
+                      activeArtboardId: state.activeArtboardId,
+                      projectName: project.name,
+                    },
+                    {
+                      resolver: rasterSources,
+                      fonts: fonts ?? (await loadFigureFonts()),
+                      rasterize: rasterizeVectorItems,
+                      record: (metadata) => client.recordExport(project.id, metadata),
+                      download: downloadBlob,
+                    },
+                  );
+                  setExportCount((count) => count + 1);
+                  setExportStatus(
+                    `${result.filename} downloaded and provenance recorded for ${result.figures} figure${result.figures === 1 ? "" : "s"}.`,
+                  );
+                  toast.show({
+                    tone: "success",
+                    title: `${choice.format.toUpperCase()} exported`,
+                    description: `Revision ${saved.revision}, rendered from the original pixels.`,
+                  });
+                } catch (error) {
+                  setExportStatus(error instanceof Error ? error.message : "Export failed.");
+                  toast.show({
+                    tone: "error",
+                    title: "Export failed",
+                    description: error instanceof Error ? error.message : "Try again in a moment.",
+                  });
+                }
+              }}
               status={exportStatus}
-              statusTone={exportTone}
-              valid={dimensions.valid}
-              width={dimensions.width}
+            />
+            <IntegrityPanel
+              assets={assets}
+              client={client}
+              download={downloadBlob}
+              fonts={fonts}
+              projectId={project.id}
+              projectName={project.name}
+              rasterSources={rasterSources}
+              saveExact={saveExact}
+              session={session}
+            />
+            <CommentsPanel
+              canModerate={access.canModerate}
+              canResolve={!access.readOnly}
+              client={client}
+              currentUserId={access.currentUserId}
+              projectId={project.id}
+              session={session}
+            />
+            {!access.readOnly && (
+              <TemplatePanel client={client} project={project} saveExact={saveExact} />
+            )}
+            <HistoryPanel
+              client={client}
+              onRestore={(document) =>
+                session.getState().apply(() => document, { selectedIds: [] })
+              }
+              projectId={project.id}
+              refreshKey={exportCount}
+              revision={revision}
             />
           </aside>
         )}

@@ -30,8 +30,7 @@ export function EditorToolbar({
   saveStatus,
   canUndo,
   canRedo,
-  canExport,
-  exporting,
+  readOnly = false,
   libraryOpen,
   inspectorOpen,
   account,
@@ -47,8 +46,7 @@ export function EditorToolbar({
   saveStatus: SaveStatus;
   canUndo: boolean;
   canRedo: boolean;
-  canExport: boolean;
-  exporting: boolean;
+  readOnly?: boolean;
   libraryOpen: boolean;
   inspectorOpen: boolean;
   account?: ReactNode;
@@ -70,16 +68,22 @@ export function EditorToolbar({
       <h1 className="editor-title" title={projectName}>
         {projectName}
       </h1>
-      <span className="save-chip" data-state={saveStatus}>
-        {problem ? (
-          <AlertIcon size={14} />
-        ) : saveStatus === "saving" ? (
-          <span aria-hidden="true" className="fl-spinner" />
-        ) : (
-          <CheckIcon size={14} />
-        )}
-        <span role="status">{saveLabels[saveStatus]}</span>
-      </span>
+      {readOnly ? (
+        <span className="save-chip" data-state="read-only">
+          <span role="status">View only</span>
+        </span>
+      ) : (
+        <span className="save-chip" data-state={saveStatus}>
+          {problem ? (
+            <AlertIcon size={14} />
+          ) : saveStatus === "saving" ? (
+            <span aria-hidden="true" className="fl-spinner" />
+          ) : (
+            <CheckIcon size={14} />
+          )}
+          <span role="status">{saveLabels[saveStatus]}</span>
+        </span>
+      )}
       <span className="app-header-spacer" />
       <Toolbar className="editor-tools" label="Editor">
         <ToolbarGroup>
@@ -120,14 +124,8 @@ export function EditorToolbar({
           shortcut="?"
           tooltipAlign="end"
         />
-        <Button
-          disabled={!canExport}
-          icon={<DownloadIcon size={16} />}
-          loading={exporting}
-          onClick={onExport}
-          variant="primary"
-        >
-          Export PNG
+        <Button icon={<DownloadIcon size={16} />} onClick={onExport} variant="primary">
+          Export…
         </Button>
       </Toolbar>
       {account}

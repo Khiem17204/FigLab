@@ -1,5 +1,8 @@
-import { proportionallyResizeTransform, type ResizeAnchor } from "@figlab/editor-core";
-import type { ObjectTransformV1 } from "@figlab/figure-schema";
+import {
+  type BoxTransform,
+  proportionallyResizeTransform,
+  type ResizeAnchor,
+} from "@figlab/editor-core";
 
 import type { Point } from "./session-store";
 
@@ -55,14 +58,37 @@ export function normalizedPointInImage(point: Point, imageRect: ScreenRect): Poi
   };
 }
 
-export function resizeFromDraggedCorner(
-  transform: ObjectTransformV1,
+export function resizeFromDraggedCorner<T extends BoxTransform>(
+  transform: T,
   draggedCorner: ResizeAnchor,
   deltaPt: Point,
-): ObjectTransformV1 {
+): T {
   const growsRight = draggedCorner.endsWith("right");
   const widthPt = Math.max(1, transform.widthPt + deltaPt.x * (growsRight ? 1 : -1));
   return proportionallyResizeTransform(transform, widthPt, oppositeCorner(draggedCorner));
+}
+
+/**
+ * Resizes a box from a dragged corner without keeping its aspect ratio; the opposite corner
+ * stays put. `minSizePt` 0 lets a line collapse to horizontal or vertical.
+ */
+export function resizeFreely<T extends BoxTransform>(
+  transform: T,
+  draggedCorner: ResizeAnchor,
+  deltaPt: Point,
+  minSizePt = 1,
+): T {
+  const left = draggedCorner.endsWith("left");
+  const top = draggedCorner.startsWith("top");
+  const widthPt = Math.max(minSizePt, transform.widthPt + (left ? -deltaPt.x : deltaPt.x));
+  const heightPt = Math.max(minSizePt, transform.heightPt + (top ? -deltaPt.y : deltaPt.y));
+  return {
+    ...transform,
+    xPt: left ? transform.xPt + transform.widthPt - widthPt : transform.xPt,
+    yPt: top ? transform.yPt + transform.heightPt - heightPt : transform.yPt,
+    widthPt,
+    heightPt,
+  };
 }
 
 function oppositeCorner(corner: ResizeAnchor): ResizeAnchor {

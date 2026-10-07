@@ -6,7 +6,13 @@ export const EDITOR_SHORTCUTS: { group: string; items: { keys: string[]; action:
     items: [
       { keys: ["Mod+Z"], action: "Undo" },
       { keys: ["Mod+Shift+Z"], action: "Redo" },
-      { keys: ["Delete", "Backspace"], action: "Delete the selected panel" },
+      { keys: ["Delete", "Backspace"], action: "Delete the selection" },
+      { keys: ["Mod+A"], action: "Select everything on the figure" },
+      { keys: ["Mod+D"], action: "Duplicate the selection" },
+      { keys: ["Mod+G"], action: "Group" },
+      { keys: ["Mod+Shift+G"], action: "Ungroup" },
+      { keys: ["←", "→"], action: "Nudge 1 pt (Shift: 10 pt)" },
+      { keys: ["Escape"], action: "Deselect and return to the select tool" },
     ],
   },
   {
