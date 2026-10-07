@@ -1,4 +1,4 @@
-import { FigureDocumentV1Schema } from "@figlab/figure-schema";
+import { FigureDocumentSchema, FigureDocumentV1Schema } from "@figlab/figure-schema";
 import { Kind, type Static, Type, TypeRegistry } from "@sinclair/typebox";
 import { Value } from "@sinclair/typebox/value";
 
@@ -91,7 +91,7 @@ export const ProjectDocumentResponseSchema = Type.Object(
   {
     projectId: Type.String({ minLength: 1 }),
     revision: Type.Integer({ minimum: 0 }),
-    document: FigureDocumentV1Schema,
+    document: FigureDocumentSchema,
     updatedAt: Type.String({ minLength: 1 }),
   },
   { additionalProperties: false },
@@ -100,7 +100,8 @@ export const ProjectDocumentResponseSchema = Type.Object(
 export const SaveDocumentRequestSchema = Type.Object(
   {
     baseRevision: Type.Integer({ minimum: 0 }),
-    document: FigureDocumentV1Schema,
+    /** Any supported version; the server migrates it and always stores the current version. */
+    document: Type.Union([FigureDocumentSchema, FigureDocumentV1Schema]),
   },
   { additionalProperties: false },
 );
@@ -109,7 +110,7 @@ export const SaveDocumentResponseSchema = Type.Object(
   {
     projectId: Type.String({ minLength: 1 }),
     revision: Type.Integer({ minimum: 1 }),
-    document: FigureDocumentV1Schema,
+    document: FigureDocumentSchema,
     updatedAt: Type.String({ minLength: 1 }),
   },
   { additionalProperties: false },

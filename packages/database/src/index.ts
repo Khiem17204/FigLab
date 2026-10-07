@@ -118,7 +118,7 @@ export function assertResourceId(value: string): void {
 }
 const timestamp = () => new Date().toISOString();
 const defaultDocument = (id: string) => ({
-  schemaVersion: 1,
+  schemaVersion: 2,
   artboards: [{ id, name: "Figure 1", widthPt: 612, heightPt: 792, backgroundHex: "#FFFFFF" }],
   objects: [],
   groups: [],
@@ -236,7 +236,7 @@ export class InMemoryFigLabRepository implements FigLabRepository {
     this.documents.set(project.id, {
       projectId: project.id,
       revision: 0,
-      schemaVersion: 1,
+      schemaVersion: 2,
       document: defaultDocument(randomUUID()),
       updatedAt: now,
     });
@@ -286,7 +286,7 @@ export class InMemoryFigLabRepository implements FigLabRepository {
     const updated = {
       ...old,
       revision: old.revision + 1,
-      schemaVersion: 1,
+      schemaVersion: schemaVersionOf(document),
       document: structuredClone(document),
       updatedAt: timestamp(),
     };
@@ -456,6 +456,11 @@ export class InMemoryFigLabRepository implements FigLabRepository {
   ): void {
     this.auditEvents.push({ id: randomUUID(), projectId, action, details, createdAt: timestamp() });
   }
+}
+
+export function schemaVersionOf(document: unknown): number {
+  const version = (document as { schemaVersion?: unknown } | null)?.schemaVersion;
+  return typeof version === "number" ? version : 1;
 }
 
 function deriveDocumentDiff(before: unknown, after: unknown): Record<string, unknown> {

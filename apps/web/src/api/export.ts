@@ -4,13 +4,13 @@ import {
   type RecordExportRequest,
   validateRecordExportRequest,
 } from "@figlab/api-contract";
-import type { FigureDocumentV1 } from "@figlab/figure-schema";
+import type { FigureDocument } from "@figlab/figure-schema";
 import { composeArtboardPng, type RasterSourceResolver } from "@figlab/image-processing";
 
 import { sha256 } from "./client";
 
 export type OriginalSourcePngExporter = (
-  document: FigureDocumentV1,
+  document: FigureDocument,
   size: { widthPx: number; heightPx: number },
 ) => Promise<Blob>;
 
@@ -31,7 +31,7 @@ export function createArtboardPngExporter(
 }
 
 export type ExportPngOptions = {
-  document: FigureDocumentV1;
+  document: FigureDocument;
   revision: number;
   widthPx: number;
   heightPx: number;

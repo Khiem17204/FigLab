@@ -24,7 +24,7 @@ describe("buildApp", () => {
     expect(principal.email).toBe("scientist@example.test");
   });
 
-  it("creates a schema-v1 project document and returns a typed stale-save conflict", async () => {
+  it("creates a current-schema project document and returns a typed stale-save conflict", async () => {
     const repository = new InMemoryFigLabRepository();
     const principal = await repository.bootstrapSingleUser();
     const app = await buildApp({ repository, store: new FakeObjectStore(), principal });
@@ -39,7 +39,7 @@ describe("buildApp", () => {
       method: "GET",
       url: `/v1/projects/${project.id}/document`,
     });
-    expect(document.json()).toMatchObject({ revision: 0, document: { schemaVersion: 1 } });
+    expect(document.json()).toMatchObject({ revision: 0, document: { schemaVersion: 2 } });
     const first = await app.inject({
       method: "PUT",
       url: `/v1/projects/${project.id}/document`,
@@ -57,6 +57,44 @@ describe("buildApp", () => {
       message: "Document revision conflict",
       currentRevision: 1,
     });
+    await app.close();
+  });
+
+  it("serves stored v1 documents as v2 and stores v1 saves as v2", async () => {
+    const repository = new InMemoryFigLabRepository();
+    const principal = await repository.bootstrapSingleUser();
+    const project = await repository.createProject(principal.workspaceId, "Legacy");
+    const v1 = {
+      schemaVersion: 1,
+      artboards: [
+        { id: "board", name: "Figure 1", widthPt: 612, heightPt: 792, backgroundHex: "#FFFFFF" },
+      ],
+      objects: [],
+      groups: [],
+      constraints: [],
+      styles: [],
+    };
+    await repository.saveDocument(project.id, 0, v1);
+    const app = await buildApp({ repository, store: new FakeObjectStore(), principal });
+    const read = await app.inject({ method: "GET", url: `/v1/projects/${project.id}/document` });
+    expect(read.statusCode).toBe(200);
+    expect(read.json().document).toEqual({ ...v1, schemaVersion: 2 });
+
+    const saved = await app.inject({
+      method: "PUT",
+      url: `/v1/projects/${project.id}/document`,
+      payload: { baseRevision: 1, document: v1 },
+    });
+    expect(saved.statusCode).toBe(200);
+    expect(saved.json().document.schemaVersion).toBe(2);
+    expect((await repository.getDocument(project.id)).schemaVersion).toBe(2);
+
+    const future = await app.inject({
+      method: "PUT",
+      url: `/v1/projects/${project.id}/document`,
+      payload: { baseRevision: 2, document: { ...v1, schemaVersion: 3 } },
+    });
+    expect(future.statusCode).toBe(400);
     await app.close();
   });
 

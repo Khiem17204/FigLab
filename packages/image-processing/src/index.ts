@@ -1,4 +1,9 @@
-import type { DisplayTransformV1, FigureDocumentV1, NormalizedRect } from "@figlab/figure-schema";
+import {
+  type DisplayTransformV1,
+  type FigureDocument,
+  isImageView,
+  type NormalizedRect,
+} from "@figlab/figure-schema";
 import { fromArrayBuffer } from "geotiff";
 
 export const MAX_RASTER_PIXELS = 100_000_000;
@@ -364,7 +369,7 @@ export async function decodeBrowserRaster(
 }
 
 export async function composeArtboardPng(
-  document: FigureDocumentV1,
+  document: FigureDocument,
   artboardId: string,
   widthPx: number,
   heightPx: number,
@@ -376,6 +381,7 @@ export async function composeArtboardPng(
   const canvas = new Uint8Array(widthPx * heightPx * 4);
   fillBackground(canvas, artboard.backgroundHex);
   const views = document.objects
+    .filter(isImageView)
     .filter((object) => object.artboardId === artboardId && !object.hidden)
     .slice()
     .sort((left, right) => left.zIndex - right.zIndex);

@@ -1,4 +1,9 @@
-import { createDefaultFigureDocument, type FigureDocumentV1 } from "@figlab/figure-schema";
+import {
+  createDefaultFigureDocument,
+  type FigureDocument,
+  type ImageViewObjectV1,
+  isImageView,
+} from "@figlab/figure-schema";
 import { describe, expect, it } from "vitest";
 import {
   commitCommand,
@@ -36,8 +41,12 @@ describe("editor core commands", () => {
     );
 
     expect(original.objects).toEqual([]);
-    expect(created.objects[0]?.view.viewport).toEqual(viewport);
-    expect(changed.objects[0]?.view).toEqual({
+    const createdView = created.objects[0];
+    const changedView = changed.objects[0];
+    if (!createdView || !isImageView(createdView) || !changedView || !isImageView(changedView))
+      throw new Error("expected image views");
+    expect(createdView.view.viewport).toEqual(viewport);
+    expect(changedView.view).toEqual({
       sourceAssetId: "asset-a",
       viewport: { x: 0, y: 0, width: 0.5, height: 0.5 },
       display: { ...display, invert: true },
@@ -117,18 +126,14 @@ describe("editor core commands", () => {
   });
 });
 
-function documentWithTwoViews(): FigureDocumentV1 {
+function documentWithTwoViews(): FigureDocument {
   return {
     ...createDefaultFigureDocument("board"),
     objects: [imageView("view-a", "asset-a", 0), imageView("view-b", "asset-a", 10)],
   };
 }
 
-function imageView(
-  id: string,
-  sourceAssetId: string,
-  xPt: number,
-): FigureDocumentV1["objects"][number] {
+function imageView(id: string, sourceAssetId: string, xPt: number): ImageViewObjectV1 {
   return {
     id,
     type: "image-view",

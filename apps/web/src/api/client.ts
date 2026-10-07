@@ -8,7 +8,7 @@ import {
   type ProjectDocumentResponse,
   type SaveDocumentResponse,
 } from "@figlab/api-contract";
-import type { FigureDocumentV1 } from "@figlab/figure-schema";
+import type { FigureDocument } from "@figlab/figure-schema";
 
 export class ApiError extends Error {
   readonly status: number;
@@ -82,7 +82,7 @@ export class FigLabClient {
   saveDocument(
     projectId: string,
     baseRevision: number,
-    document: FigureDocumentV1,
+    document: FigureDocument,
   ): Promise<SaveDocumentResponse> {
     return this.json(path(apiRoutes.projectDocument, { projectId }), {
       method: "PUT",

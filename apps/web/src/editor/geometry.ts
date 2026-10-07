@@ -1,5 +1,8 @@
-import { proportionallyResizeTransform, type ResizeAnchor } from "@figlab/editor-core";
-import type { ObjectTransformV1 } from "@figlab/figure-schema";
+import {
+  type BoxTransform,
+  proportionallyResizeTransform,
+  type ResizeAnchor,
+} from "@figlab/editor-core";
 
 import type { Point } from "./session-store";
 
@@ -55,11 +58,11 @@ export function normalizedPointInImage(point: Point, imageRect: ScreenRect): Poi
   };
 }
 
-export function resizeFromDraggedCorner(
-  transform: ObjectTransformV1,
+export function resizeFromDraggedCorner<T extends BoxTransform>(
+  transform: T,
   draggedCorner: ResizeAnchor,
   deltaPt: Point,
-): ObjectTransformV1 {
+): T {
   const growsRight = draggedCorner.endsWith("right");
   const widthPt = Math.max(1, transform.widthPt + deltaPt.x * (growsRight ? 1 : -1));
   return proportionallyResizeTransform(transform, widthPt, oppositeCorner(draggedCorner));

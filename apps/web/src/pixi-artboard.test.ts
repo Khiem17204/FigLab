@@ -1,4 +1,4 @@
-import type { FigureDocumentV1, ImageViewObjectV1 } from "@figlab/figure-schema";
+import type { FigureDocument, ImageViewObjectV1 } from "@figlab/figure-schema";
 import { BufferImageSource, Container, Graphics, Sprite, Texture } from "pixi.js";
 import { describe, expect, it } from "vitest";
 
@@ -20,8 +20,8 @@ const makeObject = (id: string, sourceAssetId: string, zIndex: number): ImageVie
   },
 });
 
-const makeDocument = (objects: ImageViewObjectV1[]): FigureDocumentV1 => ({
-  schemaVersion: 1,
+const makeDocument = (objects: ImageViewObjectV1[]): FigureDocument => ({
+  schemaVersion: 2,
   artboards: [
     { id: "board", name: "Figure 1", widthPt: 10, heightPt: 10, backgroundHex: "#FFFFFF" },
   ],

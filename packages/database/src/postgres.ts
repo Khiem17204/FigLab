@@ -17,6 +17,7 @@ import {
   assertResourceId,
   deriveDocumentAuditEvents,
   NotFoundError,
+  schemaVersionOf,
   UploadExpiredError,
 } from "./index.js";
 import * as schema from "./schema.js";
@@ -25,7 +26,7 @@ const LOCAL_USER_ID = "00000000-0000-4000-8000-000000000001";
 const LOCAL_WORKSPACE_ID = "00000000-0000-4000-8000-000000000002";
 const LOCAL_MEMBERSHIP_ID = "00000000-0000-4000-8000-000000000003";
 const defaultDocument = () => ({
-  schemaVersion: 1,
+  schemaVersion: 2,
   artboards: [
     { id: randomUUID(), name: "Figure 1", widthPt: 612, heightPt: 792, backgroundHex: "#FFFFFF" },
   ],
@@ -102,8 +103,8 @@ export class PostgresFigLabRepository implements FigLabRepository {
         [id, workspaceId, name, now],
       );
       await client.query(
-        "INSERT INTO project_documents(project_id,revision,schema_version,document,created_at,updated_at) VALUES($1,0,1,$2,$3,$3)",
-        [id, document, now],
+        "INSERT INTO project_documents(project_id,revision,schema_version,document,created_at,updated_at) VALUES($1,0,$2,$3,$4,$4)",
+        [id, document.schemaVersion, document, now],
       );
       await this.insertAudit(client, id, "PROJECT_CREATED", { name });
       return projectRow(first(result.rows));
@@ -190,8 +191,8 @@ export class PostgresFigLabRepository implements FigLabRepository {
       );
       if (prior.rowCount === 0) throw new NotFoundError();
       const updated = await client.query(
-        "UPDATE project_documents SET revision=revision+1,schema_version=1,document=$3,updated_at=now() WHERE project_id=$1 AND revision=$2 RETURNING *",
-        [projectId, baseRevision, document],
+        "UPDATE project_documents SET revision=revision+1,schema_version=$4,document=$3,updated_at=now() WHERE project_id=$1 AND revision=$2 RETURNING *",
+        [projectId, baseRevision, document, schemaVersionOf(document)],
       );
       if (updated.rowCount === 0) {
         const current = await client.query(
@@ -202,8 +203,8 @@ export class PostgresFigLabRepository implements FigLabRepository {
       }
       const record = documentRow(first(updated.rows));
       await client.query(
-        "INSERT INTO project_versions(id,project_id,revision,schema_version,document,created_at) VALUES($1,$2,$3,1,$4,now())",
-        [randomUUID(), projectId, record.revision, document],
+        "INSERT INTO project_versions(id,project_id,revision,schema_version,document,created_at) VALUES($1,$2,$3,$4,$5,now())",
+        [randomUUID(), projectId, record.revision, schemaVersionOf(document), document],
       );
       await this.insertAudit(
         client,

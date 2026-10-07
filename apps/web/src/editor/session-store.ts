@@ -2,13 +2,14 @@ import {
   createImageViewCommand,
   deleteObjectsCommand,
   MAX_HISTORY_SNAPSHOTS,
+  type ObjectTransform,
   type ResizeAnchor,
   setDisplayCommand,
   setObjectTransformsCommand,
 } from "@figlab/editor-core";
 import type {
   DisplayTransformV1,
-  FigureDocumentV1,
+  FigureDocument,
   ImageViewObjectV1,
   NormalizedRect,
   ObjectTransformV1,
@@ -20,10 +21,10 @@ import { resizeFromDraggedCorner } from "./geometry";
 export type Point = { x: number; y: number };
 
 type CropDraft = { start: Point; end: Point };
-type ObjectGesture = { objectId: string; transform: ObjectTransformV1 };
+type ObjectGesture = { objectId: string; transform: ObjectTransform };
 
 type EditorSnapshot = {
-  document: FigureDocumentV1;
+  document: FigureDocument;
   selectedObjectId: string | undefined;
 };
 
@@ -36,14 +37,14 @@ export type EditorSessionState = EditorSnapshot & {
   previewCrop: (point: Point) => void;
   commitCrop: (assetId: string, objectId: string) => void;
   beginObjectGesture: (objectId: string) => void;
-  previewObjectTransform: (transform: Omit<ObjectTransformV1, "rotationDeg">) => void;
+  previewObjectTransform: (transform: Omit<ObjectTransform, "rotationDeg">) => void;
   previewObjectDelta: (delta: Point) => void;
   previewObjectResize: (delta: Point, draggedCorner: ResizeAnchor) => void;
   commitObjectTransform: () => void;
   setDisplay: (objectId: string, display: DisplayTransformV1) => void;
   deleteSelectedObject: () => void;
   selectObject: (objectId: string | undefined) => void;
-  replaceDocument: (document: FigureDocumentV1) => void;
+  replaceDocument: (document: FigureDocument) => void;
   undo: () => void;
   redo: () => void;
 };
@@ -98,7 +99,7 @@ const pushHistory = (
   future: [],
 });
 
-export function createEditorSession(initialDocument: FigureDocumentV1) {
+export function createEditorSession(initialDocument: FigureDocument) {
   return createStore<EditorSessionState>()((set, get) => ({
     document: structuredClone(initialDocument),
     selectedObjectId: undefined,
@@ -156,7 +157,15 @@ export function createEditorSession(initialDocument: FigureDocumentV1) {
     previewObjectTransform: (transform) => {
       const gesture = get().objectGesture;
       if (gesture)
-        set({ objectGesture: { ...gesture, transform: { ...transform, rotationDeg: 0 } } });
+        set({
+          objectGesture: {
+            ...gesture,
+            transform: {
+              ...transform,
+              rotationDeg: gesture.transform.rotationDeg,
+            } as ObjectTransform,
+          },
+        });
     },
     previewObjectDelta: (delta) => {
       const gesture = get().objectGesture;

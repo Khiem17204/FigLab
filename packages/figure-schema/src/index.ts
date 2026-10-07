@@ -1,191 +1,74 @@
-import { type Static, Type } from "@sinclair/typebox";
-import { Value } from "@sinclair/typebox/value";
+import { FigureDocumentDecodeError } from "./errors.js";
+import { decodeFigureDocumentV1, type FigureDocumentV1 } from "./v1.js";
+import {
+  createDefaultFigureDocumentV2,
+  decodeFigureDocumentV2,
+  type FigureDocumentV2,
+  FigureDocumentV2Schema,
+  type FigureObjectV2,
+  FigureObjectV2Schema,
+} from "./v2.js";
 
-export const CURRENT_FIGURE_SCHEMA_VERSION = 1 as const;
+export * from "./errors.js";
+export * from "./presets.js";
+export * from "./v1.js";
+export * from "./v2.js";
 
-export const NormalizedRectSchema = Type.Object(
-  {
-    x: Type.Number({ minimum: 0, maximum: 1 }),
-    y: Type.Number({ minimum: 0, maximum: 1 }),
-    width: Type.Number({ exclusiveMinimum: 0, maximum: 1 }),
-    height: Type.Number({ exclusiveMinimum: 0, maximum: 1 }),
-  },
-  { additionalProperties: false },
-);
+/** Version every save writes. Older stored versions open through `migrateFigureDocument`. */
+export const CURRENT_FIGURE_SCHEMA_VERSION = 2 as const;
 
-export const DisplayTransformV1Schema = Type.Object(
-  {
-    brightness: Type.Number({ minimum: -1, maximum: 1 }),
-    contrast: Type.Number({ minimum: 0, maximum: 4 }),
-    gamma: Type.Number({ minimum: 0.1, maximum: 10 }),
-    invert: Type.Boolean(),
-  },
-  { additionalProperties: false },
-);
+export const FigureDocumentSchema = FigureDocumentV2Schema;
+export const FigureObjectSchema = FigureObjectV2Schema;
+export type FigureDocument = FigureDocumentV2;
+export type FigureObject = FigureObjectV2;
+export type FigureObjectType = FigureObject["type"];
 
-export const ScientificImageViewV1Schema = Type.Object(
-  {
-    sourceAssetId: Type.String({ minLength: 1 }),
-    viewport: NormalizedRectSchema,
-    display: DisplayTransformV1Schema,
-  },
-  { additionalProperties: false },
-);
+export const createDefaultFigureDocument = createDefaultFigureDocumentV2;
 
-export const ObjectTransformV1Schema = Type.Object(
-  {
-    xPt: Type.Number(),
-    yPt: Type.Number(),
-    widthPt: Type.Number({ exclusiveMinimum: 0 }),
-    heightPt: Type.Number({ exclusiveMinimum: 0 }),
-    rotationDeg: Type.Literal(0),
-  },
-  { additionalProperties: false },
-);
-
-export const ImageViewObjectV1Schema = Type.Object(
-  {
-    id: Type.String({ minLength: 1 }),
-    type: Type.Literal("image-view"),
-    artboardId: Type.String({ minLength: 1 }),
-    transform: ObjectTransformV1Schema,
-    zIndex: Type.Integer(),
-    locked: Type.Boolean(),
-    hidden: Type.Boolean(),
-    view: ScientificImageViewV1Schema,
-  },
-  { additionalProperties: false },
-);
-
-export const ArtboardV1Schema = Type.Object(
-  {
-    id: Type.String({ minLength: 1 }),
-    name: Type.String({ minLength: 1 }),
-    widthPt: Type.Number({ exclusiveMinimum: 0 }),
-    heightPt: Type.Number({ exclusiveMinimum: 0 }),
-    backgroundHex: Type.String({ pattern: "^#[0-9A-Fa-f]{6}$" }),
-  },
-  { additionalProperties: false },
-);
-
-export const FigureDocumentV1Schema = Type.Object(
-  {
-    schemaVersion: Type.Literal(1),
-    artboards: Type.Array(ArtboardV1Schema, { minItems: 1 }),
-    objects: Type.Array(ImageViewObjectV1Schema),
-    groups: Type.Tuple([]),
-    constraints: Type.Tuple([]),
-    styles: Type.Tuple([]),
-  },
-  { additionalProperties: false },
-);
-
-export type NormalizedRect = Static<typeof NormalizedRectSchema>;
-export type DisplayTransformV1 = Static<typeof DisplayTransformV1Schema>;
-export type ScientificImageViewV1 = Static<typeof ScientificImageViewV1Schema>;
-export type ObjectTransformV1 = Static<typeof ObjectTransformV1Schema>;
-export type ImageViewObjectV1 = Static<typeof ImageViewObjectV1Schema>;
-export type ArtboardV1 = Static<typeof ArtboardV1Schema>;
-export type FigureDocumentV1 = Static<typeof FigureDocumentV1Schema>;
-export type ObjectId = string;
-export type ArtboardId = string;
-export type AssetId = string;
-
-export type FigureDocumentDecodeErrorCode = "INVALID_DOCUMENT" | "UNSUPPORTED_SCHEMA_VERSION";
-
-export class FigureDocumentDecodeError extends Error {
-  readonly code: FigureDocumentDecodeErrorCode;
-  readonly details: string[];
-
-  constructor(code: FigureDocumentDecodeErrorCode, message: string, details: string[] = []) {
-    super(message);
-    this.name = "FigureDocumentDecodeError";
-    this.code = code;
-    this.details = details;
-  }
+/** Strictly decodes a current-version document (the shape editor commands produce). */
+export function decodeFigureDocument(input: unknown): FigureDocument {
+  rejectFutureVersion(input);
+  return decodeFigureDocumentV2(input);
 }
 
-export function createDefaultFigureDocument(artboardId: ArtboardId): FigureDocumentV1 {
-  return {
-    schemaVersion: CURRENT_FIGURE_SCHEMA_VERSION,
-    artboards: [
-      {
-        id: artboardId,
-        name: "Figure 1",
-        widthPt: 612,
-        heightPt: 792,
-        backgroundHex: "#FFFFFF",
-      },
-    ],
-    objects: [],
-    groups: [],
-    constraints: [],
-    styles: [],
-  };
+/**
+ * The single entry point for opening a stored or received document: validates it as its own
+ * version, then upgrades it step by step to the current version.
+ */
+export function migrateFigureDocument(input: unknown): FigureDocument {
+  rejectFutureVersion(input);
+  const version = schemaVersionOf(input);
+  if (version === 1) return migrateV1ToV2(decodeFigureDocumentV1(input));
+  if (version === 2) return decodeFigureDocumentV2(input);
+  throw new FigureDocumentDecodeError("INVALID_DOCUMENT", "Unknown figure schema version");
 }
 
-function assertSemanticInvariants(document: FigureDocumentV1): void {
-  const artboardIds = new Set<string>();
-  for (const artboard of document.artboards) {
-    if (artboardIds.has(artboard.id)) {
-      throw new FigureDocumentDecodeError("INVALID_DOCUMENT", "Artboard IDs must be unique");
-    }
-    artboardIds.add(artboard.id);
-  }
-
-  const objectIds = new Set<string>();
-  for (const object of document.objects) {
-    if (objectIds.has(object.id)) {
-      throw new FigureDocumentDecodeError("INVALID_DOCUMENT", "Object IDs must be unique");
-    }
-    objectIds.add(object.id);
-    if (!artboardIds.has(object.artboardId)) {
-      throw new FigureDocumentDecodeError(
-        "INVALID_DOCUMENT",
-        `Object ${object.id} references a missing artboard`,
-      );
-    }
-
-    const { viewport } = object.view;
-    if (viewport.x + viewport.width > 1 || viewport.y + viewport.height > 1) {
-      throw new FigureDocumentDecodeError(
-        "INVALID_DOCUMENT",
-        `Object ${object.id} has a viewport outside the source image`,
-      );
-    }
-  }
+export function serializeFigureDocument(document: FigureDocument): string {
+  return JSON.stringify(decodeFigureDocument(document));
 }
 
-export function decodeFigureDocument(input: unknown): FigureDocumentV1 {
-  if (
-    typeof input === "object" &&
-    input !== null &&
-    "schemaVersion" in input &&
-    typeof input.schemaVersion === "number" &&
-    input.schemaVersion > CURRENT_FIGURE_SCHEMA_VERSION
-  ) {
+/** v2 adds object kinds and groups; every v1 document is already a valid v2 document body. */
+function migrateV1ToV2(document: FigureDocumentV1): FigureDocumentV2 {
+  return decodeFigureDocumentV2({ ...document, schemaVersion: 2, groups: [] });
+}
+
+function schemaVersionOf(input: unknown): unknown {
+  return typeof input === "object" && input !== null && "schemaVersion" in input
+    ? input.schemaVersion
+    : undefined;
+}
+
+function rejectFutureVersion(input: unknown): void {
+  const version = schemaVersionOf(input);
+  if (typeof version === "number" && version > CURRENT_FIGURE_SCHEMA_VERSION)
     throw new FigureDocumentDecodeError(
       "UNSUPPORTED_SCHEMA_VERSION",
-      `Figure schema version ${input.schemaVersion} is newer than supported version 1`,
+      `Figure schema version ${version} is newer than supported version ${CURRENT_FIGURE_SCHEMA_VERSION}`,
     );
-  }
-
-  if (!Value.Check(FigureDocumentV1Schema, input)) {
-    const details = [...Value.Errors(FigureDocumentV1Schema, input)].map(
-      (error) => `${error.path || "/"}: ${error.message}`,
-    );
-    throw new FigureDocumentDecodeError("INVALID_DOCUMENT", "Invalid figure document", details);
-  }
-
-  const document = structuredClone(input) as FigureDocumentV1;
-  assertSemanticInvariants(document);
-  return document;
 }
 
-export function migrateFigureDocument(input: unknown): FigureDocumentV1 {
-  return decodeFigureDocument(input);
-}
-
-export function serializeFigureDocument(document: FigureDocumentV1): string {
-  return JSON.stringify(decodeFigureDocument(document));
+export function isImageView(
+  object: FigureObject,
+): object is Extract<FigureObject, { type: "image-view" }> {
+  return object.type === "image-view";
 }

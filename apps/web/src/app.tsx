@@ -1,6 +1,12 @@
 import type { AssetDescriptor, Project, ProjectDocumentResponse } from "@figlab/api-contract";
+import type { ObjectTransform } from "@figlab/editor-core";
 import { type ResizeAnchor, selectImageProvenance } from "@figlab/editor-core";
-import type { FigureDocumentV1, ImageViewObjectV1, NormalizedRect } from "@figlab/figure-schema";
+import {
+  type FigureDocument,
+  type ImageViewObjectV1,
+  isImageView,
+  type NormalizedRect,
+} from "@figlab/figure-schema";
 import { Button, Panel } from "@figlab/ui";
 import { QueryClient, QueryClientProvider, useMutation, useQuery } from "@tanstack/react-query";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -212,7 +218,7 @@ export function FigLabEditor({
   const [revision, setRevision] = useState(initial.revision);
   const [assets, setAssets] = useState<AssetDescriptor[]>([]);
   const [selectedAssetId, setSelectedAssetId] = useState(
-    initial.document.objects[0]?.view.sourceAssetId,
+    initial.document.objects.find(isImageView)?.view.sourceAssetId,
   );
   const [uploadStatus, setUploadStatus] = useState(
     "Choose a PNG, JPEG, or TIFF original to upload.",
@@ -266,7 +272,9 @@ export function FigLabEditor({
   useEffect(() => {
     let cancelled = false;
     const referencedAssetIds = [
-      ...new Set(initial.document.objects.map((object) => object.view.sourceAssetId)),
+      ...new Set(
+        initial.document.objects.filter(isImageView).map((object) => object.view.sourceAssetId),
+      ),
     ];
     void Promise.all(
       referencedAssetIds.map(async (assetId) => {
@@ -291,7 +299,9 @@ export function FigLabEditor({
     };
   }, [client, initial.document, rasterSources]);
 
-  const selected = state.document.objects.find((object) => object.id === state.selectedObjectId);
+  const selected = state.document.objects
+    .filter(isImageView)
+    .find((object) => object.id === state.selectedObjectId);
   const selectedAsset = assets.find((asset) => asset.id === selectedAssetId);
   const selectedPreviewUrl = selectedAssetId
     ? rasterSources.getPreviewUrl(selectedAssetId)
@@ -602,8 +612,8 @@ function ArtboardEditor({
   onResize,
   onCommit,
 }: {
-  document: FigureDocumentV1;
-  gesture?: { objectId: string; transform: ImageViewObjectV1["transform"] };
+  document: FigureDocument;
+  gesture?: { objectId: string; transform: ObjectTransform };
   selectedId?: string;
   rasterSources: BrowserRasterRepository;
   onSelect: (id: string) => void;
@@ -706,7 +716,7 @@ function ExportControls({
   onExport,
   status,
 }: {
-  artboard: FigureDocumentV1["artboards"][number] | undefined;
+  artboard: FigureDocument["artboards"][number] | undefined;
   onExport: (width: number, height: number) => Promise<void>;
   status: string;
 }) {
@@ -830,10 +840,7 @@ function viewportStyle(viewport: NormalizedRect, imageRect?: ScreenRect) {
     height: viewport.height * imageRect.height,
   };
 }
-function transformStyle(
-  transform: ImageViewObjectV1["transform"],
-  screen?: ArtboardScreenTransform,
-) {
+function transformStyle(transform: ObjectTransform, screen?: ArtboardScreenTransform) {
   if (!screen) return { display: "none" };
   return {
     left: screen.leftPx + transform.xPt * screen.scale,

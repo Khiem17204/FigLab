@@ -1,5 +1,5 @@
-import { normalizedToPixelRect } from "@figlab/editor-core";
-import type { FigureDocumentV1, ImageViewObjectV1, ObjectTransformV1 } from "@figlab/figure-schema";
+import { normalizedToPixelRect, type ObjectTransform } from "@figlab/editor-core";
+import { type FigureDocument, type ImageViewObjectV1, isImageView } from "@figlab/figure-schema";
 import { Application, Assets, Container, Graphics, Sprite, type Texture } from "pixi.js";
 import { useEffect, useRef } from "react";
 import { type ArtboardScreenTransform, artboardScreenTransform } from "./editor/geometry";
@@ -14,9 +14,9 @@ export async function buildPixiArtboardScene({
   isDisposed = () => false,
 }: {
   stage: Container;
-  document: FigureDocumentV1;
+  document: FigureDocument;
   screenTransform: ArtboardScreenTransform;
-  preview?: { objectId: string; transform: ObjectTransformV1 };
+  preview?: { objectId: string; transform: ObjectTransform };
   loadTexture: (object: ImageViewObjectV1) => Promise<Texture | undefined>;
   isDisposed?: () => boolean;
 }) {
@@ -33,6 +33,7 @@ export async function buildPixiArtboardScene({
   const rasterLayer = new Container({ sortableChildren: true });
   stage.addChild(rasterLayer);
   const objects = document.objects
+    .filter(isImageView)
     .filter((object) => !object.hidden)
     .map((object, documentIndex) => ({ documentIndex, object }))
     .sort(
@@ -61,8 +62,8 @@ export function PixiArtboard({
   rasterSources,
   screenTransform,
 }: {
-  document: FigureDocumentV1;
-  preview?: { objectId: string; transform: ObjectTransformV1 };
+  document: FigureDocument;
+  preview?: { objectId: string; transform: ObjectTransform };
   rasterSources: BrowserRasterRepository;
   screenTransform?: ArtboardScreenTransform;
 }) {

@@ -30,7 +30,12 @@ import {
   SingleUserAuthorizer,
   UploadExpiredError,
 } from "@figlab/database";
-import { decodeFigureDocument, FigureDocumentDecodeError } from "@figlab/figure-schema";
+import {
+  type FigureDocument,
+  FigureDocumentDecodeError,
+  isImageView,
+  migrateFigureDocument,
+} from "@figlab/figure-schema";
 import { createObjectStoreFromEnv, type ObjectStore } from "@figlab/storage";
 import { Type } from "@sinclair/typebox";
 import Fastify, { type FastifyInstance } from "fastify";
@@ -233,7 +238,7 @@ export async function buildApp(dependencies: AppDependencies): Promise<FastifyIn
     async (request) => {
       const id = (request.params as { projectId: string }).projectId;
       await projectFor(request.principal, id);
-      return dependencies.repository.getDocument(id);
+      return currentDocument(await dependencies.repository.getDocument(id));
     },
   );
   app.put(
@@ -257,7 +262,7 @@ export async function buildApp(dependencies: AppDependencies): Promise<FastifyIn
       const id = (request.params as { projectId: string }).projectId;
       await projectFor(request.principal, id);
       const body = request.body as { baseRevision: number; document: unknown };
-      const document = decodeFigureDocument(body.document);
+      const document = migrateFigureDocument(body.document);
       await dependencies.repository.assertReadyAssets(id, sourceAssetIds(document));
       const saved = await dependencies.repository.saveDocument(id, body.baseRevision, document);
       if (saved.kind === "conflict")
@@ -266,7 +271,7 @@ export async function buildApp(dependencies: AppDependencies): Promise<FastifyIn
           message: "Document revision conflict",
           currentRevision: saved.currentRevision,
         });
-      return saved.document;
+      return currentDocument(saved.document);
     },
   );
   app.post(
@@ -510,12 +515,14 @@ function resourceId(value: string): string {
   assertResourceId(value);
   return value;
 }
-function sourceAssetIds(document: {
-  objects: { type: string; view?: { sourceAssetId: string } }[];
-}): string[] {
-  return document.objects
-    .filter((object) => object.type === "image-view" && object.view)
-    .map((object) => object.view?.sourceAssetId ?? "");
+function sourceAssetIds(document: FigureDocument): string[] {
+  return document.objects.filter(isImageView).map((object) => object.view.sourceAssetId);
+}
+/** Stored documents may be older versions; responses always carry the current version. */
+function currentDocument<T extends { document: unknown }>(
+  record: T,
+): T & { document: FigureDocument } {
+  return { ...record, document: migrateFigureDocument(record.document) };
 }
 function isValidUpload(
   input: {

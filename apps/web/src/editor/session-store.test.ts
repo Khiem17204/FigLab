@@ -98,7 +98,7 @@ describe("editor session crop commands", () => {
     session
       .getState()
       .setDisplay("view-1", { brightness: 7, contrast: -1, gamma: 99, invert: true });
-    expect(session.getState().document.objects[0]?.view.display).toEqual({
+    expect(imageViewAt(session, 0)?.view.display).toEqual({
       brightness: 1,
       contrast: 0,
       gamma: 10,
@@ -106,14 +106,14 @@ describe("editor session crop commands", () => {
     });
 
     session.getState().undo();
-    expect(session.getState().document.objects[0]?.view.display).toEqual({
+    expect(imageViewAt(session, 0)?.view.display).toEqual({
       brightness: 0,
       contrast: 1,
       gamma: 1,
       invert: false,
     });
     session.getState().redo();
-    expect(session.getState().document.objects[0]?.view.display.invert).toBe(true);
+    expect(imageViewAt(session, 0)?.view.display.invert).toBe(true);
   });
 
   it("deletes the selected panel as an undoable document command", () => {
@@ -135,4 +135,9 @@ function sessionWithView() {
   session.getState().previewCrop({ x: 0.5, y: 0.5 });
   session.getState().commitCrop("asset-1", "view-1");
   return session;
+}
+
+function imageViewAt(session: ReturnType<typeof createEditorSession>, index: number) {
+  const object = session.getState().document.objects[index];
+  return object?.type === "image-view" ? object : undefined;
 }
