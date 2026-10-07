@@ -1,10 +1,12 @@
-import {
-  type DisplayTransformV1,
-  type FigureDocument,
-  isImageView,
-  type NormalizedRect,
-} from "@figlab/figure-schema";
+import type { DisplayTransformV1, NormalizedRect } from "@figlab/figure-schema";
 import { fromArrayBuffer } from "geotiff";
+
+export * from "./canvas.js";
+export * from "./encode.js";
+export * from "./export.js";
+export * from "./fonts.js";
+export * from "./scene.js";
+export * from "./svg.js";
 
 export const MAX_RASTER_PIXELS = 100_000_000;
 export const MAX_EXPORT_EDGE_PX = 16_384;
@@ -368,135 +370,16 @@ export async function decodeBrowserRaster(
   return region;
 }
 
-export async function composeArtboardPng(
-  document: FigureDocument,
-  artboardId: string,
-  widthPx: number,
-  heightPx: number,
-  resolver: RasterSourceResolver,
-): Promise<Uint8Array> {
-  validateExportDimensions(widthPx, heightPx);
-  const artboard = document.artboards.find((candidate) => candidate.id === artboardId);
-  if (artboard === undefined) throw new Error(`Artboard ${artboardId} was not found`);
-  const canvas = new Uint8Array(widthPx * heightPx * 4);
-  fillBackground(canvas, artboard.backgroundHex);
-  const views = document.objects
-    .filter(isImageView)
-    .filter((object) => object.artboardId === artboardId && !object.hidden)
-    .slice()
-    .sort((left, right) => left.zIndex - right.zIndex);
-  for (const object of views) {
-    const source = await resolver.describe(object.view.sourceAssetId);
-    const sourceRect = normalizedToPixelRect(object.view.viewport, source.widthPx, source.heightPx);
-    const region = await resolver.getRegion(object.view.sourceAssetId, sourceRect, 0);
-    compositeImageView(
-      canvas,
-      widthPx,
-      heightPx,
-      artboard.widthPt,
-      artboard.heightPt,
-      object.transform,
-      region,
-      object.view.display,
-    );
-  }
-  return encodePngRgba(canvas, widthPx, heightPx);
-}
-
-async function encodePngRgba(
-  data: Uint8Array,
-  widthPx: number,
-  heightPx: number,
-): Promise<Uint8Array> {
-  const rowByteLength = widthPx * 4;
-  const scanlines = new Uint8Array((rowByteLength + 1) * heightPx);
-  for (let y = 0; y < heightPx; y += 1) {
-    const sourceOffset = y * rowByteLength;
-    const targetOffset = y * (rowByteLength + 1);
-    scanlines[targetOffset] = 0;
-    scanlines.set(data.subarray(sourceOffset, sourceOffset + rowByteLength), targetOffset + 1);
-  }
-
-  const header = new Uint8Array(13);
-  const headerView = new DataView(header.buffer);
-  headerView.setUint32(0, widthPx, false);
-  headerView.setUint32(4, heightPx, false);
-  header[8] = 8;
-  header[9] = 6;
-  const compressed = await deflate(scanlines);
-  return concatenateBytes([
-    new Uint8Array([137, 80, 78, 71, 13, 10, 26, 10]),
-    pngChunk("IHDR", header),
-    pngChunk("IDAT", compressed),
-    pngChunk("IEND", new Uint8Array()),
-  ]);
-}
-
-async function deflate(data: Uint8Array): Promise<Uint8Array> {
-  if (typeof CompressionStream === "undefined") {
-    throw new Error("PNG export requires CompressionStream support");
-  }
-  const compression = new CompressionStream("deflate");
-  const compressed = readStream(compression.readable);
-  const writer = compression.writable.getWriter();
-  const input = new Uint8Array(new ArrayBuffer(data.byteLength));
-  input.set(data);
-  await writer.write(input);
-  await writer.close();
-  return compressed;
-}
-
-async function readStream(stream: ReadableStream<Uint8Array>): Promise<Uint8Array> {
-  const reader = stream.getReader();
-  const chunks: Uint8Array[] = [];
-  while (true) {
-    const { done, value } = await reader.read();
-    if (done) return concatenateBytes(chunks);
-    chunks.push(value);
-  }
-}
-
-function pngChunk(type: string, data: Uint8Array): Uint8Array {
-  const chunk = new Uint8Array(data.length + 12);
-  const view = new DataView(chunk.buffer);
-  view.setUint32(0, data.length, false);
-  for (let index = 0; index < 4; index += 1) chunk[index + 4] = type.charCodeAt(index);
-  chunk.set(data, 8);
-  view.setUint32(data.length + 8, crc32(chunk.subarray(4, data.length + 8)), false);
-  return chunk;
-}
-
-function crc32(data: Uint8Array): number {
-  let crc = 0xffff_ffff;
-  for (const byte of data) {
-    crc ^= byte;
-    for (let bit = 0; bit < 8; bit += 1) {
-      crc = (crc >>> 1) ^ (crc & 1 ? 0xedb8_8320 : 0);
-    }
-  }
-  return (crc ^ 0xffff_ffff) >>> 0;
-}
-
-function concatenateBytes(chunks: ReadonlyArray<Uint8Array>): Uint8Array {
-  const output = new Uint8Array(chunks.reduce((length, chunk) => length + chunk.length, 0));
-  let offset = 0;
-  for (const chunk of chunks) {
-    output.set(chunk, offset);
-    offset += chunk.length;
-  }
-  return output;
-}
-
-function validateExportDimensions(widthPx: number, heightPx: number): void {
+export function validateExportDimensions(widthPx: number, heightPx: number): void {
   if (!Number.isInteger(widthPx) || !Number.isInteger(heightPx) || widthPx < 1 || heightPx < 1)
     throw new RangeError("Export dimensions must be positive integers");
   if (widthPx > MAX_EXPORT_EDGE_PX || heightPx > MAX_EXPORT_EDGE_PX)
-    throw new RangeError("PNG export cannot exceed 16,384 px per edge");
+    throw new RangeError("Export cannot exceed 16,384 px per edge");
   if (widthPx * heightPx > MAX_EXPORT_PIXELS)
-    throw new RangeError("PNG export cannot exceed 100,000,000 pixels");
+    throw new RangeError("Export cannot exceed 100,000,000 pixels");
 }
 
-function fillBackground(data: Uint8Array, hex: string): void {
+export function fillBackground(data: Uint8Array, hex: string): void {
   const red = Number.parseInt(hex.slice(1, 3), 16);
   const green = Number.parseInt(hex.slice(3, 5), 16);
   const blue = Number.parseInt(hex.slice(5, 7), 16);
@@ -508,7 +391,7 @@ function fillBackground(data: Uint8Array, hex: string): void {
   }
 }
 
-function compositeImageView(
+export function compositeImageView(
   canvas: Uint8Array,
   canvasWidth: number,
   canvasHeight: number,
@@ -569,7 +452,7 @@ function sourceAlphaSample(sample: number, bitDepth: 8 | 16): number {
   return Math.round((sample / (bitDepth === 8 ? 255 : 65_535)) * 255);
 }
 
-function compositeSourceOver(
+export function compositeSourceOver(
   destination: Uint8Array,
   index: number,
   sourceRed: number,
@@ -631,7 +514,7 @@ function sampleAtCanvas(canvas: Uint8Array, index: number): number {
   return sample;
 }
 
-function normalizedToPixelRect(
+export function normalizedToPixelRect(
   viewport: NormalizedRect,
   widthPx: number,
   heightPx: number,

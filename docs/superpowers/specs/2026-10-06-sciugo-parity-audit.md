@@ -73,7 +73,7 @@ Effort key, in agent-days including tests: **S** ≤ 1, **M** 1–3, **L** 3–6
 
 | Sciugo feature (evidence) | FigLab today | Proposed design | Effort |
 | --- | --- | --- | --- |
-| Text: bold, italic, underline, color, background, angled text, multi-line, Greek-letter shortcuts (`\alpha`→α) **[B][R]** | **Missing.** | A `text` object with runs (bold, italic, underline, sub/superscript), font size, color, rotation, and alignment. Greek and `\symbol` replacement is a pure input helper. One bundled Arial-metric font (Arimo, Apache-2.0) so preview, PNG, PDF, and SVG measure the same. | L |
+| Text: bold, italic, underline, color, background, angled text, multi-line, Greek-letter shortcuts (`\alpha`→α) **[B][R]** | **Missing.** | A `text` object with runs (bold, italic, underline, sub/superscript), font size, color, rotation, and alignment. Greek and `\symbol` replacement is a pure input helper. One bundled Arial-metric font (Arimo, SIL OFL 1.1) so preview, PNG, PDF, and SVG measure the same. | L |
 | Brackets and underlines on label cells ("put brackets above/below the line"), MW pointer lines **[B][W]**. Free arrows and shapes were **not found**. | **Missing.** | A `shape` object for line, arrow, rectangle, ellipse, and bracket, with stroke width, color, dash, and head style. | M |
 | Insets/zoom: "Choose region", "Edit subregion", a region outline drawn as Box or Lines with a color **[O][B]** | **Partial.** Two crops of the same asset are already provenance siblings, but nothing draws the link. | A `zoom-link` object `{sourceViewId, insetViewId, style}`. The box on the source panel is *computed* from the inset's viewport, with optional connector lines. It cannot be drawn in the wrong place, and moving the inset crop moves the box. | M |
 | Scale bars: "Set Image Resolution", units nm…m, "Can't handle anisotropic resolution yet" **[B]**. Calibration is manual. | **Missing.** The jobs only keep sharp's `density` for PNG/JPEG. | **Calibration** per asset in the document: `assetCalibrations[assetId] = {umPerPxX, umPerPxY, source: "tiff-tags" \| "imagej" \| "ome" \| "manual"}`. The verifier pre-fills it from TIFF tags, ImageJ `unit=` descriptions, and OME `PhysicalSize*`. A `scale-bar` object bound to a view stores the length in physical units, and the bar width is derived from calibration, viewport, and panel size. The integrity report flags manual calibration. | M |
@@ -224,4 +224,4 @@ commit series with unit, integration, e2e, and live tests.
 - **D3** Sharing: **workspace membership only**; no per-project grants.
 - **D4** Audit retention: **keep** audit rows after a project is deleted (tombstone the project).
 - **D5** Lab workspaces: **stay in P2**, so P0 and P1 do not touch production authorization.
-- **D6** Fonts: **bundle Arimo** (Apache-2.0, Arial-metric) for consistent export text.
+- **D6** Fonts: **bundle Arimo** (SIL OFL 1.1, Arial-metric) for consistent export text.
