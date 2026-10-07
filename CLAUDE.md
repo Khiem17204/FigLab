@@ -42,8 +42,12 @@ Production: https://figlab.netlify.app (Netlify site `figlab`) on Supabase proje
 - Document changes need a new schema version plus the migration entry point in
   `packages/figure-schema`; old documents must still open.
 - Tests rely on accessible names ("Upload original", "Create project", "Export PNG",
-  "Brightness", "Invert", "Move view-…", "Show in Original", …). If one changes, update
-  `apps/web/e2e`, `tests/e2e`, and `tests/live` together.
+  "Brightness", "Invert", "Move view-…", "Show in Original", "Original · <file>", the
+  "Rename project" dialog with "Save name", the "Delete “<name>”?" dialog with "Delete project",
+  …) and on the exact "Saved" status in `.editor-header`. If one changes, update `apps/web/e2e`,
+  `tests/e2e`, and `tests/live` together.
+- UI uses `@figlab/ui` tokens and components; `apps/web/e2e/a11y.spec.ts` runs axe (WCAG 2.2 AA)
+  in light and dark. Toasts are not `status`/`alert` regions, so keep inline status text too.
 
 ## Repository map
 
@@ -58,7 +62,7 @@ Production: https://figlab.netlify.app (Netlify site `figlab`) on Supabase proje
 | `packages/database` | Drizzle tables, `pg` repository, in-memory repository, `Principal`/`Authorizer`, SQL migrations. |
 | `packages/storage` | `ObjectStore` interface; S3/MinIO and Supabase Storage adapters, picked by `STORAGE_DRIVER`; fake store. |
 | `packages/api-contract` | Routes, DTOs, error codes, limits. Snapshot: `openapi/openapi-v1.yaml`. |
-| `packages/ui` | Shared React primitives. |
+| `packages/ui` | Design system: `--fl-*` tokens (light + dusk-blue dark), self-hosted fonts, and accessible primitives (Button, Field, Slider, Section, Toolbar, Dialog, Toast, DropZone, …). See `packages/ui/README.md`. |
 | `netlify/`, `scripts/build-netlify-functions.mjs` | Function entries (`api`, `jobs-background`, `jobs-sweep`) and the esbuild bundling step. |
 | `deploy/` | Compose stack, Dockerfiles, Caddy, `migrate.sh`, Supabase root CA. |
 | `supabase/config.toml` | Supabase Auth/API settings for `supabase config push`. |
