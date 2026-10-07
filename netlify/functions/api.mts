@@ -10,7 +10,10 @@ let app: Promise<FastifyInstance> | undefined;
 
 function getApp(): Promise<FastifyInstance> {
   app ??= createAppFromEnv(process.env, {
-    maxConnections: 3,
+    // Supabase's session pooler admits 15 clients across every warm instance of every deploy,
+    // and frozen instances keep theirs: hold few, and release them quickly.
+    maxConnections: 2,
+    idleTimeoutMillis: 1_000,
     onJobsEnqueued: () => {
       const current = invocation.getStore();
       if (current) current.context.waitUntil(triggerJobDrain(current.origin));

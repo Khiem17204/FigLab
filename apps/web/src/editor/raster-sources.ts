@@ -23,6 +23,8 @@ export class BrowserRasterRepository implements RasterSourceResolver {
   private readonly regions = new Map<string, RasterRegion>();
   private readonly tiffDescriptions = new Map<string, RasterDescription>();
   private readonly previewUrls = new Map<string, string>();
+  /** Originals still downloading or decoding; reads of them wait instead of failing. */
+  private readonly loading = new Map<string, Promise<void>>();
   private tiffClient: TiffRasterClient | undefined;
 
   constructor(
@@ -42,6 +44,24 @@ export class BrowserRasterRepository implements RasterSourceResolver {
     const region = await this.decode(bytes, mimeType);
     this.regions.set(assetId, region);
     this.previewUrls.set(assetId, createPreviewUrl(bytes, mimeType));
+  }
+
+  /**
+   * Records that an original is on its way (download plus `add`). Until it settles, `describe`
+   * and `getRegion` for that asset wait for it, so exports and checks started early still read
+   * original pixels.
+   */
+  track(assetId: string, load: Promise<void>): Promise<void> {
+    const settled = load.finally(() => {
+      if (this.loading.get(assetId) === settled) this.loading.delete(assetId);
+    });
+    this.loading.set(assetId, settled);
+    return settled;
+  }
+
+  private async ready(assetId: string): Promise<void> {
+    if (this.has(assetId)) return;
+    await this.loading.get(assetId)?.catch(() => undefined);
   }
 
   has(assetId: string): boolean {
@@ -140,6 +160,7 @@ export class BrowserRasterRepository implements RasterSourceResolver {
   }
 
   async describe(assetId: string): Promise<RasterDescription> {
+    await this.ready(assetId);
     const tiff = this.tiffDescriptions.get(assetId);
     if (tiff) return { ...tiff };
     const region = this.required(assetId);
@@ -157,6 +178,7 @@ export class BrowserRasterRepository implements RasterSourceResolver {
     pyramidLevel = 0,
     plane = 0,
   ): Promise<RasterRegion> {
+    await this.ready(assetId);
     if (this.tiffDescriptions.has(assetId))
       return this.requiredTiffClient().read(assetId, sourceRect, pyramidLevel, plane);
     if (pyramidLevel !== 0) throw new Error("Raster pyramids are not supported");

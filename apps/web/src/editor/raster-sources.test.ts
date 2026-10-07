@@ -121,6 +121,32 @@ describe("browser raster sources", () => {
       renderDisplayRgba(region, { brightness: 0, contrast: 1, gamma: 1, invert: false }),
     ).toEqual(new Uint8ClampedArray([255, 0, 0, 0, 0, 255, 0, 127]));
   });
+
+  it("waits for originals that are still loading instead of failing", async () => {
+    const repository = new BrowserRasterRepository(async () => ({
+      data: new Uint8Array([1, 2, 3, 4]),
+      sourceRect: { x: 0, y: 0, width: 2, height: 2 },
+      widthPx: 2,
+      heightPx: 2,
+      bitDepth: 8,
+      channels: 1,
+      pyramidLevel: 0,
+    }));
+    let finish: () => void = () => undefined;
+    const download = new Promise<void>((resolve) => {
+      finish = resolve;
+    });
+    void repository.track(
+      "late",
+      download.then(() => repository.add("late", new ArrayBuffer(1), "image/png")),
+    );
+    const region = repository.getRegion("late", { x: 1, y: 1, width: 1, height: 1 });
+    const description = repository.describe("late");
+    finish();
+    expect((await region).data).toEqual(new Uint8Array([4]));
+    expect((await description).widthPx).toBe(2);
+    await expect(repository.describe("never-tracked")).rejects.toThrow("is not loaded");
+  });
 });
 
 function previewDocument() {

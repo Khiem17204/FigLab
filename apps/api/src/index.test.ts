@@ -592,6 +592,121 @@ describe("buildApp", () => {
     await app.close();
   });
 
+  it("stores documents exactly as sent, without coercing nulls in the body", async () => {
+    const repository = new InMemoryFigLabRepository();
+    const principal = await repository.bootstrapSingleUser();
+    const project = await repository.createProject(principal.workspaceId, "Exact");
+    const upload = await repository.createUpload({
+      projectId: project.id,
+      filename: "blot.png",
+      mimeType: "image/png",
+      contentLength: 10,
+      checksumSha256: "a".repeat(64),
+      storageKey: "exact-key",
+    });
+    await repository.updateAsset(upload.assetId, {
+      status: "ready",
+      widthPx: 100,
+      heightPx: 50,
+      metadata: {},
+    });
+    const board = {
+      id: "board",
+      name: "Figure 1",
+      widthPt: 612,
+      heightPt: 792,
+      backgroundHex: "#FFFFFF",
+    };
+    const base = { artboardId: "board", locked: false, hidden: false };
+    const document = {
+      schemaVersion: 3,
+      sources: [
+        { assetId: upload.assetId, widthPx: 100, heightPx: 50, calibration: null, markers: [] },
+      ],
+      artboards: [board],
+      objects: [
+        {
+          ...base,
+          id: "blot",
+          type: "image-view",
+          zIndex: 0,
+          transform: { xPt: 50, yPt: 100, widthPt: 200, heightPt: 100, rotationDeg: 0 },
+          view: {
+            sourceAssetId: upload.assetId,
+            plane: 0,
+            channel: null,
+            viewport: { x: 0, y: 0, width: 1, height: 1 },
+            rotationDeg: 0,
+            flipX: false,
+            flipY: false,
+            display: {
+              brightness: 0,
+              contrast: 1,
+              gamma: 1,
+              invert: false,
+              levels: { black: 0, white: 1 },
+              lut: "none",
+            },
+          },
+        },
+        {
+          ...base,
+          id: "lanes",
+          type: "lane-table",
+          zIndex: 1,
+          transform: { xPt: 50, yPt: 80, widthPt: 200, heightPt: 12, rotationDeg: 0 },
+          laneTable: {
+            targetObjectId: "blot",
+            lanes: 6,
+            laneCenters: null,
+            placement: "above",
+            rows: [{ cells: [{ text: "Condition", span: 6, underline: true }] }],
+            fontSizePt: 7,
+            colorHex: "#000000",
+            gapPt: 2,
+          },
+        },
+        {
+          ...base,
+          id: "note",
+          type: "text",
+          zIndex: 2,
+          transform: { xPt: 10, yPt: 10, widthPt: 40, heightPt: 12, rotationDeg: 0 },
+          text: {
+            content: "n = 3",
+            style: {
+              fontSizePt: 8,
+              bold: false,
+              italic: false,
+              underline: false,
+              colorHex: "#000000",
+              align: "start",
+              backgroundHex: null,
+            },
+          },
+        },
+      ],
+      groups: [],
+      constraints: [],
+      styles: [],
+    };
+    const app = await buildApp({ repository, store: new FakeObjectStore(), principal });
+    const saved = await app.inject({
+      method: "PUT",
+      url: `/v1/projects/${project.id}/document`,
+      payload: { baseRevision: 0, document },
+    });
+    expect(saved.statusCode).toBe(200);
+    expect((await repository.getDocument(project.id)).document).toEqual(document);
+    // Query strings still coerce.
+    expect(
+      (
+        await app.inject({ method: "GET", url: `/v1/projects/${project.id}/audit-events?limit=1` })
+      ).json().events,
+    ).toHaveLength(1);
+    await app.close();
+  });
+
   it("requests integrity reports for saved revisions and hides other projects' reports", async () => {
     const repository = new InMemoryFigLabRepository();
     const principal = await repository.bootstrapSingleUser();

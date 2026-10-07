@@ -62,6 +62,7 @@ import {
   UnauthorizedError,
 } from "./auth.js";
 import { createWorkspaceProject, registerCollaborationRoutes } from "./collaboration.js";
+import { validatorCompiler } from "./validation.js";
 
 const params = Type.Object({ projectId: Type.String({ minLength: 1 }) });
 const uploadParams = Type.Object({ uploadId: Type.String({ minLength: 1 }) });
@@ -141,7 +142,8 @@ export async function buildApp(dependencies: AppDependencies): Promise<FastifyIn
     );
     resolvePrincipal = singleUserResolver(dependencies.principal);
   }
-  const app = Fastify({ logger: false, ajv: { customOptions: { removeAdditional: false } } });
+  const app = Fastify({ logger: false });
+  app.setValidatorCompiler(validatorCompiler);
   const authorizer = dependencies.authorizer ?? new MembershipAuthorizer(dependencies.repository);
   const jobsEnqueued = () => {
     try {
@@ -625,7 +627,11 @@ export async function buildApp(dependencies: AppDependencies): Promise<FastifyIn
 /** Builds the API from environment variables without binding a port. */
 export async function createAppFromEnv(
   environment: NodeJS.ProcessEnv = process.env,
-  options: { maxConnections?: number; onJobsEnqueued?: () => void } = {},
+  options: {
+    maxConnections?: number;
+    idleTimeoutMillis?: number;
+    onJobsEnqueued?: () => void;
+  } = {},
 ): Promise<FastifyInstance> {
   const publicAppUrl = required(environment, "PUBLIC_APP_URL");
   const authMode = environment.AUTH_MODE ?? "single-user";
@@ -636,6 +642,7 @@ export async function createAppFromEnv(
     assertSingleUserConfiguration(publicAppUrl, allowInsecureSingleUserRemote);
   const { repository, close } = createPostgresRepository(required(environment, "DATABASE_URL"), {
     ...(options.maxConnections ? { maxConnections: options.maxConnections } : {}),
+    ...(options.idleTimeoutMillis ? { idleTimeoutMillis: options.idleTimeoutMillis } : {}),
     ...(environment.DATABASE_CA_CERT ? { caCert: environment.DATABASE_CA_CERT } : {}),
   });
   const identity =
