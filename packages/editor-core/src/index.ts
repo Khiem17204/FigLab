@@ -19,6 +19,7 @@ export * from "./arrange.js";
 export * from "./artboards.js";
 export * from "./bounds.js";
 export * from "./labels.js";
+export * from "./templates.js";
 
 export type PixelRect = { x: number; y: number; width: number; height: number };
 export type EditorCommand = (document: FigureDocument) => FigureDocument;

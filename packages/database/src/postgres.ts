@@ -1,25 +1,47 @@
 import { randomUUID } from "node:crypto";
-import { and, eq } from "drizzle-orm";
 import { drizzle, type NodePgDatabase } from "drizzle-orm/node-postgres";
 import { Pool, type PoolClient, type QueryResultRow } from "pg";
 import type {
   ActorOptions,
+  AdminJob,
+  AdminOverview,
+  AdminUser,
+  AdminWorkspace,
   AssetRecord,
   AuditEvent,
   AuditEventPage,
   AuthUserIdentity,
+  CommentAnchor,
+  CommentRecord,
+  CreateProjectOptions,
   DocumentRecord,
   ExportRecord,
   FigLabRepository,
+  FolderRecord,
   IntegrityReportRecord,
+  InvitePreview,
+  InviteRecord,
+  InviteRole,
+  InviteStatus,
   Principal,
+  ProjectFilter,
   ProjectRecord,
+  ProjectSearchHit,
+  TemplateRecord,
+  TemplateSummary,
   UploadRecord,
   VersionRecord,
   VersionSummary,
+  WorkspaceKind,
+  WorkspaceMember,
+  WorkspaceRole,
+  WorkspaceSummary,
 } from "./index.js";
 import {
+  assertInviteUsable,
   assertResourceId,
+  byWorkspaceOrder,
+  ConflictError,
   deriveDocumentAuditEvents,
   deriveDocumentDiff,
   exportAuditDetails,
@@ -83,15 +105,15 @@ export class PostgresFigLabRepository implements FigLabRepository {
         [identity.id, identity.email, now],
       );
       const membership = await client.query<{ workspace_id: string }>(
-        "SELECT workspace_id FROM workspace_members WHERE user_id=$1 AND role='owner' ORDER BY created_at LIMIT 1",
+        "SELECT m.workspace_id FROM workspace_members m JOIN workspaces w ON w.id=m.workspace_id WHERE m.user_id=$1 AND m.role='owner' AND w.kind='personal' ORDER BY m.created_at LIMIT 1",
         [identity.id],
       );
       const existing = membership.rows[0]?.workspace_id;
       if (existing) return { id: identity.id, email: identity.email, workspaceId: existing };
       const workspaceId = randomUUID();
       await client.query(
-        "INSERT INTO workspaces(id,name,created_at,updated_at) VALUES($1,$2,$3,$3)",
-        [workspaceId, "Personal workspace", now],
+        "INSERT INTO workspaces(id,name,kind,created_by,created_at,updated_at) VALUES($1,$2,'personal',$3,$4,$4)",
+        [workspaceId, "Personal workspace", identity.id, now],
       );
       await client.query(
         "INSERT INTO workspace_members(id,workspace_id,user_id,role,created_at,updated_at) VALUES($1,$2,$3,'owner',$4,$4)",
@@ -103,59 +125,703 @@ export class PostgresFigLabRepository implements FigLabRepository {
   async createProject(
     workspaceId: string,
     name: string,
-    options: ActorOptions = {},
+    options: CreateProjectOptions = {},
   ): Promise<ProjectRecord> {
     assertResourceId(workspaceId);
     return this.transaction(async (client) => {
+      if (options.folderId) await this.folderIn(client, workspaceId, options.folderId);
       const id = randomUUID();
       const now = new Date();
-      const document = defaultDocument();
+      const document = options.document ?? defaultDocument();
       const result = await client.query(
-        "INSERT INTO projects(id,workspace_id,name,status,created_at,updated_at) VALUES($1,$2,$3,'active',$4,$4) RETURNING *",
-        [id, workspaceId, name, now],
+        "INSERT INTO projects(id,workspace_id,name,status,folder_id,created_by,created_at,updated_at) VALUES($1,$2,$3,'active',$4,$5,$6,$6) RETURNING *",
+        [id, workspaceId, name, options.folderId ?? null, options.actorUserId ?? null, now],
       );
       await client.query(
         "INSERT INTO project_documents(project_id,revision,schema_version,document,created_at,updated_at) VALUES($1,0,$2,$3,$4,$4)",
-        [id, document.schemaVersion, document, now],
+        [id, schemaVersionOf(document), document, now],
       );
       await this.insertAudit(client, id, "PROJECT_CREATED", { name }, options.actorUserId);
       return projectRow(first(result.rows));
     });
   }
-  async listProjects(workspaceId: string): Promise<ProjectRecord[]> {
+  async listProjects(workspaceId: string, filter: ProjectFilter = {}): Promise<ProjectRecord[]> {
     assertResourceId(workspaceId);
-    const rows = await this.db
-      .select()
-      .from(schema.projects)
-      .where(
-        and(eq(schema.projects.workspaceId, workspaceId), eq(schema.projects.status, "active")),
-      )
-      .orderBy(schema.projects.createdAt);
-    return rows.map((row) => ({
-      id: row.id,
-      workspaceId: row.workspaceId,
-      name: row.name,
-      status: row.status as ProjectRecord["status"],
-      createdAt: row.createdAt.toISOString(),
-      updatedAt: row.updatedAt.toISOString(),
-    }));
+    const conditions = ["workspace_id=$1", "status='active'"];
+    const values: unknown[] = [workspaceId];
+    const query = filter.query?.trim().toLowerCase();
+    if (query) {
+      values.push(query);
+      conditions.push(`strpos(lower(name),$${values.length})>0`);
+    }
+    if (filter.folderId === null) conditions.push("folder_id IS NULL");
+    else if (filter.folderId !== undefined) {
+      assertResourceId(filter.folderId);
+      values.push(filter.folderId);
+      conditions.push(`folder_id=$${values.length}`);
+    }
+    if (filter.createdBy) {
+      assertResourceId(filter.createdBy);
+      values.push(filter.createdBy);
+      conditions.push(`created_by=$${values.length}`);
+    }
+    const result = await this.pool.query(
+      `SELECT * FROM projects WHERE ${conditions.join(" AND ")} ORDER BY created_at, id`,
+      values,
+    );
+    return result.rows.map(projectRow);
   }
   async getProject(projectId: string): Promise<ProjectRecord> {
     assertResourceId(projectId);
-    const rows = await this.db
-      .select()
-      .from(schema.projects)
-      .where(eq(schema.projects.id, projectId));
-    const row = rows[0];
-    if (!row || row.status === "deleted") throw new NotFoundError();
+    const result = await this.pool.query("SELECT * FROM projects WHERE id=$1", [projectId]);
+    const row = first(result.rows);
+    if (row.status === "deleted") throw new NotFoundError();
+    return projectRow(row);
+  }
+  async moveProject(
+    projectId: string,
+    folderId: string | null,
+    options: ActorOptions = {},
+  ): Promise<ProjectRecord> {
+    assertResourceId(projectId);
+    return this.transaction(async (client) => {
+      const project = projectRow(
+        first(
+          (
+            await client.query(
+              "SELECT * FROM projects WHERE id=$1 AND status<>'deleted' FOR UPDATE",
+              [projectId],
+            )
+          ).rows,
+        ),
+      );
+      if (folderId) await this.folderIn(client, project.workspaceId, folderId);
+      const result = await client.query(
+        "UPDATE projects SET folder_id=$2,updated_at=now() WHERE id=$1 RETURNING *",
+        [projectId, folderId],
+      );
+      await this.insertAudit(client, projectId, "PROJECT_MOVED", { folderId }, options.actorUserId);
+      return projectRow(first(result.rows));
+    });
+  }
+  private async folderIn(
+    client: PoolClient | Pool,
+    workspaceId: string,
+    folderId: string,
+  ): Promise<FolderRecord> {
+    assertResourceId(folderId);
+    const folder = folderRow(
+      first((await client.query("SELECT * FROM folders WHERE id=$1", [folderId])).rows),
+    );
+    if (folder.workspaceId !== workspaceId) throw new NotFoundError();
+    return folder;
+  }
+
+  // Workspaces and members
+  async getWorkspaceRole(workspaceId: string, userId: string): Promise<WorkspaceRole | undefined> {
+    assertResourceId(workspaceId);
+    assertResourceId(userId);
+    const result = await this.pool.query<{ role: WorkspaceRole }>(
+      "SELECT role FROM workspace_members WHERE workspace_id=$1 AND user_id=$2",
+      [workspaceId, userId],
+    );
+    return result.rows[0]?.role;
+  }
+  async getWorkspace(
+    workspaceId: string,
+  ): Promise<{ id: string; name: string; kind: WorkspaceKind }> {
+    assertResourceId(workspaceId);
+    const row = first(
+      (await this.pool.query("SELECT id,name,kind FROM workspaces WHERE id=$1", [workspaceId]))
+        .rows,
+    );
+    return { id: row.id, name: row.name, kind: row.kind };
+  }
+  async listWorkspaces(userId: string): Promise<WorkspaceSummary[]> {
+    assertResourceId(userId);
+    const result = await this.pool.query(`${WORKSPACE_SELECT} WHERE m.user_id=$1`, [userId]);
+    return result.rows.map(workspaceRow).sort(byWorkspaceOrder);
+  }
+  private async workspaceSummary(
+    client: PoolClient | Pool,
+    workspaceId: string,
+    userId: string,
+  ): Promise<WorkspaceSummary> {
+    return workspaceRow(
+      first(
+        (
+          await client.query(`${WORKSPACE_SELECT} WHERE m.workspace_id=$1 AND m.user_id=$2`, [
+            workspaceId,
+            userId,
+          ])
+        ).rows,
+      ),
+    );
+  }
+  async createLabWorkspace(userId: string, name: string): Promise<WorkspaceSummary> {
+    assertResourceId(userId);
+    return this.transaction(async (client) => {
+      const id = randomUUID();
+      await client.query(
+        "INSERT INTO workspaces(id,name,kind,created_by,created_at,updated_at) VALUES($1,$2,'lab',$3,now(),now())",
+        [id, name, userId],
+      );
+      await client.query(
+        "INSERT INTO workspace_members(id,workspace_id,user_id,role,created_at,updated_at) VALUES($1,$2,$3,'owner',now(),now())",
+        [randomUUID(), id, userId],
+      );
+      return this.workspaceSummary(client, id, userId);
+    });
+  }
+  async renameWorkspace(workspaceId: string, name: string): Promise<void> {
+    assertResourceId(workspaceId);
+    first(
+      (
+        await this.pool.query(
+          "UPDATE workspaces SET name=$2,updated_at=now() WHERE id=$1 RETURNING id",
+          [workspaceId, name],
+        )
+      ).rows,
+    );
+  }
+  async listMembers(workspaceId: string): Promise<WorkspaceMember[]> {
+    assertResourceId(workspaceId);
+    const result = await this.pool.query(
+      `${MEMBER_SELECT} WHERE m.workspace_id=$1 ORDER BY m.created_at, u.email`,
+      [workspaceId],
+    );
+    return result.rows.map(memberRow);
+  }
+  async setMemberRole(
+    workspaceId: string,
+    userId: string,
+    role: WorkspaceRole,
+  ): Promise<WorkspaceMember> {
+    assertResourceId(workspaceId);
+    assertResourceId(userId);
+    return this.transaction(async (client) => {
+      const current = await this.lockedMember(client, workspaceId, userId);
+      if (current.role === "owner" && role !== "owner")
+        await this.assertAnotherOwner(client, workspaceId, userId);
+      await client.query(
+        "UPDATE workspace_members SET role=$3,updated_at=now() WHERE workspace_id=$1 AND user_id=$2",
+        [workspaceId, userId, role],
+      );
+      return memberRow(
+        first(
+          (
+            await client.query(`${MEMBER_SELECT} WHERE m.workspace_id=$1 AND m.user_id=$2`, [
+              workspaceId,
+              userId,
+            ])
+          ).rows,
+        ),
+      );
+    });
+  }
+  async removeMember(workspaceId: string, userId: string): Promise<void> {
+    assertResourceId(workspaceId);
+    assertResourceId(userId);
+    await this.transaction(async (client) => {
+      const current = await this.lockedMember(client, workspaceId, userId);
+      if (current.role === "owner") await this.assertAnotherOwner(client, workspaceId, userId);
+      await client.query("DELETE FROM workspace_members WHERE workspace_id=$1 AND user_id=$2", [
+        workspaceId,
+        userId,
+      ]);
+    });
+  }
+  /** Locks every membership row of the workspace, so owner checks cannot race. */
+  private async lockedMember(
+    client: PoolClient,
+    workspaceId: string,
+    userId: string,
+  ): Promise<{ role: WorkspaceRole }> {
+    const rows = (
+      await client.query<{ user_id: string; role: WorkspaceRole }>(
+        "SELECT user_id,role FROM workspace_members WHERE workspace_id=$1 ORDER BY id FOR UPDATE",
+        [workspaceId],
+      )
+    ).rows;
+    const member = rows.find((row) => row.user_id === userId);
+    if (!member) throw new NotFoundError();
+    return member;
+  }
+  private async assertAnotherOwner(
+    client: PoolClient,
+    workspaceId: string,
+    userId: string,
+  ): Promise<void> {
+    const others = await client.query(
+      "SELECT 1 FROM workspace_members WHERE workspace_id=$1 AND user_id<>$2 AND role='owner'",
+      [workspaceId, userId],
+    );
+    if (others.rowCount === 0) throw new ConflictError("A workspace needs at least one owner");
+  }
+  async createInvite(input: {
+    workspaceId: string;
+    role: InviteRole;
+    email?: string;
+    createdBy: string;
+    tokenSha256: string;
+    expiresAt: string;
+  }): Promise<InviteRecord> {
+    assertResourceId(input.workspaceId);
+    const id = randomUUID();
+    await this.pool.query(
+      "INSERT INTO workspace_invites(id,workspace_id,token_sha256,role,email,created_by,expires_at,created_at) VALUES($1,$2,$3,$4,$5,$6,$7,now())",
+      [
+        id,
+        input.workspaceId,
+        input.tokenSha256,
+        input.role,
+        input.email ?? null,
+        input.createdBy,
+        input.expiresAt,
+      ],
+    );
+    return inviteRow(first((await this.pool.query(`${INVITE_SELECT} WHERE i.id=$1`, [id])).rows));
+  }
+  async listInvites(workspaceId: string): Promise<InviteRecord[]> {
+    assertResourceId(workspaceId);
+    const result = await this.pool.query(
+      `${INVITE_SELECT} WHERE i.workspace_id=$1 ORDER BY i.created_at DESC, i.id`,
+      [workspaceId],
+    );
+    return result.rows.map(inviteRow);
+  }
+  async revokeInvite(workspaceId: string, inviteId: string): Promise<InviteRecord> {
+    assertResourceId(workspaceId);
+    assertResourceId(inviteId);
+    await this.pool.query(
+      "UPDATE workspace_invites SET revoked_at=now() WHERE id=$2 AND workspace_id=$1 AND accepted_by IS NULL AND revoked_at IS NULL",
+      [workspaceId, inviteId],
+    );
+    return inviteRow(
+      first(
+        (
+          await this.pool.query(`${INVITE_SELECT} WHERE i.id=$1 AND i.workspace_id=$2`, [
+            inviteId,
+            workspaceId,
+          ])
+        ).rows,
+      ),
+    );
+  }
+  async previewInvite(tokenSha256: string): Promise<InvitePreview> {
+    const row = first(
+      (
+        await this.pool.query(
+          `${INVITE_SELECT.replace("FROM workspace_invites i", "FROM workspace_invites i JOIN workspaces w ON w.id=i.workspace_id").replace("SELECT i.*", "SELECT i.*, w.name AS workspace_name")} WHERE i.token_sha256=$1`,
+          [tokenSha256],
+        )
+      ).rows,
+    );
+    const invite = inviteRow(row);
     return {
-      id: row.id,
-      workspaceId: row.workspaceId,
-      name: row.name,
-      status: row.status as ProjectRecord["status"],
-      createdAt: row.createdAt.toISOString(),
-      updatedAt: row.updatedAt.toISOString(),
+      workspaceId: invite.workspaceId,
+      workspaceName: row.workspace_name,
+      role: invite.role,
+      ...(invite.email ? { email: invite.email } : {}),
+      status: invite.status,
+      expiresAt: invite.expiresAt,
     };
+  }
+  async acceptInvite(
+    tokenSha256: string,
+    user: { id: string; email: string },
+  ): Promise<WorkspaceSummary> {
+    assertResourceId(user.id);
+    return this.transaction(async (client) => {
+      const locked = first(
+        (
+          await client.query("SELECT id FROM workspace_invites WHERE token_sha256=$1 FOR UPDATE", [
+            tokenSha256,
+          ])
+        ).rows,
+      );
+      const invite = inviteRow(
+        first((await client.query(`${INVITE_SELECT} WHERE i.id=$1`, [locked.id])).rows),
+      );
+      const existing = await client.query(
+        "SELECT 1 FROM workspace_members WHERE workspace_id=$1 AND user_id=$2",
+        [invite.workspaceId, user.id],
+      );
+      if (existing.rowCount === 0) {
+        assertInviteUsable(invite.status, invite.email, user.email);
+        await client.query(
+          "INSERT INTO workspace_members(id,workspace_id,user_id,role,created_at,updated_at) VALUES($1,$2,$3,$4,now(),now())",
+          [randomUUID(), invite.workspaceId, user.id, invite.role],
+        );
+        await client.query(
+          "UPDATE workspace_invites SET accepted_by=$2,accepted_at=now() WHERE id=$1",
+          [invite.id, user.id],
+        );
+      }
+      return this.workspaceSummary(client, invite.workspaceId, user.id);
+    });
+  }
+
+  // Folders and search
+  async listFolders(workspaceId: string): Promise<FolderRecord[]> {
+    assertResourceId(workspaceId);
+    const result = await this.pool.query(
+      "SELECT * FROM folders WHERE workspace_id=$1 ORDER BY lower(name), created_at",
+      [workspaceId],
+    );
+    return result.rows.map(folderRow);
+  }
+  async getFolder(folderId: string): Promise<FolderRecord> {
+    assertResourceId(folderId);
+    return folderRow(
+      first((await this.pool.query("SELECT * FROM folders WHERE id=$1", [folderId])).rows),
+    );
+  }
+  async createFolder(workspaceId: string, name: string, parentId?: string): Promise<FolderRecord> {
+    assertResourceId(workspaceId);
+    if (parentId) await this.folderIn(this.pool, workspaceId, parentId);
+    const result = await this.pool.query(
+      "INSERT INTO folders(id,workspace_id,parent_id,name,created_at,updated_at) VALUES($1,$2,$3,$4,now(),now()) RETURNING *",
+      [randomUUID(), workspaceId, parentId ?? null, name],
+    );
+    return folderRow(first(result.rows));
+  }
+  async updateFolder(
+    folderId: string,
+    patch: { name?: string; parentId?: string | null; archived?: boolean },
+  ): Promise<FolderRecord> {
+    assertResourceId(folderId);
+    return this.transaction(async (client) => {
+      const folder = folderRow(
+        first(
+          (await client.query("SELECT * FROM folders WHERE id=$1 FOR UPDATE", [folderId])).rows,
+        ),
+      );
+      if (patch.parentId) {
+        await this.folderIn(client, folder.workspaceId, patch.parentId);
+        const cycle = await client.query(
+          "WITH RECURSIVE up(id,parent_id) AS (SELECT id,parent_id FROM folders WHERE id=$1 UNION ALL SELECT f.id,f.parent_id FROM folders f JOIN up ON f.id=up.parent_id) SELECT 1 FROM up WHERE id=$2",
+          [patch.parentId, folderId],
+        );
+        if ((cycle.rowCount ?? 0) > 0) throw new ConflictError("A folder cannot move into itself");
+      }
+      const result = await client.query(
+        `UPDATE folders SET
+           name=COALESCE($2,name),
+           parent_id=CASE WHEN $3::boolean THEN $4::uuid ELSE parent_id END,
+           archived_at=CASE WHEN $5::boolean IS NULL THEN archived_at WHEN $5 THEN COALESCE(archived_at,now()) ELSE NULL END,
+           updated_at=now()
+         WHERE id=$1 RETURNING *`,
+        [
+          folderId,
+          patch.name ?? null,
+          patch.parentId !== undefined,
+          patch.parentId ?? null,
+          patch.archived ?? null,
+        ],
+      );
+      return folderRow(first(result.rows));
+    });
+  }
+  async searchProjects(userId: string, query: string, limit: number): Promise<ProjectSearchHit[]> {
+    assertResourceId(userId);
+    const needle = query.trim().toLowerCase();
+    if (!needle) return [];
+    const result = await this.pool.query(
+      `SELECT p.id, p.name, p.workspace_id, w.name AS workspace_name, p.folder_id, p.updated_at,
+         COALESCE(array_agg(a.filename ORDER BY a.filename) FILTER (WHERE a.id IS NOT NULL), '{}') AS filenames
+       FROM workspace_members m
+       JOIN workspaces w ON w.id=m.workspace_id
+       JOIN projects p ON p.workspace_id=w.id AND p.status='active'
+       LEFT JOIN assets a ON a.project_id=p.id AND strpos(lower(a.filename),$2)>0
+       WHERE m.user_id=$1
+       GROUP BY p.id, w.name
+       HAVING strpos(lower(p.name),$2)>0 OR count(a.id)>0
+       ORDER BY p.updated_at DESC, p.id
+       LIMIT $3`,
+      [userId, needle, limit],
+    );
+    return result.rows.map((row) => ({
+      projectId: row.id,
+      projectName: row.name,
+      workspaceId: row.workspace_id,
+      workspaceName: row.workspace_name,
+      ...(row.folder_id ? { folderId: row.folder_id } : {}),
+      matchedFilenames: row.filenames,
+      updatedAt: date(row.updated_at),
+    }));
+  }
+
+  // Templates
+  async createTemplate(input: {
+    workspaceId: string;
+    name: string;
+    document: unknown;
+    createdBy: string;
+  }): Promise<TemplateSummary> {
+    assertResourceId(input.workspaceId);
+    const id = randomUUID();
+    await this.pool.query(
+      "INSERT INTO project_templates(id,workspace_id,name,schema_version,document,created_by,created_at,updated_at) VALUES($1,$2,$3,$4,$5,$6,now(),now())",
+      [
+        id,
+        input.workspaceId,
+        input.name,
+        schemaVersionOf(input.document),
+        input.document,
+        input.createdBy,
+      ],
+    );
+    return templateRow(
+      first((await this.pool.query(`${TEMPLATE_SELECT} WHERE t.id=$1`, [id])).rows),
+    );
+  }
+  async listTemplates(workspaceId: string): Promise<TemplateSummary[]> {
+    assertResourceId(workspaceId);
+    const result = await this.pool.query(
+      `${TEMPLATE_SELECT} WHERE t.workspace_id=$1 ORDER BY t.created_at DESC, t.id`,
+      [workspaceId],
+    );
+    return result.rows.map(templateRow);
+  }
+  async getTemplate(templateId: string): Promise<TemplateRecord> {
+    assertResourceId(templateId);
+    const row = first(
+      (
+        await this.pool.query(
+          `${TEMPLATE_SELECT.replace("SELECT t.id,", "SELECT t.document, t.schema_version, t.id,")} WHERE t.id=$1`,
+          [templateId],
+        )
+      ).rows,
+    );
+    return { ...templateRow(row), schemaVersion: row.schema_version, document: row.document };
+  }
+  async deleteTemplate(templateId: string): Promise<void> {
+    assertResourceId(templateId);
+    const result = await this.pool.query("DELETE FROM project_templates WHERE id=$1", [templateId]);
+    if (result.rowCount === 0) throw new NotFoundError();
+  }
+
+  // Comments
+  async createComment(input: {
+    projectId: string;
+    authorUserId: string;
+    body: string;
+    parentId?: string;
+    anchor?: CommentAnchor;
+  }): Promise<CommentRecord> {
+    assertResourceId(input.projectId);
+    return this.transaction(async (client) => {
+      if (input.parentId) {
+        assertResourceId(input.parentId);
+        const parent = first(
+          (
+            await client.query("SELECT project_id,parent_id FROM comments WHERE id=$1", [
+              input.parentId,
+            ])
+          ).rows,
+        );
+        if (parent.project_id !== input.projectId || parent.parent_id) throw new NotFoundError();
+      }
+      const id = randomUUID();
+      await client.query(
+        "INSERT INTO comments(id,project_id,parent_id,author_user_id,artboard_id,object_id,x_pt,y_pt,body,created_at,updated_at) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,now(),now())",
+        [
+          id,
+          input.projectId,
+          input.parentId ?? null,
+          input.authorUserId,
+          input.anchor?.artboardId ?? null,
+          input.anchor?.objectId ?? null,
+          input.anchor?.xPt ?? null,
+          input.anchor?.yPt ?? null,
+          input.body,
+        ],
+      );
+      await this.insertAudit(
+        client,
+        input.projectId,
+        "COMMENT_ADDED",
+        { commentId: id, ...(input.parentId ? { parentId: input.parentId } : {}) },
+        input.authorUserId,
+      );
+      return commentRow(first((await client.query(`${COMMENT_SELECT} WHERE c.id=$1`, [id])).rows));
+    });
+  }
+  async listComments(projectId: string): Promise<CommentRecord[]> {
+    assertResourceId(projectId);
+    const result = await this.pool.query(
+      `${COMMENT_SELECT} WHERE c.project_id=$1 ORDER BY c.created_at, c.id`,
+      [projectId],
+    );
+    return result.rows.map(commentRow);
+  }
+  async getComment(commentId: string): Promise<CommentRecord> {
+    assertResourceId(commentId);
+    return commentRow(
+      first((await this.pool.query(`${COMMENT_SELECT} WHERE c.id=$1`, [commentId])).rows),
+    );
+  }
+  async updateComment(
+    commentId: string,
+    patch: { body?: string; resolvedBy?: string | null },
+    actorUserId: string,
+  ): Promise<CommentRecord> {
+    assertResourceId(commentId);
+    return this.transaction(async (client) => {
+      const before = first(
+        (
+          await client.query("SELECT project_id,resolved_at FROM comments WHERE id=$1 FOR UPDATE", [
+            commentId,
+          ])
+        ).rows,
+      );
+      const resolving = patch.resolvedBy !== undefined;
+      await client.query(
+        `UPDATE comments SET
+           body=COALESCE($2,body),
+           resolved_at=CASE WHEN NOT $3::boolean THEN resolved_at WHEN $4::uuid IS NULL THEN NULL ELSE COALESCE(resolved_at,now()) END,
+           resolved_by=CASE WHEN NOT $3::boolean THEN resolved_by ELSE $4::uuid END,
+           updated_at=now()
+         WHERE id=$1`,
+        [commentId, patch.body ?? null, resolving, patch.resolvedBy ?? null],
+      );
+      if (resolving && Boolean(before.resolved_at) !== Boolean(patch.resolvedBy))
+        await this.insertAudit(
+          client,
+          before.project_id,
+          patch.resolvedBy ? "COMMENT_RESOLVED" : "COMMENT_REOPENED",
+          { commentId },
+          actorUserId,
+        );
+      return commentRow(
+        first((await client.query(`${COMMENT_SELECT} WHERE c.id=$1`, [commentId])).rows),
+      );
+    });
+  }
+  async deleteComment(commentId: string, actorUserId: string): Promise<void> {
+    assertResourceId(commentId);
+    await this.transaction(async (client) => {
+      const comment = first(
+        (await client.query("SELECT project_id FROM comments WHERE id=$1 FOR UPDATE", [commentId]))
+          .rows,
+      );
+      await client.query("DELETE FROM comments WHERE parent_id=$1", [commentId]);
+      await client.query("DELETE FROM comments WHERE id=$1", [commentId]);
+      await this.insertAudit(
+        client,
+        comment.project_id,
+        "COMMENT_DELETED",
+        { commentId },
+        actorUserId,
+      );
+    });
+  }
+
+  // Admin
+  async adminOverview(): Promise<AdminOverview> {
+    const row = first(
+      (
+        await this.pool.query(
+          `SELECT
+             (SELECT count(*) FROM users)::int AS users,
+             (SELECT count(*) FROM workspaces WHERE kind='personal')::int AS personal,
+             (SELECT count(*) FROM workspaces WHERE kind='lab')::int AS labs,
+             (SELECT count(*) FROM projects WHERE status='active')::int AS projects,
+             (SELECT count(*) FROM assets a JOIN projects p ON p.id=a.project_id
+                WHERE a.status='ready' AND p.status='active')::int AS assets,
+             (SELECT COALESCE(sum(u.content_length),0) FROM assets a
+                JOIN upload_sessions u ON u.id=a.upload_id
+                JOIN projects p ON p.id=a.project_id
+                WHERE a.status='ready' AND p.status='active')::bigint AS storage,
+             (SELECT count(*) FROM integrity_reports WHERE status='pending')::int AS pending`,
+        )
+      ).rows,
+    );
+    const failed = (await this.jobsAvailable())
+      ? Number(
+          first(
+            (
+              await this.pool.query(
+                "SELECT count(*)::int AS count FROM graphile_worker.jobs WHERE last_error IS NOT NULL",
+              )
+            ).rows,
+          ).count,
+        )
+      : 0;
+    return {
+      users: row.users,
+      personalWorkspaces: row.personal,
+      labWorkspaces: row.labs,
+      projects: row.projects,
+      assets: row.assets,
+      storageBytes: Number(row.storage),
+      pendingIntegrityReports: row.pending,
+      failedJobs: failed,
+    };
+  }
+  /** The worker creates its schema on first start; until then there are no jobs to report. */
+  private async jobsAvailable(): Promise<boolean> {
+    const result = await this.pool.query<{ present: boolean }>(
+      "SELECT to_regclass('graphile_worker.jobs') IS NOT NULL AS present",
+    );
+    return result.rows[0]?.present === true;
+  }
+  async adminUsers(limit: number): Promise<AdminUser[]> {
+    const result = await this.pool.query(
+      `SELECT u.id, u.email, u.created_at,
+         (SELECT count(*) FROM workspace_members m WHERE m.user_id=u.id)::int AS workspaces,
+         (SELECT count(*) FROM projects p WHERE p.created_by=u.id AND p.status='active')::int AS projects
+       FROM users u ORDER BY u.created_at, u.id LIMIT $1`,
+      [limit],
+    );
+    return result.rows.map((row) => ({
+      id: row.id,
+      email: row.email,
+      workspaces: row.workspaces,
+      projects: row.projects,
+      createdAt: date(row.created_at),
+    }));
+  }
+  async adminWorkspaces(limit: number): Promise<AdminWorkspace[]> {
+    const result = await this.pool.query(
+      `SELECT w.id, w.name, w.kind, w.created_at,
+         (SELECT count(*) FROM workspace_members m WHERE m.workspace_id=w.id)::int AS members,
+         (SELECT count(*) FROM projects p WHERE p.workspace_id=w.id AND p.status='active')::int AS projects,
+         (SELECT count(*) FROM assets a JOIN projects p ON p.id=a.project_id
+            WHERE p.workspace_id=w.id AND p.status='active' AND a.status='ready')::int AS assets,
+         (SELECT COALESCE(sum(u.content_length),0) FROM assets a
+            JOIN projects p ON p.id=a.project_id JOIN upload_sessions u ON u.id=a.upload_id
+            WHERE p.workspace_id=w.id AND p.status='active' AND a.status='ready')::bigint AS storage
+       FROM workspaces w ORDER BY w.created_at, w.id LIMIT $1`,
+      [limit],
+    );
+    return result.rows.map((row) => ({
+      id: row.id,
+      name: row.name,
+      kind: row.kind,
+      members: row.members,
+      projects: row.projects,
+      assets: row.assets,
+      storageBytes: Number(row.storage),
+      createdAt: date(row.created_at),
+    }));
+  }
+  async adminFailedJobs(limit: number): Promise<AdminJob[]> {
+    if (!(await this.jobsAvailable())) return [];
+    const result = await this.pool.query(
+      `SELECT id::text AS id, task_identifier, attempts, max_attempts, last_error, run_at
+       FROM graphile_worker.jobs WHERE last_error IS NOT NULL ORDER BY run_at DESC LIMIT $1`,
+      [limit],
+    );
+    return result.rows.map((row) => ({
+      id: row.id,
+      task: row.task_identifier,
+      attempts: row.attempts,
+      maxAttempts: row.max_attempts,
+      ...(row.last_error ? { lastError: String(row.last_error).slice(0, 2000) } : {}),
+      runAt: date(row.run_at),
+    }));
   }
   async renameProject(
     projectId: string,
@@ -565,6 +1231,10 @@ export class PostgresFigLabRepository implements FigLabRepository {
       await client.query("DELETE FROM upload_sessions WHERE project_id=$1", [projectId]);
       await client.query("DELETE FROM project_versions WHERE project_id=$1", [projectId]);
       await client.query("DELETE FROM project_documents WHERE project_id=$1", [projectId]);
+      await client.query("DELETE FROM comments WHERE project_id=$1 AND parent_id IS NOT NULL", [
+        projectId,
+      ]);
+      await client.query("DELETE FROM comments WHERE project_id=$1", [projectId]);
       await client.query(
         "UPDATE projects SET status='deleted',deleted_at=now(),updated_at=now() WHERE id=$1",
         [projectId],
@@ -664,6 +1334,8 @@ function projectRow(row: QueryResultRow): ProjectRecord {
     workspaceId: row.workspace_id,
     name: row.name,
     status: row.status,
+    ...(row.folder_id ? { folderId: row.folder_id } : {}),
+    ...(row.created_by ? { createdBy: row.created_by } : {}),
     createdAt: date(row.created_at),
     updatedAt: date(row.updated_at),
   };
@@ -748,5 +1420,97 @@ function auditRow(row: QueryResultRow): AuditEvent {
     ...(row.actor_user_id ? { actor: { id: row.actor_user_id, email: row.actor_email } } : {}),
     sequence: Number(row.seq),
     createdAt: date(row.created_at),
+  };
+}
+
+const WORKSPACE_SELECT = `SELECT w.id, w.name, w.kind, w.created_at, m.role,
+  (SELECT count(*) FROM workspace_members x WHERE x.workspace_id=w.id)::int AS member_count
+  FROM workspace_members m JOIN workspaces w ON w.id=m.workspace_id`;
+function workspaceRow(row: QueryResultRow): WorkspaceSummary {
+  return {
+    id: row.id,
+    name: row.name,
+    kind: row.kind,
+    role: row.role,
+    memberCount: row.member_count,
+    createdAt: date(row.created_at),
+  };
+}
+const MEMBER_SELECT =
+  "SELECT m.user_id, u.email, m.role, m.created_at FROM workspace_members m JOIN users u ON u.id=m.user_id";
+function memberRow(row: QueryResultRow): WorkspaceMember {
+  return { userId: row.user_id, email: row.email, role: row.role, joinedAt: date(row.created_at) };
+}
+const INVITE_SELECT = `SELECT i.*, c.email AS created_by_email, a.email AS accepted_by_email
+  FROM workspace_invites i JOIN users c ON c.id=i.created_by LEFT JOIN users a ON a.id=i.accepted_by`;
+function inviteRow(row: QueryResultRow): InviteRecord {
+  const expiresAt = date(row.expires_at);
+  const status: InviteStatus = row.accepted_by
+    ? "accepted"
+    : row.revoked_at
+      ? "revoked"
+      : Date.parse(expiresAt) <= Date.now()
+        ? "expired"
+        : "pending";
+  return {
+    id: row.id,
+    workspaceId: row.workspace_id,
+    role: row.role,
+    ...(row.email ? { email: row.email } : {}),
+    createdBy: { id: row.created_by, email: row.created_by_email },
+    ...(row.accepted_by
+      ? { acceptedBy: { id: row.accepted_by, email: row.accepted_by_email } }
+      : {}),
+    status,
+    expiresAt,
+    createdAt: date(row.created_at),
+  };
+}
+function folderRow(row: QueryResultRow): FolderRecord {
+  return {
+    id: row.id,
+    workspaceId: row.workspace_id,
+    ...(row.parent_id ? { parentId: row.parent_id } : {}),
+    name: row.name,
+    archived: row.archived_at !== null,
+    createdAt: date(row.created_at),
+    updatedAt: date(row.updated_at),
+  };
+}
+const TEMPLATE_SELECT = `SELECT t.id, t.workspace_id, t.name, t.created_by, t.created_at, u.email AS created_by_email
+  FROM project_templates t LEFT JOIN users u ON u.id=t.created_by`;
+function templateRow(row: QueryResultRow): TemplateSummary {
+  return {
+    id: row.id,
+    workspaceId: row.workspace_id,
+    name: row.name,
+    ...(row.created_by ? { createdBy: { id: row.created_by, email: row.created_by_email } } : {}),
+    createdAt: date(row.created_at),
+  };
+}
+const COMMENT_SELECT = `SELECT c.*, a.email AS author_email, r.email AS resolved_by_email
+  FROM comments c JOIN users a ON a.id=c.author_user_id LEFT JOIN users r ON r.id=c.resolved_by`;
+function commentRow(row: QueryResultRow): CommentRecord {
+  const anchor: CommentAnchor | undefined = row.artboard_id
+    ? {
+        artboardId: row.artboard_id,
+        ...(row.object_id ? { objectId: row.object_id } : {}),
+        ...(row.x_pt !== null ? { xPt: row.x_pt } : {}),
+        ...(row.y_pt !== null ? { yPt: row.y_pt } : {}),
+      }
+    : undefined;
+  return {
+    id: row.id,
+    projectId: row.project_id,
+    ...(row.parent_id ? { parentId: row.parent_id } : {}),
+    author: { id: row.author_user_id, email: row.author_email },
+    ...(anchor ? { anchor } : {}),
+    body: row.body,
+    ...(row.resolved_at ? { resolvedAt: date(row.resolved_at) } : {}),
+    ...(row.resolved_by
+      ? { resolvedBy: { id: row.resolved_by, email: row.resolved_by_email } }
+      : {}),
+    createdAt: date(row.created_at),
+    updatedAt: date(row.updated_at),
   };
 }

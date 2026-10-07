@@ -49,6 +49,12 @@ paths:
                     - type: string
                       enum:
                       - member
+                  userId:
+                    minLength: 1
+                    type: string
+                  personalWorkspaceId:
+                    minLength: 1
+                    type: string
   "/v1/projects":
     get:
       responses:
@@ -93,6 +99,12 @@ paths:
                           - type: string
                             enum:
                             - deleting
+                        folderId:
+                          minLength: 1
+                          type: string
+                        createdBy:
+                          minLength: 1
+                          type: string
                         createdAt:
                           minLength: 1
                           type: string
@@ -113,6 +125,12 @@ paths:
                 name:
                   minLength: 1
                   maxLength: 120
+                  type: string
+                folderId:
+                  format: uuid
+                  type: string
+                templateId:
+                  format: uuid
                   type: string
       responses:
         '201':
@@ -148,6 +166,12 @@ paths:
                     - type: string
                       enum:
                       - deleting
+                  folderId:
+                    minLength: 1
+                    type: string
+                  createdBy:
+                    minLength: 1
+                    type: string
                   createdAt:
                     minLength: 1
                     type: string
@@ -197,6 +221,12 @@ paths:
                     - type: string
                       enum:
                       - deleting
+                  folderId:
+                    minLength: 1
+                    type: string
+                  createdBy:
+                    minLength: 1
+                    type: string
                   createdAt:
                     minLength: 1
                     type: string
@@ -259,6 +289,12 @@ paths:
                     - type: string
                       enum:
                       - deleting
+                  folderId:
+                    minLength: 1
+                    type: string
+                  createdBy:
+                    minLength: 1
+                    type: string
                   createdAt:
                     minLength: 1
                     type: string
@@ -307,6 +343,12 @@ paths:
                     - type: string
                       enum:
                       - deleting
+                  folderId:
+                    minLength: 1
+                    type: string
+                  createdBy:
+                    minLength: 1
+                    type: string
                   createdAt:
                     minLength: 1
                     type: string
@@ -629,6 +671,28 @@ paths:
                                         - type: string
                                           enum:
                                           - yellow
+                              sampleInfo:
+                                additionalProperties: false
+                                type: object
+                                properties:
+                                  target:
+                                    maxLength: 200
+                                    type: string
+                                  antibody:
+                                    maxLength: 200
+                                    type: string
+                                  dilution:
+                                    maxLength: 200
+                                    type: string
+                                  lot:
+                                    maxLength: 200
+                                    type: string
+                                  supplier:
+                                    maxLength: 200
+                                    type: string
+                                  notes:
+                                    maxLength: 1000
+                                    type: string
                           - additionalProperties: false
                             type: object
                             required:
@@ -819,6 +883,28 @@ paths:
                                                 - yellow
                                         visible:
                                           type: boolean
+                              sampleInfo:
+                                additionalProperties: false
+                                type: object
+                                properties:
+                                  target:
+                                    maxLength: 200
+                                    type: string
+                                  antibody:
+                                    maxLength: 200
+                                    type: string
+                                  dilution:
+                                    maxLength: 200
+                                    type: string
+                                  lot:
+                                    maxLength: 200
+                                    type: string
+                                  supplier:
+                                    maxLength: 200
+                                    type: string
+                                  notes:
+                                    maxLength: 1000
+                                    type: string
                           - additionalProperties: false
                             type: object
                             required:
@@ -1901,6 +1987,28 @@ paths:
                                         - type: string
                                           enum:
                                           - yellow
+                              sampleInfo:
+                                additionalProperties: false
+                                type: object
+                                properties:
+                                  target:
+                                    maxLength: 200
+                                    type: string
+                                  antibody:
+                                    maxLength: 200
+                                    type: string
+                                  dilution:
+                                    maxLength: 200
+                                    type: string
+                                  lot:
+                                    maxLength: 200
+                                    type: string
+                                  supplier:
+                                    maxLength: 200
+                                    type: string
+                                  notes:
+                                    maxLength: 1000
+                                    type: string
                           - additionalProperties: false
                             type: object
                             required:
@@ -2091,6 +2199,28 @@ paths:
                                                 - yellow
                                         visible:
                                           type: boolean
+                              sampleInfo:
+                                additionalProperties: false
+                                type: object
+                                properties:
+                                  target:
+                                    maxLength: 200
+                                    type: string
+                                  antibody:
+                                    maxLength: 200
+                                    type: string
+                                  dilution:
+                                    maxLength: 200
+                                    type: string
+                                  lot:
+                                    maxLength: 200
+                                    type: string
+                                  supplier:
+                                    maxLength: 200
+                                    type: string
+                                  notes:
+                                    maxLength: 1000
+                                    type: string
                           - additionalProperties: false
                             type: object
                             required:
@@ -3883,6 +4013,28 @@ paths:
                                         - type: string
                                           enum:
                                           - yellow
+                              sampleInfo:
+                                additionalProperties: false
+                                type: object
+                                properties:
+                                  target:
+                                    maxLength: 200
+                                    type: string
+                                  antibody:
+                                    maxLength: 200
+                                    type: string
+                                  dilution:
+                                    maxLength: 200
+                                    type: string
+                                  lot:
+                                    maxLength: 200
+                                    type: string
+                                  supplier:
+                                    maxLength: 200
+                                    type: string
+                                  notes:
+                                    maxLength: 1000
+                                    type: string
                           - additionalProperties: false
                             type: object
                             required:
@@ -4073,6 +4225,28 @@ paths:
                                                 - yellow
                                         visible:
                                           type: boolean
+                              sampleInfo:
+                                additionalProperties: false
+                                type: object
+                                properties:
+                                  target:
+                                    maxLength: 200
+                                    type: string
+                                  antibody:
+                                    maxLength: 200
+                                    type: string
+                                  dilution:
+                                    maxLength: 200
+                                    type: string
+                                  lot:
+                                    maxLength: 200
+                                    type: string
+                                  supplier:
+                                    maxLength: 200
+                                    type: string
+                                  notes:
+                                    maxLength: 1000
+                                    type: string
                           - additionalProperties: false
                             type: object
                             required:
@@ -4873,7 +5047,16 @@ paths:
                       - UNAUTHORIZED
                     - type: string
                       enum:
+                      - FORBIDDEN
+                    - type: string
+                      enum:
                       - NOT_FOUND
+                    - type: string
+                      enum:
+                      - CONFLICT
+                    - type: string
+                      enum:
+                      - INVITE_UNAVAILABLE
                     - type: string
                       enum:
                       - REVISION_CONFLICT
@@ -5857,6 +6040,28 @@ paths:
                                         - type: string
                                           enum:
                                           - yellow
+                              sampleInfo:
+                                additionalProperties: false
+                                type: object
+                                properties:
+                                  target:
+                                    maxLength: 200
+                                    type: string
+                                  antibody:
+                                    maxLength: 200
+                                    type: string
+                                  dilution:
+                                    maxLength: 200
+                                    type: string
+                                  lot:
+                                    maxLength: 200
+                                    type: string
+                                  supplier:
+                                    maxLength: 200
+                                    type: string
+                                  notes:
+                                    maxLength: 1000
+                                    type: string
                           - additionalProperties: false
                             type: object
                             required:
@@ -6047,6 +6252,28 @@ paths:
                                                 - yellow
                                         visible:
                                           type: boolean
+                              sampleInfo:
+                                additionalProperties: false
+                                type: object
+                                properties:
+                                  target:
+                                    maxLength: 200
+                                    type: string
+                                  antibody:
+                                    maxLength: 200
+                                    type: string
+                                  dilution:
+                                    maxLength: 200
+                                    type: string
+                                  lot:
+                                    maxLength: 200
+                                    type: string
+                                  supplier:
+                                    maxLength: 200
+                                    type: string
+                                  notes:
+                                    maxLength: 1000
+                                    type: string
                           - additionalProperties: false
                             type: object
                             required:
@@ -7011,3 +7238,1896 @@ paths:
                   completedAt:
                     type: string
                   report: {}
+  "/v1/workspaces":
+    get:
+      responses:
+        '200':
+          description: Default Response
+          content:
+            application/json:
+              schema:
+                additionalProperties: false
+                type: object
+                required:
+                - workspaces
+                properties:
+                  workspaces:
+                    type: array
+                    items:
+                      additionalProperties: false
+                      type: object
+                      required:
+                      - id
+                      - name
+                      - kind
+                      - role
+                      - memberCount
+                      - createdAt
+                      properties:
+                        id:
+                          minLength: 1
+                          type: string
+                        name:
+                          minLength: 1
+                          type: string
+                        kind:
+                          anyOf:
+                          - type: string
+                            enum:
+                            - personal
+                          - type: string
+                            enum:
+                            - lab
+                        role:
+                          anyOf:
+                          - type: string
+                            enum:
+                            - owner
+                          - type: string
+                            enum:
+                            - admin
+                          - type: string
+                            enum:
+                            - editor
+                          - type: string
+                            enum:
+                            - viewer
+                        memberCount:
+                          minimum: 0
+                          type: integer
+                        createdAt:
+                          minLength: 1
+                          type: string
+    post:
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              additionalProperties: false
+              type: object
+              required:
+              - name
+              properties:
+                name:
+                  minLength: 1
+                  maxLength: 120
+                  type: string
+      responses:
+        '201':
+          description: Default Response
+          content:
+            application/json:
+              schema:
+                additionalProperties: false
+                type: object
+                required:
+                - id
+                - name
+                - kind
+                - role
+                - memberCount
+                - createdAt
+                properties:
+                  id:
+                    minLength: 1
+                    type: string
+                  name:
+                    minLength: 1
+                    type: string
+                  kind:
+                    anyOf:
+                    - type: string
+                      enum:
+                      - personal
+                    - type: string
+                      enum:
+                      - lab
+                  role:
+                    anyOf:
+                    - type: string
+                      enum:
+                      - owner
+                    - type: string
+                      enum:
+                      - admin
+                    - type: string
+                      enum:
+                      - editor
+                    - type: string
+                      enum:
+                      - viewer
+                  memberCount:
+                    minimum: 0
+                    type: integer
+                  createdAt:
+                    minLength: 1
+                    type: string
+  "/v1/workspaces/{workspaceId}":
+    patch:
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              additionalProperties: false
+              type: object
+              required:
+              - name
+              properties:
+                name:
+                  minLength: 1
+                  maxLength: 120
+                  type: string
+      parameters:
+      - schema:
+          format: uuid
+          type: string
+        in: path
+        name: workspaceId
+        required: true
+      responses:
+        '204':
+          description: Default Response
+  "/v1/workspaces/{workspaceId}/projects":
+    get:
+      parameters:
+      - schema:
+          maxLength: 120
+          type: string
+        in: query
+        name: q
+        required: false
+      - schema:
+          anyOf:
+          - format: uuid
+            type: string
+          - type: string
+            enum:
+            - root
+        in: query
+        name: folderId
+        required: false
+      - schema:
+          format: uuid
+          type: string
+        in: query
+        name: createdBy
+        required: false
+      - schema:
+          format: uuid
+          type: string
+        in: path
+        name: workspaceId
+        required: true
+      responses:
+        '200':
+          description: Default Response
+          content:
+            application/json:
+              schema:
+                additionalProperties: false
+                type: object
+                required:
+                - projects
+                properties:
+                  projects:
+                    type: array
+                    items:
+                      additionalProperties: false
+                      type: object
+                      required:
+                      - id
+                      - workspaceId
+                      - name
+                      - status
+                      - createdAt
+                      - updatedAt
+                      properties:
+                        id:
+                          minLength: 1
+                          type: string
+                        workspaceId:
+                          minLength: 1
+                          type: string
+                        name:
+                          minLength: 1
+                          maxLength: 120
+                          type: string
+                        status:
+                          anyOf:
+                          - type: string
+                            enum:
+                            - active
+                          - type: string
+                            enum:
+                            - deleting
+                        folderId:
+                          minLength: 1
+                          type: string
+                        createdBy:
+                          minLength: 1
+                          type: string
+                        createdAt:
+                          minLength: 1
+                          type: string
+                        updatedAt:
+                          minLength: 1
+                          type: string
+    post:
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              additionalProperties: false
+              type: object
+              required:
+              - name
+              properties:
+                name:
+                  minLength: 1
+                  maxLength: 120
+                  type: string
+                folderId:
+                  format: uuid
+                  type: string
+                templateId:
+                  format: uuid
+                  type: string
+      parameters:
+      - schema:
+          format: uuid
+          type: string
+        in: path
+        name: workspaceId
+        required: true
+      responses:
+        '201':
+          description: Default Response
+          content:
+            application/json:
+              schema:
+                additionalProperties: false
+                type: object
+                required:
+                - id
+                - workspaceId
+                - name
+                - status
+                - createdAt
+                - updatedAt
+                properties:
+                  id:
+                    minLength: 1
+                    type: string
+                  workspaceId:
+                    minLength: 1
+                    type: string
+                  name:
+                    minLength: 1
+                    maxLength: 120
+                    type: string
+                  status:
+                    anyOf:
+                    - type: string
+                      enum:
+                      - active
+                    - type: string
+                      enum:
+                      - deleting
+                  folderId:
+                    minLength: 1
+                    type: string
+                  createdBy:
+                    minLength: 1
+                    type: string
+                  createdAt:
+                    minLength: 1
+                    type: string
+                  updatedAt:
+                    minLength: 1
+                    type: string
+  "/v1/projects/{projectId}/folder":
+    put:
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              additionalProperties: false
+              type: object
+              required:
+              - folderId
+              properties:
+                folderId:
+                  anyOf:
+                  - format: uuid
+                    type: string
+                  - type: 'null'
+      parameters:
+      - schema:
+          format: uuid
+          type: string
+        in: path
+        name: projectId
+        required: true
+      responses:
+        '200':
+          description: Default Response
+          content:
+            application/json:
+              schema:
+                additionalProperties: false
+                type: object
+                required:
+                - id
+                - workspaceId
+                - name
+                - status
+                - createdAt
+                - updatedAt
+                properties:
+                  id:
+                    minLength: 1
+                    type: string
+                  workspaceId:
+                    minLength: 1
+                    type: string
+                  name:
+                    minLength: 1
+                    maxLength: 120
+                    type: string
+                  status:
+                    anyOf:
+                    - type: string
+                      enum:
+                      - active
+                    - type: string
+                      enum:
+                      - deleting
+                  folderId:
+                    minLength: 1
+                    type: string
+                  createdBy:
+                    minLength: 1
+                    type: string
+                  createdAt:
+                    minLength: 1
+                    type: string
+                  updatedAt:
+                    minLength: 1
+                    type: string
+  "/v1/workspaces/{workspaceId}/members":
+    get:
+      parameters:
+      - schema:
+          format: uuid
+          type: string
+        in: path
+        name: workspaceId
+        required: true
+      responses:
+        '200':
+          description: Default Response
+          content:
+            application/json:
+              schema:
+                additionalProperties: false
+                type: object
+                required:
+                - members
+                properties:
+                  members:
+                    type: array
+                    items:
+                      additionalProperties: false
+                      type: object
+                      required:
+                      - userId
+                      - email
+                      - role
+                      - joinedAt
+                      properties:
+                        userId:
+                          minLength: 1
+                          type: string
+                        email:
+                          type: string
+                        role:
+                          anyOf:
+                          - type: string
+                            enum:
+                            - owner
+                          - type: string
+                            enum:
+                            - admin
+                          - type: string
+                            enum:
+                            - editor
+                          - type: string
+                            enum:
+                            - viewer
+                        joinedAt:
+                          minLength: 1
+                          type: string
+  "/v1/workspaces/{workspaceId}/members/{userId}":
+    put:
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              additionalProperties: false
+              type: object
+              required:
+              - role
+              properties:
+                role:
+                  anyOf:
+                  - type: string
+                    enum:
+                    - owner
+                  - type: string
+                    enum:
+                    - admin
+                  - type: string
+                    enum:
+                    - editor
+                  - type: string
+                    enum:
+                    - viewer
+      parameters:
+      - schema:
+          format: uuid
+          type: string
+        in: path
+        name: workspaceId
+        required: true
+      - schema:
+          format: uuid
+          type: string
+        in: path
+        name: userId
+        required: true
+      responses:
+        '200':
+          description: Default Response
+          content:
+            application/json:
+              schema:
+                additionalProperties: false
+                type: object
+                required:
+                - userId
+                - email
+                - role
+                - joinedAt
+                properties:
+                  userId:
+                    minLength: 1
+                    type: string
+                  email:
+                    type: string
+                  role:
+                    anyOf:
+                    - type: string
+                      enum:
+                      - owner
+                    - type: string
+                      enum:
+                      - admin
+                    - type: string
+                      enum:
+                      - editor
+                    - type: string
+                      enum:
+                      - viewer
+                  joinedAt:
+                    minLength: 1
+                    type: string
+    delete:
+      parameters:
+      - schema:
+          format: uuid
+          type: string
+        in: path
+        name: workspaceId
+        required: true
+      - schema:
+          format: uuid
+          type: string
+        in: path
+        name: userId
+        required: true
+      responses:
+        '204':
+          description: Default Response
+  "/v1/workspaces/{workspaceId}/invites":
+    get:
+      parameters:
+      - schema:
+          format: uuid
+          type: string
+        in: path
+        name: workspaceId
+        required: true
+      responses:
+        '200':
+          description: Default Response
+          content:
+            application/json:
+              schema:
+                additionalProperties: false
+                type: object
+                required:
+                - invites
+                properties:
+                  invites:
+                    type: array
+                    items:
+                      additionalProperties: false
+                      type: object
+                      required:
+                      - id
+                      - workspaceId
+                      - role
+                      - createdBy
+                      - status
+                      - expiresAt
+                      - createdAt
+                      properties:
+                        id:
+                          minLength: 1
+                          type: string
+                        workspaceId:
+                          minLength: 1
+                          type: string
+                        role:
+                          anyOf:
+                          - type: string
+                            enum:
+                            - admin
+                          - type: string
+                            enum:
+                            - editor
+                          - type: string
+                            enum:
+                            - viewer
+                        email:
+                          type: string
+                        createdBy:
+                          additionalProperties: false
+                          type: object
+                          required:
+                          - id
+                          - email
+                          properties:
+                            id:
+                              minLength: 1
+                              type: string
+                            email:
+                              type: string
+                        acceptedBy:
+                          additionalProperties: false
+                          type: object
+                          required:
+                          - id
+                          - email
+                          properties:
+                            id:
+                              minLength: 1
+                              type: string
+                            email:
+                              type: string
+                        status:
+                          anyOf:
+                          - type: string
+                            enum:
+                            - pending
+                          - type: string
+                            enum:
+                            - accepted
+                          - type: string
+                            enum:
+                            - revoked
+                          - type: string
+                            enum:
+                            - expired
+                        expiresAt:
+                          minLength: 1
+                          type: string
+                        createdAt:
+                          minLength: 1
+                          type: string
+    post:
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              additionalProperties: false
+              type: object
+              required:
+              - role
+              properties:
+                role:
+                  anyOf:
+                  - type: string
+                    enum:
+                    - admin
+                  - type: string
+                    enum:
+                    - editor
+                  - type: string
+                    enum:
+                    - viewer
+                email:
+                  format: email
+                  maxLength: 254
+                  type: string
+                expiresInDays:
+                  minimum: 1
+                  maximum: 30
+                  type: integer
+      parameters:
+      - schema:
+          format: uuid
+          type: string
+        in: path
+        name: workspaceId
+        required: true
+      responses:
+        '201':
+          description: Default Response
+          content:
+            application/json:
+              schema:
+                additionalProperties: false
+                type: object
+                required:
+                - invite
+                - token
+                properties:
+                  invite:
+                    additionalProperties: false
+                    type: object
+                    required:
+                    - id
+                    - workspaceId
+                    - role
+                    - createdBy
+                    - status
+                    - expiresAt
+                    - createdAt
+                    properties:
+                      id:
+                        minLength: 1
+                        type: string
+                      workspaceId:
+                        minLength: 1
+                        type: string
+                      role:
+                        anyOf:
+                        - type: string
+                          enum:
+                          - admin
+                        - type: string
+                          enum:
+                          - editor
+                        - type: string
+                          enum:
+                          - viewer
+                      email:
+                        type: string
+                      createdBy:
+                        additionalProperties: false
+                        type: object
+                        required:
+                        - id
+                        - email
+                        properties:
+                          id:
+                            minLength: 1
+                            type: string
+                          email:
+                            type: string
+                      acceptedBy:
+                        additionalProperties: false
+                        type: object
+                        required:
+                        - id
+                        - email
+                        properties:
+                          id:
+                            minLength: 1
+                            type: string
+                          email:
+                            type: string
+                      status:
+                        anyOf:
+                        - type: string
+                          enum:
+                          - pending
+                        - type: string
+                          enum:
+                          - accepted
+                        - type: string
+                          enum:
+                          - revoked
+                        - type: string
+                          enum:
+                          - expired
+                      expiresAt:
+                        minLength: 1
+                        type: string
+                      createdAt:
+                        minLength: 1
+                        type: string
+                  token:
+                    minLength: 43
+                    type: string
+  "/v1/workspaces/{workspaceId}/invites/{inviteId}":
+    delete:
+      parameters:
+      - schema:
+          format: uuid
+          type: string
+        in: path
+        name: workspaceId
+        required: true
+      - schema:
+          format: uuid
+          type: string
+        in: path
+        name: inviteId
+        required: true
+      responses:
+        '200':
+          description: Default Response
+          content:
+            application/json:
+              schema:
+                additionalProperties: false
+                type: object
+                required:
+                - id
+                - workspaceId
+                - role
+                - createdBy
+                - status
+                - expiresAt
+                - createdAt
+                properties:
+                  id:
+                    minLength: 1
+                    type: string
+                  workspaceId:
+                    minLength: 1
+                    type: string
+                  role:
+                    anyOf:
+                    - type: string
+                      enum:
+                      - admin
+                    - type: string
+                      enum:
+                      - editor
+                    - type: string
+                      enum:
+                      - viewer
+                  email:
+                    type: string
+                  createdBy:
+                    additionalProperties: false
+                    type: object
+                    required:
+                    - id
+                    - email
+                    properties:
+                      id:
+                        minLength: 1
+                        type: string
+                      email:
+                        type: string
+                  acceptedBy:
+                    additionalProperties: false
+                    type: object
+                    required:
+                    - id
+                    - email
+                    properties:
+                      id:
+                        minLength: 1
+                        type: string
+                      email:
+                        type: string
+                  status:
+                    anyOf:
+                    - type: string
+                      enum:
+                      - pending
+                    - type: string
+                      enum:
+                      - accepted
+                    - type: string
+                      enum:
+                      - revoked
+                    - type: string
+                      enum:
+                      - expired
+                  expiresAt:
+                    minLength: 1
+                    type: string
+                  createdAt:
+                    minLength: 1
+                    type: string
+  "/v1/invites/{token}":
+    get:
+      parameters:
+      - schema:
+          pattern: "^[A-Za-z0-9_-]{43}$"
+          type: string
+        in: path
+        name: token
+        required: true
+      responses:
+        '200':
+          description: Default Response
+          content:
+            application/json:
+              schema:
+                additionalProperties: false
+                type: object
+                required:
+                - workspaceId
+                - workspaceName
+                - role
+                - status
+                - expiresAt
+                properties:
+                  workspaceId:
+                    minLength: 1
+                    type: string
+                  workspaceName:
+                    type: string
+                  role:
+                    anyOf:
+                    - type: string
+                      enum:
+                      - admin
+                    - type: string
+                      enum:
+                      - editor
+                    - type: string
+                      enum:
+                      - viewer
+                  email:
+                    type: string
+                  status:
+                    anyOf:
+                    - type: string
+                      enum:
+                      - pending
+                    - type: string
+                      enum:
+                      - accepted
+                    - type: string
+                      enum:
+                      - revoked
+                    - type: string
+                      enum:
+                      - expired
+                  expiresAt:
+                    minLength: 1
+                    type: string
+  "/v1/invites/{token}/accept":
+    post:
+      parameters:
+      - schema:
+          pattern: "^[A-Za-z0-9_-]{43}$"
+          type: string
+        in: path
+        name: token
+        required: true
+      responses:
+        '200':
+          description: Default Response
+          content:
+            application/json:
+              schema:
+                additionalProperties: false
+                type: object
+                required:
+                - id
+                - name
+                - kind
+                - role
+                - memberCount
+                - createdAt
+                properties:
+                  id:
+                    minLength: 1
+                    type: string
+                  name:
+                    minLength: 1
+                    type: string
+                  kind:
+                    anyOf:
+                    - type: string
+                      enum:
+                      - personal
+                    - type: string
+                      enum:
+                      - lab
+                  role:
+                    anyOf:
+                    - type: string
+                      enum:
+                      - owner
+                    - type: string
+                      enum:
+                      - admin
+                    - type: string
+                      enum:
+                      - editor
+                    - type: string
+                      enum:
+                      - viewer
+                  memberCount:
+                    minimum: 0
+                    type: integer
+                  createdAt:
+                    minLength: 1
+                    type: string
+  "/v1/workspaces/{workspaceId}/folders":
+    get:
+      parameters:
+      - schema:
+          format: uuid
+          type: string
+        in: path
+        name: workspaceId
+        required: true
+      responses:
+        '200':
+          description: Default Response
+          content:
+            application/json:
+              schema:
+                additionalProperties: false
+                type: object
+                required:
+                - folders
+                properties:
+                  folders:
+                    type: array
+                    items:
+                      additionalProperties: false
+                      type: object
+                      required:
+                      - id
+                      - workspaceId
+                      - name
+                      - archived
+                      - createdAt
+                      - updatedAt
+                      properties:
+                        id:
+                          minLength: 1
+                          type: string
+                        workspaceId:
+                          minLength: 1
+                          type: string
+                        parentId:
+                          minLength: 1
+                          type: string
+                        name:
+                          minLength: 1
+                          type: string
+                        archived:
+                          type: boolean
+                        createdAt:
+                          minLength: 1
+                          type: string
+                        updatedAt:
+                          minLength: 1
+                          type: string
+    post:
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              additionalProperties: false
+              type: object
+              required:
+              - name
+              properties:
+                name:
+                  minLength: 1
+                  maxLength: 120
+                  type: string
+                parentId:
+                  format: uuid
+                  type: string
+      parameters:
+      - schema:
+          format: uuid
+          type: string
+        in: path
+        name: workspaceId
+        required: true
+      responses:
+        '201':
+          description: Default Response
+          content:
+            application/json:
+              schema:
+                additionalProperties: false
+                type: object
+                required:
+                - id
+                - workspaceId
+                - name
+                - archived
+                - createdAt
+                - updatedAt
+                properties:
+                  id:
+                    minLength: 1
+                    type: string
+                  workspaceId:
+                    minLength: 1
+                    type: string
+                  parentId:
+                    minLength: 1
+                    type: string
+                  name:
+                    minLength: 1
+                    type: string
+                  archived:
+                    type: boolean
+                  createdAt:
+                    minLength: 1
+                    type: string
+                  updatedAt:
+                    minLength: 1
+                    type: string
+  "/v1/workspaces/{workspaceId}/folders/{folderId}":
+    patch:
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              additionalProperties: false
+              minProperties: 1
+              type: object
+              properties:
+                name:
+                  minLength: 1
+                  maxLength: 120
+                  type: string
+                parentId:
+                  anyOf:
+                  - format: uuid
+                    type: string
+                  - type: 'null'
+                archived:
+                  type: boolean
+      parameters:
+      - schema:
+          format: uuid
+          type: string
+        in: path
+        name: workspaceId
+        required: true
+      - schema:
+          format: uuid
+          type: string
+        in: path
+        name: folderId
+        required: true
+      responses:
+        '200':
+          description: Default Response
+          content:
+            application/json:
+              schema:
+                additionalProperties: false
+                type: object
+                required:
+                - id
+                - workspaceId
+                - name
+                - archived
+                - createdAt
+                - updatedAt
+                properties:
+                  id:
+                    minLength: 1
+                    type: string
+                  workspaceId:
+                    minLength: 1
+                    type: string
+                  parentId:
+                    minLength: 1
+                    type: string
+                  name:
+                    minLength: 1
+                    type: string
+                  archived:
+                    type: boolean
+                  createdAt:
+                    minLength: 1
+                    type: string
+                  updatedAt:
+                    minLength: 1
+                    type: string
+  "/v1/search":
+    get:
+      parameters:
+      - schema:
+          minLength: 1
+          maxLength: 120
+          type: string
+        in: query
+        name: q
+        required: true
+      - schema:
+          minimum: 1
+          maximum: 50
+          type: integer
+        in: query
+        name: limit
+        required: false
+      responses:
+        '200':
+          description: Default Response
+          content:
+            application/json:
+              schema:
+                additionalProperties: false
+                type: object
+                required:
+                - results
+                properties:
+                  results:
+                    type: array
+                    items:
+                      additionalProperties: false
+                      type: object
+                      required:
+                      - projectId
+                      - projectName
+                      - workspaceId
+                      - workspaceName
+                      - matchedFilenames
+                      - updatedAt
+                      properties:
+                        projectId:
+                          minLength: 1
+                          type: string
+                        projectName:
+                          type: string
+                        workspaceId:
+                          minLength: 1
+                          type: string
+                        workspaceName:
+                          type: string
+                        folderId:
+                          minLength: 1
+                          type: string
+                        matchedFilenames:
+                          type: array
+                          items:
+                            type: string
+                        updatedAt:
+                          minLength: 1
+                          type: string
+  "/v1/workspaces/{workspaceId}/templates":
+    get:
+      parameters:
+      - schema:
+          format: uuid
+          type: string
+        in: path
+        name: workspaceId
+        required: true
+      responses:
+        '200':
+          description: Default Response
+          content:
+            application/json:
+              schema:
+                additionalProperties: false
+                type: object
+                required:
+                - templates
+                properties:
+                  templates:
+                    type: array
+                    items:
+                      additionalProperties: false
+                      type: object
+                      required:
+                      - id
+                      - workspaceId
+                      - name
+                      - createdAt
+                      properties:
+                        id:
+                          minLength: 1
+                          type: string
+                        workspaceId:
+                          minLength: 1
+                          type: string
+                        name:
+                          minLength: 1
+                          type: string
+                        createdBy:
+                          additionalProperties: false
+                          type: object
+                          required:
+                          - id
+                          - email
+                          properties:
+                            id:
+                              minLength: 1
+                              type: string
+                            email:
+                              type: string
+                        createdAt:
+                          minLength: 1
+                          type: string
+    post:
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              additionalProperties: false
+              type: object
+              required:
+              - name
+              - projectId
+              properties:
+                name:
+                  minLength: 1
+                  maxLength: 120
+                  type: string
+                projectId:
+                  format: uuid
+                  type: string
+      parameters:
+      - schema:
+          format: uuid
+          type: string
+        in: path
+        name: workspaceId
+        required: true
+      responses:
+        '201':
+          description: Default Response
+          content:
+            application/json:
+              schema:
+                additionalProperties: false
+                type: object
+                required:
+                - id
+                - workspaceId
+                - name
+                - createdAt
+                properties:
+                  id:
+                    minLength: 1
+                    type: string
+                  workspaceId:
+                    minLength: 1
+                    type: string
+                  name:
+                    minLength: 1
+                    type: string
+                  createdBy:
+                    additionalProperties: false
+                    type: object
+                    required:
+                    - id
+                    - email
+                    properties:
+                      id:
+                        minLength: 1
+                        type: string
+                      email:
+                        type: string
+                  createdAt:
+                    minLength: 1
+                    type: string
+  "/v1/workspaces/{workspaceId}/templates/{templateId}":
+    delete:
+      parameters:
+      - schema:
+          format: uuid
+          type: string
+        in: path
+        name: workspaceId
+        required: true
+      - schema:
+          format: uuid
+          type: string
+        in: path
+        name: templateId
+        required: true
+      responses:
+        '204':
+          description: Default Response
+  "/v1/projects/{projectId}/comments":
+    get:
+      parameters:
+      - schema:
+          format: uuid
+          type: string
+        in: path
+        name: projectId
+        required: true
+      responses:
+        '200':
+          description: Default Response
+          content:
+            application/json:
+              schema:
+                additionalProperties: false
+                type: object
+                required:
+                - comments
+                properties:
+                  comments:
+                    type: array
+                    items:
+                      additionalProperties: false
+                      type: object
+                      required:
+                      - id
+                      - projectId
+                      - author
+                      - body
+                      - createdAt
+                      - updatedAt
+                      properties:
+                        id:
+                          minLength: 1
+                          type: string
+                        projectId:
+                          minLength: 1
+                          type: string
+                        parentId:
+                          minLength: 1
+                          type: string
+                        author:
+                          additionalProperties: false
+                          type: object
+                          required:
+                          - id
+                          - email
+                          properties:
+                            id:
+                              minLength: 1
+                              type: string
+                            email:
+                              type: string
+                        anchor:
+                          additionalProperties: false
+                          type: object
+                          required:
+                          - artboardId
+                          properties:
+                            artboardId:
+                              minLength: 1
+                              maxLength: 128
+                              type: string
+                            objectId:
+                              minLength: 1
+                              maxLength: 128
+                              type: string
+                            xPt:
+                              minimum: -100000
+                              maximum: 100000
+                              type: number
+                            yPt:
+                              minimum: -100000
+                              maximum: 100000
+                              type: number
+                        body:
+                          minLength: 1
+                          type: string
+                        resolvedAt:
+                          minLength: 1
+                          type: string
+                        resolvedBy:
+                          additionalProperties: false
+                          type: object
+                          required:
+                          - id
+                          - email
+                          properties:
+                            id:
+                              minLength: 1
+                              type: string
+                            email:
+                              type: string
+                        createdAt:
+                          minLength: 1
+                          type: string
+                        updatedAt:
+                          minLength: 1
+                          type: string
+    post:
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              additionalProperties: false
+              type: object
+              required:
+              - body
+              properties:
+                body:
+                  minLength: 1
+                  maxLength: 4000
+                  type: string
+                parentId:
+                  format: uuid
+                  type: string
+                anchor:
+                  additionalProperties: false
+                  type: object
+                  required:
+                  - artboardId
+                  properties:
+                    artboardId:
+                      minLength: 1
+                      maxLength: 128
+                      type: string
+                    objectId:
+                      minLength: 1
+                      maxLength: 128
+                      type: string
+                    xPt:
+                      minimum: -100000
+                      maximum: 100000
+                      type: number
+                    yPt:
+                      minimum: -100000
+                      maximum: 100000
+                      type: number
+      parameters:
+      - schema:
+          format: uuid
+          type: string
+        in: path
+        name: projectId
+        required: true
+      responses:
+        '201':
+          description: Default Response
+          content:
+            application/json:
+              schema:
+                additionalProperties: false
+                type: object
+                required:
+                - id
+                - projectId
+                - author
+                - body
+                - createdAt
+                - updatedAt
+                properties:
+                  id:
+                    minLength: 1
+                    type: string
+                  projectId:
+                    minLength: 1
+                    type: string
+                  parentId:
+                    minLength: 1
+                    type: string
+                  author:
+                    additionalProperties: false
+                    type: object
+                    required:
+                    - id
+                    - email
+                    properties:
+                      id:
+                        minLength: 1
+                        type: string
+                      email:
+                        type: string
+                  anchor:
+                    additionalProperties: false
+                    type: object
+                    required:
+                    - artboardId
+                    properties:
+                      artboardId:
+                        minLength: 1
+                        maxLength: 128
+                        type: string
+                      objectId:
+                        minLength: 1
+                        maxLength: 128
+                        type: string
+                      xPt:
+                        minimum: -100000
+                        maximum: 100000
+                        type: number
+                      yPt:
+                        minimum: -100000
+                        maximum: 100000
+                        type: number
+                  body:
+                    minLength: 1
+                    type: string
+                  resolvedAt:
+                    minLength: 1
+                    type: string
+                  resolvedBy:
+                    additionalProperties: false
+                    type: object
+                    required:
+                    - id
+                    - email
+                    properties:
+                      id:
+                        minLength: 1
+                        type: string
+                      email:
+                        type: string
+                  createdAt:
+                    minLength: 1
+                    type: string
+                  updatedAt:
+                    minLength: 1
+                    type: string
+  "/v1/projects/{projectId}/comments/{commentId}":
+    patch:
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              additionalProperties: false
+              minProperties: 1
+              type: object
+              properties:
+                body:
+                  minLength: 1
+                  maxLength: 4000
+                  type: string
+                resolved:
+                  type: boolean
+      parameters:
+      - schema:
+          format: uuid
+          type: string
+        in: path
+        name: projectId
+        required: true
+      - schema:
+          format: uuid
+          type: string
+        in: path
+        name: commentId
+        required: true
+      responses:
+        '200':
+          description: Default Response
+          content:
+            application/json:
+              schema:
+                additionalProperties: false
+                type: object
+                required:
+                - id
+                - projectId
+                - author
+                - body
+                - createdAt
+                - updatedAt
+                properties:
+                  id:
+                    minLength: 1
+                    type: string
+                  projectId:
+                    minLength: 1
+                    type: string
+                  parentId:
+                    minLength: 1
+                    type: string
+                  author:
+                    additionalProperties: false
+                    type: object
+                    required:
+                    - id
+                    - email
+                    properties:
+                      id:
+                        minLength: 1
+                        type: string
+                      email:
+                        type: string
+                  anchor:
+                    additionalProperties: false
+                    type: object
+                    required:
+                    - artboardId
+                    properties:
+                      artboardId:
+                        minLength: 1
+                        maxLength: 128
+                        type: string
+                      objectId:
+                        minLength: 1
+                        maxLength: 128
+                        type: string
+                      xPt:
+                        minimum: -100000
+                        maximum: 100000
+                        type: number
+                      yPt:
+                        minimum: -100000
+                        maximum: 100000
+                        type: number
+                  body:
+                    minLength: 1
+                    type: string
+                  resolvedAt:
+                    minLength: 1
+                    type: string
+                  resolvedBy:
+                    additionalProperties: false
+                    type: object
+                    required:
+                    - id
+                    - email
+                    properties:
+                      id:
+                        minLength: 1
+                        type: string
+                      email:
+                        type: string
+                  createdAt:
+                    minLength: 1
+                    type: string
+                  updatedAt:
+                    minLength: 1
+                    type: string
+    delete:
+      parameters:
+      - schema:
+          format: uuid
+          type: string
+        in: path
+        name: projectId
+        required: true
+      - schema:
+          format: uuid
+          type: string
+        in: path
+        name: commentId
+        required: true
+      responses:
+        '204':
+          description: Default Response
+  "/v1/admin/overview":
+    get:
+      responses:
+        '200':
+          description: Default Response
+          content:
+            application/json:
+              schema:
+                additionalProperties: false
+                type: object
+                required:
+                - users
+                - personalWorkspaces
+                - labWorkspaces
+                - projects
+                - assets
+                - storageBytes
+                - pendingIntegrityReports
+                - failedJobs
+                properties:
+                  users:
+                    type: integer
+                  personalWorkspaces:
+                    type: integer
+                  labWorkspaces:
+                    type: integer
+                  projects:
+                    type: integer
+                  assets:
+                    type: integer
+                  storageBytes:
+                    type: integer
+                  pendingIntegrityReports:
+                    type: integer
+                  failedJobs:
+                    type: integer
+  "/v1/admin/users":
+    get:
+      parameters:
+      - schema:
+          minimum: 1
+          maximum: 500
+          type: integer
+        in: query
+        name: limit
+        required: false
+      responses:
+        '200':
+          description: Default Response
+          content:
+            application/json:
+              schema:
+                additionalProperties: false
+                type: object
+                required:
+                - users
+                properties:
+                  users:
+                    type: array
+                    items:
+                      additionalProperties: false
+                      type: object
+                      required:
+                      - id
+                      - email
+                      - workspaces
+                      - projects
+                      - createdAt
+                      properties:
+                        id:
+                          minLength: 1
+                          type: string
+                        email:
+                          type: string
+                        workspaces:
+                          type: integer
+                        projects:
+                          type: integer
+                        createdAt:
+                          minLength: 1
+                          type: string
+  "/v1/admin/workspaces":
+    get:
+      parameters:
+      - schema:
+          minimum: 1
+          maximum: 500
+          type: integer
+        in: query
+        name: limit
+        required: false
+      responses:
+        '200':
+          description: Default Response
+          content:
+            application/json:
+              schema:
+                additionalProperties: false
+                type: object
+                required:
+                - workspaces
+                properties:
+                  workspaces:
+                    type: array
+                    items:
+                      additionalProperties: false
+                      type: object
+                      required:
+                      - id
+                      - name
+                      - kind
+                      - members
+                      - projects
+                      - assets
+                      - storageBytes
+                      - createdAt
+                      properties:
+                        id:
+                          minLength: 1
+                          type: string
+                        name:
+                          type: string
+                        kind:
+                          anyOf:
+                          - type: string
+                            enum:
+                            - personal
+                          - type: string
+                            enum:
+                            - lab
+                        members:
+                          type: integer
+                        projects:
+                          type: integer
+                        assets:
+                          type: integer
+                        storageBytes:
+                          type: integer
+                        createdAt:
+                          minLength: 1
+                          type: string
+  "/v1/admin/jobs":
+    get:
+      parameters:
+      - schema:
+          minimum: 1
+          maximum: 500
+          type: integer
+        in: query
+        name: limit
+        required: false
+      responses:
+        '200':
+          description: Default Response
+          content:
+            application/json:
+              schema:
+                additionalProperties: false
+                type: object
+                required:
+                - jobs
+                properties:
+                  jobs:
+                    type: array
+                    items:
+                      additionalProperties: false
+                      type: object
+                      required:
+                      - id
+                      - task
+                      - attempts
+                      - maxAttempts
+                      - runAt
+                      properties:
+                        id:
+                          minLength: 1
+                          type: string
+                        task:
+                          type: string
+                        attempts:
+                          type: integer
+                        maxAttempts:
+                          type: integer
+                        lastError:
+                          type: string
+                        runAt:
+                          minLength: 1
+                          type: string

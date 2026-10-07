@@ -14,6 +14,7 @@ import { bindAutosave } from "./editor/autosave-binding";
 import { BrowserRasterRepository, type SupportedRasterMime } from "./editor/raster-sources";
 import { createEditorSession } from "./editor/session-store";
 import { ArrangePanel } from "./figure-tools/arrange-panel";
+import { CommentsPanel, TemplatePanel } from "./figure-tools/comments-panel";
 import { useDerivedSync } from "./figure-tools/derived-sync";
 import { exportFigures } from "./figure-tools/export-figure";
 import { ExportPanel } from "./figure-tools/export-panel";
@@ -29,6 +30,19 @@ import { QuantifyPanel } from "./figure-tools/quantify-panel";
 import { rasterizeVectorItems } from "./figure-tools/rasterize";
 import { SourceInspector } from "./figure-tools/source-inspector";
 import "./styles.css";
+import {
+  AdminPanel,
+  canWrite,
+  InviteBanner,
+  LabMembers,
+  ProjectFolderSelect,
+  ProjectSearch,
+  TemplatePicker,
+  useFolders,
+  useTemplates,
+  useWorkspaceSelection,
+  WorkspaceNav,
+} from "./workspaces/workspaces";
 
 const defaultClient = new FigLabClient();
 
@@ -74,10 +88,37 @@ function Dashboard({
   client: FigLabClient;
   onOpen: (project: Project) => void;
 }) {
-  const projects = useQuery({ queryKey: ["projects"], queryFn: () => client.listProjects() });
+  const me = useQuery({ queryKey: ["me"], queryFn: () => client.me() });
+  const selection = useWorkspaceSelection(client);
+  const workspace = selection.current;
+  const folders = useFolders(client, workspace?.id);
+  const templates = useTemplates(client, workspace?.id);
+  // The personal workspace's full list is also served by /v1/projects.
+  const simpleList = !workspace || (workspace.kind === "personal" && selection.folder === "all");
+  const projects = useQuery({
+    queryKey: ["projects", workspace?.id ?? "personal", selection.folder],
+    queryFn: () =>
+      simpleList || !workspace
+        ? client.listProjects()
+        : client.listWorkspaceProjects(
+            workspace.id,
+            selection.folder === "all" ? {} : { folderId: selection.folder },
+          ),
+  });
   const [name, setName] = useState("");
+  const [templateId, setTemplateId] = useState("");
+  const [panel, setPanel] = useState<"members" | "admin">();
+  const folderId =
+    selection.folder !== "all" && selection.folder !== "root" ? selection.folder : undefined;
   const create = useMutation({
-    mutationFn: (projectName: string) => client.createProject(projectName),
+    mutationFn: (projectName: string) =>
+      workspace && (workspace.kind === "lab" || folderId || templateId)
+        ? client.createWorkspaceProject(workspace.id, {
+            name: projectName,
+            ...(folderId ? { folderId } : {}),
+            ...(templateId ? { templateId } : {}),
+          })
+        : client.createProject(projectName),
     onSuccess: (created) => onOpen(created),
   });
   const rename = useMutation({
@@ -99,11 +140,14 @@ function Dashboard({
       <div className="dashboard-layout">
         <nav aria-label="Project navigation" className="side-nav">
           <strong>Projects</strong>
+          {workspace && <WorkspaceNav client={client} selection={selection} />}
         </nav>
         <section aria-labelledby="projects-heading" className="dashboard-content">
           <div className="section-heading">
             <div>
-              <p className="eyebrow">Workspace</p>
+              <p className="eyebrow">
+                {workspace?.kind === "lab" ? `Lab · ${workspace.name}` : "Workspace"}
+              </p>
               <h1 id="projects-heading">Projects</h1>
             </div>
             <form
@@ -118,11 +162,56 @@ function Dashboard({
                 placeholder="New project name"
                 value={name}
               />
+              <TemplatePicker
+                onChange={setTemplateId}
+                templates={templates.data ?? []}
+                value={templateId}
+              />
               <Button disabled={create.isPending} type="submit">
                 Create project
               </Button>
             </form>
           </div>
+          <InviteBanner
+            client={client}
+            onJoined={async (joined) => {
+              await selection.refetch();
+              selection.select(joined.id);
+            }}
+          />
+          <div className="folder-actions">
+            {workspace?.kind === "lab" && (
+              <Button
+                aria-pressed={panel === "members"}
+                onClick={() => setPanel(panel === "members" ? undefined : "members")}
+              >
+                Lab members
+              </Button>
+            )}
+            {me.data?.role === "admin" && (
+              <Button
+                aria-pressed={panel === "admin"}
+                onClick={() => setPanel(panel === "admin" ? undefined : "admin")}
+              >
+                Administration
+              </Button>
+            )}
+          </div>
+          {panel === "members" && workspace?.kind === "lab" && (
+            <LabMembers
+              client={client}
+              currentUserId={me.data?.userId}
+              onLeft={async () => {
+                setPanel(undefined);
+                const remaining = await selection.refetch();
+                const personal = remaining.data?.find((entry) => entry.kind === "personal");
+                if (personal) selection.select(personal.id);
+              }}
+              workspace={workspace}
+            />
+          )}
+          {panel === "admin" && <AdminPanel client={client} />}
+          {workspace && <ProjectSearch client={client} onOpen={onOpen} />}
           {projects.isLoading && <p role="status">Loading projects…</p>}
           {projects.isError && (
             <p role="alert">Could not load projects. Retry when the server is available.</p>
@@ -135,6 +224,14 @@ function Dashboard({
               <Panel key={item.id}>
                 <h2>{item.name}</h2>
                 <p>Updated {new Date(item.updatedAt).toLocaleDateString()}</p>
+                {workspace && canWrite(workspace.role) && (folders.data?.length ?? 0) > 0 && (
+                  <ProjectFolderSelect
+                    client={client}
+                    folders={folders.data ?? []}
+                    onMoved={() => void projects.refetch()}
+                    project={item}
+                  />
+                )}
                 <Button aria-label={`Open ${item.name}`} onClick={() => onOpen(item)}>
                   Open
                 </Button>
@@ -177,6 +274,9 @@ function EditorLoader({
     queryKey: ["document", project.id],
     queryFn: () => client.getDocument(project.id),
   });
+  const me = useQuery({ queryKey: ["me"], queryFn: () => client.me() });
+  const workspaces = useQuery({ queryKey: ["workspaces"], queryFn: () => client.listWorkspaces() });
+  const role = workspaces.data?.find((workspace) => workspace.id === project.workspaceId)?.role;
   if (loaded.isLoading)
     return (
       <main className="loading-page">
@@ -192,6 +292,12 @@ function EditorLoader({
     );
   return (
     <FigLabEditor
+      access={{
+        // Until the role is known, behave as before; the server enforces roles regardless.
+        readOnly: role === "viewer",
+        canModerate: role === "owner" || role === "admin" || role === undefined,
+        ...(me.data?.userId ? { currentUserId: me.data.userId } : {}),
+      }}
       client={client}
       initial={loaded.data}
       onBack={onBack}
@@ -202,12 +308,15 @@ function EditorLoader({
 }
 
 export function FigLabEditor({
+  access = { readOnly: false, canModerate: true },
   client = defaultClient,
   initial,
   onBack,
   project,
   reload,
 }: {
+  /** The caller's workspace role: viewers comment and export but never save. */
+  access?: { readOnly: boolean; canModerate: boolean; currentUserId?: string };
   client?: FigLabClient;
   initial: ProjectDocumentResponse;
   onBack: () => void;
@@ -245,13 +354,29 @@ export function FigLabEditor({
       ),
     [client, project.id],
   );
-  useEffect(() => bindAutosave(session, autosave), [autosave, session]);
+  useEffect(
+    () => (access.readOnly ? undefined : bindAutosave(session, autosave)),
+    [access.readOnly, autosave, session],
+  );
+  // Viewers check and export the revision they loaded, never local edits.
+  const loadedRevision = useRef({ document: initial.document, revision: initial.revision });
+  const saveExact = useCallback(
+    async () =>
+      access.readOnly
+        ? {
+            document: structuredClone(loadedRevision.current.document),
+            revision: loadedRevision.current.revision,
+          }
+        : autosave.saveNow(),
+    [access.readOnly, autosave],
+  );
   useEffect(() => () => rasterSources.dispose(), [rasterSources]);
 
   const navigateBack = useCallback(async () => {
+    if (access.readOnly) return onBack();
     const saved = await autosave.flushBeforeNavigation();
     if (saved) onBack();
-  }, [autosave, onBack]);
+  }, [access.readOnly, autosave, onBack]);
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
       if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "z") {
@@ -347,6 +472,7 @@ export function FigLabEditor({
     if (!result.data) return;
     session.getState().replaceDocument(result.data.document);
     setRevision(result.data.revision);
+    loadedRevision.current = { document: result.data.document, revision: result.data.revision };
     autosave.resetAfterReload();
   };
 
@@ -371,6 +497,11 @@ export function FigLabEditor({
           Redo
         </Button>
       </header>
+      {access.readOnly && (
+        <p className="read-only-banner" role="note">
+          View only: you can comment, check integrity, and export; edits here are not saved.
+        </p>
+      )}
       {(saveStatus === "conflict" || saveStatus === "error") && (
         <div className="conflict-banner" role="alert">
           {saveStatus === "conflict"
@@ -387,18 +518,20 @@ export function FigLabEditor({
       <div className="editor-layout">
         <aside aria-label="Source library" className="source-library">
           <h2>Source library</h2>
-          <label className="upload-control">
-            Upload original
-            <input
-              aria-label="Upload original"
-              accept="image/png,image/jpeg,image/tiff"
-              onChange={(event) => {
-                const file = event.currentTarget.files?.[0];
-                if (file) void upload(file);
-              }}
-              type="file"
-            />
-          </label>
+          {!access.readOnly && (
+            <label className="upload-control">
+              Upload original
+              <input
+                aria-label="Upload original"
+                accept="image/png,image/jpeg,image/tiff"
+                onChange={(event) => {
+                  const file = event.currentTarget.files?.[0];
+                  if (file) void upload(file);
+                }}
+                type="file"
+              />
+            </label>
+          )}
           <p role="status">{uploadStatus}</p>
           {assets.map((asset) => (
             <button
@@ -464,7 +597,7 @@ export function FigLabEditor({
             onExport={async (choice) => {
               setExportStatus("Saving the exact revision for export…");
               try {
-                const saved = await autosave.saveNow();
+                const saved = await saveExact();
                 if (!saved) {
                   setExportStatus(
                     "Save the project before exporting. Recover your local work first.",
@@ -526,9 +659,20 @@ export function FigLabEditor({
             projectId={project.id}
             projectName={project.name}
             rasterSources={rasterSources}
-            saveExact={() => autosave.saveNow()}
+            saveExact={saveExact}
             session={session}
           />
+          <CommentsPanel
+            canModerate={access.canModerate}
+            canResolve={!access.readOnly}
+            client={client}
+            currentUserId={access.currentUserId}
+            projectId={project.id}
+            session={session}
+          />
+          {!access.readOnly && (
+            <TemplatePanel client={client} project={project} saveExact={saveExact} />
+          )}
           <HistoryPanel
             client={client}
             onRestore={(document) => session.getState().apply(() => document, { selectedIds: [] })}

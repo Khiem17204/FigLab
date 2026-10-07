@@ -1,5 +1,33 @@
 import { randomUUID } from "node:crypto";
 import { isDeepStrictEqual } from "node:util";
+import {
+  type AdminJob,
+  type AdminOverview,
+  type AdminUser,
+  type AdminWorkspace,
+  type CollaborationRepository,
+  type CommentAnchor,
+  type CommentRecord,
+  type FolderRecord,
+  ForbiddenError,
+  type InvitePreview,
+  type InviteRecord,
+  type InviteRole,
+  type InviteStatus,
+  InviteUnavailableError,
+  type ProjectFilter,
+  type ProjectSearchHit,
+  roleAllows,
+  type TemplateRecord,
+  type TemplateSummary,
+  type WorkspaceAccess,
+  type WorkspaceKind,
+  type WorkspaceMember,
+  type WorkspaceRole,
+  type WorkspaceSummary,
+} from "./collaboration.js";
+
+export * from "./collaboration.js";
 
 export type ProjectStatus = "active" | "deleting" | "deleted";
 export type UploadStatus =
@@ -29,6 +57,11 @@ export type AuditAction =
   | "EXPORT_CREATED"
   | "PROJECT_DELETION_REQUESTED"
   | "INTEGRITY_REPORT_REQUESTED"
+  | "PROJECT_MOVED"
+  | "COMMENT_ADDED"
+  | "COMMENT_RESOLVED"
+  | "COMMENT_REOPENED"
+  | "COMMENT_DELETED"
   | "PROJECT_DELETED";
 
 export type PrincipalRole = "admin" | "member";
@@ -47,6 +80,9 @@ export interface ProjectRecord {
   workspaceId: string;
   name: string;
   status: ProjectStatus;
+  folderId?: string;
+  /** The user who created the project; absent for projects created before labs. */
+  createdBy?: string;
   createdAt: string;
   updatedAt: string;
 }
@@ -137,6 +173,11 @@ export interface IntegrityReportRecord {
 }
 /** Optional attribution for audited writes. */
 export type ActorOptions = { actorUserId?: string };
+export type CreateProjectOptions = ActorOptions & {
+  folderId?: string;
+  /** Starting document (for example from a template); the default empty figure otherwise. */
+  document?: unknown;
+};
 
 export class NotFoundError extends Error {
   constructor() {
@@ -171,17 +212,40 @@ const defaultDocument = (id: string) => ({
   styles: [],
 });
 
+/**
+ * Membership checks. Non-members get `NotFoundError` (nothing is revealed); members whose role
+ * is too low for the access get `ForbiddenError`. `access` defaults to `write`.
+ */
 export interface Authorizer {
-  requireWorkspace(principal: Principal, workspaceId: string): Promise<void>;
-  requireProject(principal: Principal, project: ProjectRecord): Promise<void>;
+  requireWorkspace(
+    principal: Principal,
+    workspaceId: string,
+    access?: WorkspaceAccess,
+  ): Promise<WorkspaceRole>;
+  requireProject(
+    principal: Principal,
+    project: ProjectRecord,
+    access?: WorkspaceAccess,
+  ): Promise<WorkspaceRole>;
 }
 
-export interface FigLabRepository {
+export interface FigLabRepository extends CollaborationRepository {
   bootstrapSingleUser(email?: string): Promise<Principal>;
   /** Records an externally authenticated user and provisions their personal workspace once. */
   ensureAuthUser(identity: AuthUserIdentity): Promise<Principal>;
-  createProject(workspaceId: string, name: string, options?: ActorOptions): Promise<ProjectRecord>;
-  listProjects(workspaceId: string): Promise<ProjectRecord[]>;
+  createProject(
+    workspaceId: string,
+    name: string,
+    options?: CreateProjectOptions,
+  ): Promise<ProjectRecord>;
+  /** Active projects, oldest first. */
+  listProjects(workspaceId: string, filter?: ProjectFilter): Promise<ProjectRecord[]>;
+  /** Throws `NotFoundError` when the folder is not in the project's workspace. */
+  moveProject(
+    projectId: string,
+    folderId: string | null,
+    options?: ActorOptions,
+  ): Promise<ProjectRecord>;
   /** Throws `NotFoundError` for missing and for deleted (tombstoned) projects. */
   getProject(projectId: string): Promise<ProjectRecord>;
   renameProject(projectId: string, name: string, options?: ActorOptions): Promise<ProjectRecord>;
@@ -264,12 +328,40 @@ export interface FigLabRepository {
    */
   deleteProjectData(projectId: string): Promise<void>;
 }
+/** Grants the principal's own (personal) workspace only, as its owner. */
 export class SingleUserAuthorizer implements Authorizer {
-  async requireWorkspace(principal: Principal, workspaceId: string): Promise<void> {
+  async requireWorkspace(principal: Principal, workspaceId: string): Promise<WorkspaceRole> {
     if (principal.workspaceId !== workspaceId) throw new NotFoundError();
+    return "owner";
   }
-  async requireProject(principal: Principal, project: ProjectRecord): Promise<void> {
-    await this.requireWorkspace(principal, project.workspaceId);
+  async requireProject(principal: Principal, project: ProjectRecord): Promise<WorkspaceRole> {
+    return this.requireWorkspace(principal, project.workspaceId);
+  }
+}
+
+/** Checks workspace membership roles; the principal's personal workspace needs no lookup. */
+export class MembershipAuthorizer implements Authorizer {
+  constructor(private readonly repository: Pick<CollaborationRepository, "getWorkspaceRole">) {}
+  async requireWorkspace(
+    principal: Principal,
+    workspaceId: string,
+    access: WorkspaceAccess = "write",
+  ): Promise<WorkspaceRole> {
+    assertResourceId(workspaceId);
+    const role =
+      principal.workspaceId === workspaceId
+        ? "owner"
+        : await this.repository.getWorkspaceRole(workspaceId, principal.id);
+    if (!role) throw new NotFoundError();
+    if (!roleAllows(role, access)) throw new ForbiddenError();
+    return role;
+  }
+  async requireProject(
+    principal: Principal,
+    project: ProjectRecord,
+    access: WorkspaceAccess = "write",
+  ): Promise<WorkspaceRole> {
+    return this.requireWorkspace(principal, project.workspaceId, access);
   }
 }
 
@@ -284,58 +376,130 @@ export class InMemoryFigLabRepository implements FigLabRepository {
   private readonly integrityReports: IntegrityReportRecord[] = [];
   private nextSequence = 1;
   private readonly queuedJobs: { name: string; payload: Record<string, unknown> }[] = [];
-  private principal?: Principal;
-  private readonly authUsers = new Map<string, Principal>();
+  private readonly users = new Map<string, { id: string; email: string; createdAt: string }>();
+  private readonly personalWorkspaces = new Map<string, string>();
+  private readonly workspaces = new Map<
+    string,
+    { id: string; name: string; kind: WorkspaceKind; createdAt: string }
+  >();
+  private readonly members: {
+    workspaceId: string;
+    userId: string;
+    role: WorkspaceRole;
+    createdAt: string;
+  }[] = [];
+  private readonly invites: {
+    id: string;
+    workspaceId: string;
+    tokenSha256: string;
+    role: InviteRole;
+    email?: string;
+    createdBy: string;
+    expiresAt: string;
+    acceptedBy?: string;
+    revokedAt?: string;
+    createdAt: string;
+  }[] = [];
+  private readonly folders = new Map<string, FolderRecord>();
+  private readonly templates = new Map<
+    string,
+    Omit<TemplateRecord, "createdBy"> & { createdById?: string }
+  >();
+  private readonly comments = new Map<string, CommentRow>();
 
   async bootstrapSingleUser(email = "local-admin@figlab.invalid"): Promise<Principal> {
-    if (!this.principal)
-      this.principal = {
-        id: "00000000-0000-4000-8000-000000000001",
-        email,
-        workspaceId: "00000000-0000-4000-8000-000000000002",
-      };
-    return { ...this.principal };
+    const id = "00000000-0000-4000-8000-000000000001";
+    const workspaceId = "00000000-0000-4000-8000-000000000002";
+    const existing = this.users.get(id);
+    if (!existing) {
+      this.users.set(id, { id, email, createdAt: timestamp() });
+      this.addPersonalWorkspace(id, workspaceId, "Default workspace");
+    }
+    return { id, email: existing?.email ?? email, workspaceId };
   }
   async ensureAuthUser(identity: AuthUserIdentity): Promise<Principal> {
     assertResourceId(identity.id);
-    const existing = this.authUsers.get(identity.id);
-    const principal = {
+    const existing = this.users.get(identity.id);
+    this.users.set(identity.id, {
       id: identity.id,
       email: identity.email,
-      workspaceId: existing?.workspaceId ?? randomUUID(),
-    };
-    this.authUsers.set(identity.id, principal);
-    return { ...principal };
+      createdAt: existing?.createdAt ?? timestamp(),
+    });
+    const workspaceId =
+      this.personalWorkspaces.get(identity.id) ??
+      this.addPersonalWorkspace(identity.id, randomUUID(), "Personal workspace");
+    return { id: identity.id, email: identity.email, workspaceId };
+  }
+  private addPersonalWorkspace(userId: string, workspaceId: string, name: string): string {
+    const createdAt = timestamp();
+    this.workspaces.set(workspaceId, { id: workspaceId, name, kind: "personal", createdAt });
+    this.members.push({ workspaceId, userId, role: "owner", createdAt });
+    this.personalWorkspaces.set(userId, workspaceId);
+    return workspaceId;
   }
   async createProject(
     workspaceId: string,
     name: string,
-    options: ActorOptions = {},
+    options: CreateProjectOptions = {},
   ): Promise<ProjectRecord> {
+    if (options.folderId) await this.folderIn(workspaceId, options.folderId);
     const now = timestamp();
-    const project = {
+    const project: ProjectRecord = {
       id: randomUUID(),
       workspaceId,
       name,
-      status: "active" as const,
+      status: "active",
+      ...(options.folderId ? { folderId: options.folderId } : {}),
+      ...(options.actorUserId ? { createdBy: options.actorUserId } : {}),
       createdAt: now,
       updatedAt: now,
     };
+    const document = options.document ?? defaultDocument(randomUUID());
     this.projects.set(project.id, project);
     this.documents.set(project.id, {
       projectId: project.id,
       revision: 0,
-      schemaVersion: 3,
-      document: defaultDocument(randomUUID()),
+      schemaVersion: schemaVersionOf(document),
+      document: structuredClone(document),
       updatedAt: now,
     });
     this.recordAudit(project.id, "PROJECT_CREATED", { name }, options.actorUserId);
     return { ...project };
   }
-  async listProjects(workspaceId: string): Promise<ProjectRecord[]> {
+  async listProjects(workspaceId: string, filter: ProjectFilter = {}): Promise<ProjectRecord[]> {
+    const query = filter.query?.trim().toLowerCase();
     return [...this.projects.values()]
-      .filter((project) => project.workspaceId === workspaceId && project.status === "active")
+      .filter(
+        (project) =>
+          project.workspaceId === workspaceId &&
+          project.status === "active" &&
+          (!query || project.name.toLowerCase().includes(query)) &&
+          (filter.folderId === undefined || (project.folderId ?? null) === filter.folderId) &&
+          (!filter.createdBy || project.createdBy === filter.createdBy),
+      )
       .map((project) => ({ ...project }));
+  }
+  async moveProject(
+    projectId: string,
+    folderId: string | null,
+    options: ActorOptions = {},
+  ): Promise<ProjectRecord> {
+    const project = await this.getProject(projectId);
+    if (folderId) await this.folderIn(project.workspaceId, folderId);
+    const { folderId: _previous, ...rest } = project;
+    const moved: ProjectRecord = {
+      ...rest,
+      ...(folderId ? { folderId } : {}),
+      updatedAt: timestamp(),
+    };
+    this.projects.set(projectId, moved);
+    this.recordAudit(projectId, "PROJECT_MOVED", { folderId }, options.actorUserId);
+    return { ...moved };
+  }
+  private async folderIn(workspaceId: string, folderId: string): Promise<FolderRecord> {
+    const folder = await this.getFolder(folderId);
+    if (folder.workspaceId !== workspaceId) throw new NotFoundError();
+    return folder;
   }
   async getProject(projectId: string): Promise<ProjectRecord> {
     const value = this.projects.get(projectId);
@@ -664,8 +828,449 @@ export class InMemoryFigLabRepository implements FigLabRepository {
     this.documents.delete(projectId);
     for (let index = this.versions.length - 1; index >= 0; index -= 1)
       if (this.versions[index]?.projectId === projectId) this.versions.splice(index, 1);
+    for (const [id, comment] of this.comments)
+      if (comment.projectId === projectId) this.comments.delete(id);
     this.projects.set(projectId, { ...project, status: "deleted", updatedAt: timestamp() });
     this.recordAudit(projectId, "PROJECT_DELETED", { name: project.name });
+  }
+  // Workspaces and members
+  async getWorkspaceRole(workspaceId: string, userId: string): Promise<WorkspaceRole | undefined> {
+    return this.members.find(
+      (member) => member.workspaceId === workspaceId && member.userId === userId,
+    )?.role;
+  }
+  async getWorkspace(
+    workspaceId: string,
+  ): Promise<{ id: string; name: string; kind: WorkspaceKind }> {
+    const workspace = this.workspaces.get(workspaceId);
+    if (!workspace) throw new NotFoundError();
+    return { id: workspace.id, name: workspace.name, kind: workspace.kind };
+  }
+  async listWorkspaces(userId: string): Promise<WorkspaceSummary[]> {
+    return this.members
+      .filter((member) => member.userId === userId)
+      .map((member) => this.workspaceSummary(member.workspaceId, member.role))
+      .sort(byWorkspaceOrder);
+  }
+  private workspaceSummary(workspaceId: string, role: WorkspaceRole): WorkspaceSummary {
+    const workspace = this.workspaces.get(workspaceId);
+    if (!workspace) throw new NotFoundError();
+    return {
+      ...workspace,
+      role,
+      memberCount: this.members.filter((member) => member.workspaceId === workspaceId).length,
+    };
+  }
+  async createLabWorkspace(userId: string, name: string): Promise<WorkspaceSummary> {
+    const id = randomUUID();
+    const createdAt = timestamp();
+    this.workspaces.set(id, { id, name, kind: "lab", createdAt });
+    this.members.push({ workspaceId: id, userId, role: "owner", createdAt });
+    return this.workspaceSummary(id, "owner");
+  }
+  async renameWorkspace(workspaceId: string, name: string): Promise<void> {
+    const workspace = this.workspaces.get(workspaceId);
+    if (!workspace) throw new NotFoundError();
+    workspace.name = name;
+  }
+  async listMembers(workspaceId: string): Promise<WorkspaceMember[]> {
+    return this.members
+      .filter((member) => member.workspaceId === workspaceId)
+      .map((member) => this.memberRecord(member));
+  }
+  private memberRecord(member: (typeof this.members)[number]): WorkspaceMember {
+    return {
+      userId: member.userId,
+      email: this.users.get(member.userId)?.email ?? "",
+      role: member.role,
+      joinedAt: member.createdAt,
+    };
+  }
+  async setMemberRole(
+    workspaceId: string,
+    userId: string,
+    role: WorkspaceRole,
+  ): Promise<WorkspaceMember> {
+    const member = this.members.find(
+      (entry) => entry.workspaceId === workspaceId && entry.userId === userId,
+    );
+    if (!member) throw new NotFoundError();
+    if (member.role === "owner" && role !== "owner") this.assertAnotherOwner(workspaceId, userId);
+    member.role = role;
+    return this.memberRecord(member);
+  }
+  async removeMember(workspaceId: string, userId: string): Promise<void> {
+    const index = this.members.findIndex(
+      (entry) => entry.workspaceId === workspaceId && entry.userId === userId,
+    );
+    const member = this.members[index];
+    if (!member) throw new NotFoundError();
+    if (member.role === "owner") this.assertAnotherOwner(workspaceId, userId);
+    this.members.splice(index, 1);
+  }
+  private assertAnotherOwner(workspaceId: string, userId: string): void {
+    if (
+      !this.members.some(
+        (entry) =>
+          entry.workspaceId === workspaceId && entry.userId !== userId && entry.role === "owner",
+      )
+    )
+      throw new ConflictError("A workspace needs at least one owner");
+  }
+  async createInvite(input: {
+    workspaceId: string;
+    role: InviteRole;
+    email?: string;
+    createdBy: string;
+    tokenSha256: string;
+    expiresAt: string;
+  }): Promise<InviteRecord> {
+    const invite = { id: randomUUID(), createdAt: timestamp(), ...input };
+    this.invites.push(invite);
+    return this.inviteRecord(invite);
+  }
+  private inviteStatus(invite: (typeof this.invites)[number]): InviteStatus {
+    if (invite.acceptedBy) return "accepted";
+    if (invite.revokedAt) return "revoked";
+    return Date.parse(invite.expiresAt) <= Date.now() ? "expired" : "pending";
+  }
+  private userRef(id: string): { id: string; email: string } {
+    return { id, email: this.users.get(id)?.email ?? "" };
+  }
+  private inviteRecord(invite: (typeof this.invites)[number]): InviteRecord {
+    return {
+      id: invite.id,
+      workspaceId: invite.workspaceId,
+      role: invite.role,
+      ...(invite.email ? { email: invite.email } : {}),
+      createdBy: this.userRef(invite.createdBy),
+      ...(invite.acceptedBy ? { acceptedBy: this.userRef(invite.acceptedBy) } : {}),
+      status: this.inviteStatus(invite),
+      expiresAt: invite.expiresAt,
+      createdAt: invite.createdAt,
+    };
+  }
+  async listInvites(workspaceId: string): Promise<InviteRecord[]> {
+    return this.invites
+      .filter((invite) => invite.workspaceId === workspaceId)
+      .reverse()
+      .map((invite) => this.inviteRecord(invite));
+  }
+  async revokeInvite(workspaceId: string, inviteId: string): Promise<InviteRecord> {
+    const invite = this.invites.find(
+      (entry) => entry.id === inviteId && entry.workspaceId === workspaceId,
+    );
+    if (!invite) throw new NotFoundError();
+    if (!invite.acceptedBy && !invite.revokedAt) invite.revokedAt = timestamp();
+    return this.inviteRecord(invite);
+  }
+  async previewInvite(tokenSha256: string): Promise<InvitePreview> {
+    const invite = this.invites.find((entry) => entry.tokenSha256 === tokenSha256);
+    if (!invite) throw new NotFoundError();
+    const workspace = await this.getWorkspace(invite.workspaceId);
+    return {
+      workspaceId: workspace.id,
+      workspaceName: workspace.name,
+      role: invite.role,
+      ...(invite.email ? { email: invite.email } : {}),
+      status: this.inviteStatus(invite),
+      expiresAt: invite.expiresAt,
+    };
+  }
+  async acceptInvite(
+    tokenSha256: string,
+    user: { id: string; email: string },
+  ): Promise<WorkspaceSummary> {
+    const invite = this.invites.find((entry) => entry.tokenSha256 === tokenSha256);
+    if (!invite) throw new NotFoundError();
+    const existing = await this.getWorkspaceRole(invite.workspaceId, user.id);
+    if (existing) return this.workspaceSummary(invite.workspaceId, existing);
+    assertInviteUsable(this.inviteStatus(invite), invite.email, user.email);
+    invite.acceptedBy = user.id;
+    this.members.push({
+      workspaceId: invite.workspaceId,
+      userId: user.id,
+      role: invite.role,
+      createdAt: timestamp(),
+    });
+    return this.workspaceSummary(invite.workspaceId, invite.role);
+  }
+
+  // Folders and search
+  async listFolders(workspaceId: string): Promise<FolderRecord[]> {
+    return [...this.folders.values()]
+      .filter((folder) => folder.workspaceId === workspaceId)
+      .sort((left, right) => left.name.localeCompare(right.name))
+      .map((folder) => ({ ...folder }));
+  }
+  async getFolder(folderId: string): Promise<FolderRecord> {
+    const folder = this.folders.get(folderId);
+    if (!folder) throw new NotFoundError();
+    return { ...folder };
+  }
+  async createFolder(workspaceId: string, name: string, parentId?: string): Promise<FolderRecord> {
+    if (parentId) await this.folderIn(workspaceId, parentId);
+    const now = timestamp();
+    const folder: FolderRecord = {
+      id: randomUUID(),
+      workspaceId,
+      ...(parentId ? { parentId } : {}),
+      name,
+      archived: false,
+      createdAt: now,
+      updatedAt: now,
+    };
+    this.folders.set(folder.id, folder);
+    return { ...folder };
+  }
+  async updateFolder(
+    folderId: string,
+    patch: { name?: string; parentId?: string | null; archived?: boolean },
+  ): Promise<FolderRecord> {
+    const folder = await this.getFolder(folderId);
+    if (patch.parentId) {
+      await this.folderIn(folder.workspaceId, patch.parentId);
+      for (let cursor: string | undefined = patch.parentId; cursor; ) {
+        if (cursor === folderId) throw new ConflictError("A folder cannot move into itself");
+        cursor = this.folders.get(cursor)?.parentId;
+      }
+    }
+    const { parentId: previousParent, ...rest } = folder;
+    const parentId = patch.parentId === undefined ? previousParent : (patch.parentId ?? undefined);
+    const updated: FolderRecord = {
+      ...rest,
+      ...(parentId ? { parentId } : {}),
+      ...(patch.name !== undefined ? { name: patch.name } : {}),
+      ...(patch.archived !== undefined ? { archived: patch.archived } : {}),
+      updatedAt: timestamp(),
+    };
+    this.folders.set(folderId, updated);
+    return { ...updated };
+  }
+  async searchProjects(userId: string, query: string, limit: number): Promise<ProjectSearchHit[]> {
+    const needle = query.trim().toLowerCase();
+    if (!needle) return [];
+    const hits: ProjectSearchHit[] = [];
+    for (const membership of this.members.filter((member) => member.userId === userId)) {
+      const workspace = this.workspaces.get(membership.workspaceId);
+      if (!workspace) continue;
+      for (const project of this.projects.values()) {
+        if (project.workspaceId !== workspace.id || project.status !== "active") continue;
+        const matchedFilenames = [...this.assets.values()]
+          .filter(
+            (asset) =>
+              asset.projectId === project.id && asset.filename.toLowerCase().includes(needle),
+          )
+          .map((asset) => asset.filename);
+        if (!project.name.toLowerCase().includes(needle) && matchedFilenames.length === 0) continue;
+        hits.push({
+          projectId: project.id,
+          projectName: project.name,
+          workspaceId: workspace.id,
+          workspaceName: workspace.name,
+          ...(project.folderId ? { folderId: project.folderId } : {}),
+          matchedFilenames,
+          updatedAt: project.updatedAt,
+        });
+      }
+    }
+    return hits
+      .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt))
+      .slice(0, limit);
+  }
+
+  // Templates
+  async createTemplate(input: {
+    workspaceId: string;
+    name: string;
+    document: unknown;
+    createdBy: string;
+  }): Promise<TemplateSummary> {
+    const template = {
+      id: randomUUID(),
+      workspaceId: input.workspaceId,
+      name: input.name,
+      schemaVersion: schemaVersionOf(input.document),
+      document: structuredClone(input.document),
+      createdById: input.createdBy,
+      createdAt: timestamp(),
+    };
+    this.templates.set(template.id, template);
+    return this.templateSummary(template);
+  }
+  private templateSummary(
+    template: Omit<TemplateRecord, "createdBy"> & { createdById?: string },
+  ): TemplateSummary {
+    return {
+      id: template.id,
+      workspaceId: template.workspaceId,
+      name: template.name,
+      ...(template.createdById ? { createdBy: this.userRef(template.createdById) } : {}),
+      createdAt: template.createdAt,
+    };
+  }
+  async listTemplates(workspaceId: string): Promise<TemplateSummary[]> {
+    return [...this.templates.values()]
+      .filter((template) => template.workspaceId === workspaceId)
+      .reverse()
+      .map((template) => this.templateSummary(template));
+  }
+  async getTemplate(templateId: string): Promise<TemplateRecord> {
+    const template = this.templates.get(templateId);
+    if (!template) throw new NotFoundError();
+    return {
+      ...this.templateSummary(template),
+      schemaVersion: template.schemaVersion,
+      document: structuredClone(template.document),
+    };
+  }
+  async deleteTemplate(templateId: string): Promise<void> {
+    if (!this.templates.delete(templateId)) throw new NotFoundError();
+  }
+
+  // Comments
+  async createComment(input: {
+    projectId: string;
+    authorUserId: string;
+    body: string;
+    parentId?: string;
+    anchor?: CommentAnchor;
+  }): Promise<CommentRecord> {
+    if (input.parentId) {
+      const parent = await this.getComment(input.parentId);
+      if (parent.projectId !== input.projectId || parent.parentId) throw new NotFoundError();
+    }
+    const now = timestamp();
+    const comment = {
+      id: randomUUID(),
+      projectId: input.projectId,
+      ...(input.parentId ? { parentId: input.parentId } : {}),
+      authorId: input.authorUserId,
+      ...(input.anchor ? { anchor: { ...input.anchor } } : {}),
+      body: input.body,
+      createdAt: now,
+      updatedAt: now,
+    };
+    this.comments.set(comment.id, comment);
+    this.recordAudit(
+      input.projectId,
+      "COMMENT_ADDED",
+      { commentId: comment.id, ...(input.parentId ? { parentId: input.parentId } : {}) },
+      input.authorUserId,
+    );
+    return this.commentRecord(comment);
+  }
+  private commentRecord(comment: CommentRow): CommentRecord {
+    const { authorId, resolvedById, ...rest } = structuredClone(comment);
+    return {
+      ...rest,
+      author: this.userRef(authorId),
+      ...(resolvedById ? { resolvedBy: this.userRef(resolvedById) } : {}),
+    };
+  }
+  async listComments(projectId: string): Promise<CommentRecord[]> {
+    return [...this.comments.values()]
+      .filter((comment) => comment.projectId === projectId)
+      .map((comment) => this.commentRecord(comment));
+  }
+  async getComment(commentId: string): Promise<CommentRecord> {
+    const comment = this.comments.get(commentId);
+    if (!comment) throw new NotFoundError();
+    return this.commentRecord(comment);
+  }
+  async updateComment(
+    commentId: string,
+    patch: { body?: string; resolvedBy?: string | null },
+    actorUserId: string,
+  ): Promise<CommentRecord> {
+    const comment = this.comments.get(commentId);
+    if (!comment) throw new NotFoundError();
+    const now = timestamp();
+    if (patch.body !== undefined) comment.body = patch.body;
+    if (patch.resolvedBy !== undefined) {
+      const wasResolved = comment.resolvedAt !== undefined;
+      if (patch.resolvedBy) {
+        comment.resolvedAt = now;
+        comment.resolvedById = patch.resolvedBy;
+      } else {
+        delete comment.resolvedAt;
+        delete comment.resolvedById;
+      }
+      if (wasResolved !== Boolean(patch.resolvedBy))
+        this.recordAudit(
+          comment.projectId,
+          patch.resolvedBy ? "COMMENT_RESOLVED" : "COMMENT_REOPENED",
+          { commentId },
+          actorUserId,
+        );
+    }
+    comment.updatedAt = now;
+    return this.commentRecord(comment);
+  }
+  async deleteComment(commentId: string, actorUserId: string): Promise<void> {
+    const comment = this.comments.get(commentId);
+    if (!comment) throw new NotFoundError();
+    for (const [id, reply] of this.comments)
+      if (reply.parentId === commentId) this.comments.delete(id);
+    this.comments.delete(commentId);
+    this.recordAudit(comment.projectId, "COMMENT_DELETED", { commentId }, actorUserId);
+  }
+
+  // Admin
+  async adminOverview(): Promise<AdminOverview> {
+    const workspaces = [...this.workspaces.values()];
+    const projects = [...this.projects.values()].filter((project) => project.status === "active");
+    const assets = [...this.assets.values()].filter((asset) => asset.status === "ready");
+    return {
+      users: this.users.size,
+      personalWorkspaces: workspaces.filter((workspace) => workspace.kind === "personal").length,
+      labWorkspaces: workspaces.filter((workspace) => workspace.kind === "lab").length,
+      projects: projects.length,
+      assets: assets.length,
+      storageBytes: assets.reduce((sum, asset) => sum + this.assetBytes(asset), 0),
+      pendingIntegrityReports: this.integrityReports.filter((report) => report.status === "pending")
+        .length,
+      failedJobs: 0,
+    };
+  }
+  private assetBytes(asset: AssetRecord): number {
+    return this.uploads.get(asset.uploadId)?.contentLength ?? 0;
+  }
+  async adminUsers(limit: number): Promise<AdminUser[]> {
+    return [...this.users.values()].slice(0, limit).map((user) => {
+      const workspaceIds = this.members
+        .filter((member) => member.userId === user.id)
+        .map((member) => member.workspaceId);
+      return {
+        ...user,
+        workspaces: workspaceIds.length,
+        projects: [...this.projects.values()].filter(
+          (project) => project.status === "active" && project.createdBy === user.id,
+        ).length,
+      };
+    });
+  }
+  async adminWorkspaces(limit: number): Promise<AdminWorkspace[]> {
+    return [...this.workspaces.values()].slice(0, limit).map((workspace) => {
+      const projectIds = new Set(
+        [...this.projects.values()]
+          .filter((project) => project.workspaceId === workspace.id && project.status === "active")
+          .map((project) => project.id),
+      );
+      const assets = [...this.assets.values()].filter(
+        (asset) => projectIds.has(asset.projectId) && asset.status === "ready",
+      );
+      return {
+        ...workspace,
+        members: this.members.filter((member) => member.workspaceId === workspace.id).length,
+        projects: projectIds.size,
+        assets: assets.length,
+        storageBytes: assets.reduce((sum, asset) => sum + this.assetBytes(asset), 0),
+      };
+    });
+  }
+  async adminFailedJobs(_limit: number): Promise<AdminJob[]> {
+    return [];
   }
   enqueue(name: string, payload: Record<string, unknown>): void {
     this.queuedJobs.push({ name, payload });
@@ -691,11 +1296,39 @@ export class InMemoryFigLabRepository implements FigLabRepository {
   }
   private withActor(event: (typeof this.auditEvents)[number]): AuditEvent {
     const { actorUserId, ...rest } = structuredClone(event);
-    const actor = [this.principal, ...this.authUsers.values()].find(
-      (user) => user !== undefined && user.id === actorUserId,
-    );
+    const actor = actorUserId ? this.users.get(actorUserId) : undefined;
     return actor ? { ...rest, actor: { id: actor.id, email: actor.email } } : rest;
   }
+}
+
+type CommentRow = Omit<CommentRecord, "author" | "resolvedBy"> & {
+  authorId: string;
+  resolvedById?: string;
+};
+
+/** Personal workspace first, then labs by name. */
+export function byWorkspaceOrder(left: WorkspaceSummary, right: WorkspaceSummary): number {
+  if (left.kind !== right.kind) return left.kind === "personal" ? -1 : 1;
+  return left.name.localeCompare(right.name) || left.createdAt.localeCompare(right.createdAt);
+}
+
+/** Throws unless a pending invite may be used by a user with this email. */
+export function assertInviteUsable(
+  status: InviteStatus,
+  inviteEmail: string | undefined,
+  userEmail: string,
+): void {
+  if (status === "expired")
+    throw new InviteUnavailableError("expired", "This invite link has expired; ask for a new one");
+  if (status === "revoked")
+    throw new InviteUnavailableError("revoked", "This invite link was revoked");
+  if (status === "accepted")
+    throw new InviteUnavailableError("accepted", "This invite link has already been used");
+  if (inviteEmail && inviteEmail.toLowerCase() !== userEmail.toLowerCase())
+    throw new InviteUnavailableError(
+      "email-mismatch",
+      `This invite is for ${inviteEmail}; sign in with that account to accept it`,
+    );
 }
 
 export function schemaVersionOf(document: unknown): number {

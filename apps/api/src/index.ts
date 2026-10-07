@@ -34,12 +34,17 @@ import {
   type AssetRecord,
   type Authorizer,
   assertResourceId,
+  ConflictError,
   createPostgresRepository,
   type FigLabRepository,
+  ForbiddenError,
+  InviteUnavailableError,
+  MembershipAuthorizer,
   NotFoundError,
   type Principal,
-  SingleUserAuthorizer,
+  roleAllows,
   UploadExpiredError,
+  type WorkspaceAccess,
 } from "@figlab/database";
 import {
   type FigureDocument,
@@ -56,6 +61,7 @@ import {
   supabaseResolver,
   UnauthorizedError,
 } from "./auth.js";
+import { createWorkspaceProject, registerCollaborationRoutes } from "./collaboration.js";
 
 const params = Type.Object({ projectId: Type.String({ minLength: 1 }) });
 const uploadParams = Type.Object({ uploadId: Type.String({ minLength: 1 }) });
@@ -136,7 +142,7 @@ export async function buildApp(dependencies: AppDependencies): Promise<FastifyIn
     resolvePrincipal = singleUserResolver(dependencies.principal);
   }
   const app = Fastify({ logger: false, ajv: { customOptions: { removeAdditional: false } } });
-  const authorizer = dependencies.authorizer ?? new SingleUserAuthorizer();
+  const authorizer = dependencies.authorizer ?? new MembershipAuthorizer(dependencies.repository);
   const jobsEnqueued = () => {
     try {
       dependencies.onJobsEnqueued?.();
@@ -158,17 +164,36 @@ export async function buildApp(dependencies: AppDependencies): Promise<FastifyIn
       },
     },
   });
-  const projectFor = async (principal: Principal, projectId: string) => {
+  const projectAccess = async (
+    principal: Principal,
+    projectId: string,
+    access: WorkspaceAccess,
+  ) => {
     assertResourceId(projectId);
     const project = await dependencies.repository.getProject(projectId);
-    await authorizer.requireProject(principal, project);
-    return project;
+    const role = await authorizer.requireProject(principal, project, access);
+    return { project, role };
+  };
+  const projectFor = async (principal: Principal, projectId: string, access: WorkspaceAccess) =>
+    (await projectAccess(principal, projectId, access)).project;
+  const collaboration = {
+    repository: dependencies.repository,
+    authorizer,
+    projectFor: projectAccess,
   };
   app.setErrorHandler((error, request, reply) => {
     if (error instanceof UnauthorizedError)
       return reply.status(401).send({ code: "UNAUTHORIZED", message: error.message });
     if (error instanceof NotFoundError)
       return reply.status(404).send({ code: "NOT_FOUND", message: "Resource not found" });
+    if (error instanceof ForbiddenError)
+      return reply.status(403).send({ code: "FORBIDDEN", message: error.message });
+    if (error instanceof InviteUnavailableError)
+      return reply
+        .status(409)
+        .send({ code: "INVITE_UNAVAILABLE", message: error.message, details: [error.reason] });
+    if (error instanceof ConflictError)
+      return reply.status(409).send({ code: "CONFLICT", message: error.message });
     if (error instanceof UploadExpiredError)
       return reply.status(400).send({ code: "UPLOAD_EXPIRED", message: error.message });
     if (error instanceof FigureDocumentDecodeError)
@@ -195,6 +220,8 @@ export async function buildApp(dependencies: AppDependencies): Promise<FastifyIn
     async (request) => ({
       email: request.principal.email,
       role: request.principal.role ?? "admin",
+      userId: request.principal.id,
+      personalWorkspaceId: request.principal.workspaceId,
     }),
   );
   app.get(
@@ -208,11 +235,11 @@ export async function buildApp(dependencies: AppDependencies): Promise<FastifyIn
     apiRoutes.projects,
     { schema: { body: CreateProjectRequestSchema, response: { 201: ProjectSchema } } },
     async (request, reply) => {
-      const body = request.body as { name: string };
-      const project = await dependencies.repository.createProject(
+      const project = await createWorkspaceProject(
+        collaboration,
+        request.principal,
         request.principal.workspaceId,
-        body.name,
-        actor(request.principal),
+        request.body as { name: string; folderId?: string; templateId?: string },
       );
       return reply.status(201).send(project);
     },
@@ -221,14 +248,14 @@ export async function buildApp(dependencies: AppDependencies): Promise<FastifyIn
     apiRoutes.project,
     { schema: { params, response: { 200: ProjectSchema } } },
     async (request) =>
-      projectFor(request.principal, (request.params as { projectId: string }).projectId),
+      projectFor(request.principal, (request.params as { projectId: string }).projectId, "read"),
   );
   app.put(
     apiRoutes.project,
     { schema: { params, body: UpdateProjectRequestSchema, response: { 200: ProjectSchema } } },
     async (request) => {
       const id = (request.params as { projectId: string }).projectId;
-      await projectFor(request.principal, id);
+      await projectFor(request.principal, id, "write");
       return dependencies.repository.renameProject(
         id,
         (request.body as { name: string }).name,
@@ -241,7 +268,9 @@ export async function buildApp(dependencies: AppDependencies): Promise<FastifyIn
     { schema: { params, response: { 202: ProjectSchema } } },
     async (request, reply) => {
       const id = (request.params as { projectId: string }).projectId;
-      await projectFor(request.principal, id);
+      const { project, role } = await projectAccess(request.principal, id, "write");
+      if (!roleAllows(role, "manage") && project.createdBy !== request.principal.id)
+        throw new ForbiddenError("Only the project's creator or a workspace admin can delete it");
       const deleting = await dependencies.repository.markProjectDeleting(
         id,
         actor(request.principal),
@@ -255,7 +284,7 @@ export async function buildApp(dependencies: AppDependencies): Promise<FastifyIn
     { schema: { params, response: { 200: ProjectDocumentResponseSchema } } },
     async (request) => {
       const id = (request.params as { projectId: string }).projectId;
-      await projectFor(request.principal, id);
+      await projectFor(request.principal, id, "read");
       return currentDocument(await dependencies.repository.getDocument(id));
     },
   );
@@ -278,7 +307,7 @@ export async function buildApp(dependencies: AppDependencies): Promise<FastifyIn
     },
     async (request, reply) => {
       const id = (request.params as { projectId: string }).projectId;
-      await projectFor(request.principal, id);
+      await projectFor(request.principal, id, "write");
       const body = request.body as { baseRevision: number; document: unknown };
       const document = migrateFigureDocument(body.document);
       await dependencies.repository.assertReadyAssets(id, sourceAssetIds(document));
@@ -319,14 +348,14 @@ export async function buildApp(dependencies: AppDependencies): Promise<FastifyIn
         contentLength: number;
         checksumSha256: string;
       };
-      await projectFor(request.principal, id);
+      const project = await projectFor(request.principal, id, "write");
       if (!isValidUpload(body, dependencies.maxUploadBytes ?? MAX_UPLOAD_BYTES))
         return reply
           .status(400)
           .send({ code: "UPLOAD_INVALID", message: "Unsupported upload claim" });
       const assetId = randomUUID();
       const uploadTtlSeconds = Math.min(600, Math.max(1, dependencies.uploadTtlSeconds ?? 600));
-      const key = `workspaces/${request.principal.workspaceId}/projects/${id}/assets/${assetId}/original`;
+      const key = `workspaces/${project.workspaceId}/projects/${id}/assets/${assetId}/original`;
       const upload = await dependencies.repository.createUpload({
         projectId: id,
         ...body,
@@ -364,7 +393,7 @@ export async function buildApp(dependencies: AppDependencies): Promise<FastifyIn
       const upload = await dependencies.repository.getUpload(
         resourceId((request.params as { uploadId: string }).uploadId),
       );
-      await projectFor(request.principal, upload.projectId);
+      await projectFor(request.principal, upload.projectId, "write");
       if (
         upload.status === "expired" ||
         (upload.status === "reserved" && new Date(upload.expiresAt).getTime() <= Date.now())
@@ -431,7 +460,7 @@ export async function buildApp(dependencies: AppDependencies): Promise<FastifyIn
     },
     async (request, reply) => {
       const id = (request.params as { projectId: string }).projectId;
-      await projectFor(request.principal, id);
+      await projectFor(request.principal, id, "read");
       const body = request.body as {
         format: ExportFormat;
         artboardId?: string;
@@ -466,7 +495,7 @@ export async function buildApp(dependencies: AppDependencies): Promise<FastifyIn
     { schema: { params, response: { 200: ExportListResponseSchema } } },
     async (request) => {
       const id = (request.params as { projectId: string }).projectId;
-      await projectFor(request.principal, id);
+      await projectFor(request.principal, id, "read");
       return { exports: await dependencies.repository.listExports(id) };
     },
   );
@@ -481,7 +510,7 @@ export async function buildApp(dependencies: AppDependencies): Promise<FastifyIn
     },
     async (request) => {
       const id = (request.params as { projectId: string }).projectId;
-      await projectFor(request.principal, id);
+      await projectFor(request.principal, id, "read");
       const query = request.query as { limit?: number; beforeSequence?: number };
       return dependencies.repository.pageAuditEvents(id, {
         limit: query.limit ?? DEFAULT_PAGE_SIZE,
@@ -500,7 +529,7 @@ export async function buildApp(dependencies: AppDependencies): Promise<FastifyIn
     },
     async (request) => {
       const id = (request.params as { projectId: string }).projectId;
-      await projectFor(request.principal, id);
+      await projectFor(request.principal, id, "read");
       const query = request.query as { limit?: number; beforeRevision?: number };
       return {
         versions: await dependencies.repository.listVersions(id, {
@@ -515,7 +544,7 @@ export async function buildApp(dependencies: AppDependencies): Promise<FastifyIn
     { schema: { params: versionParams, response: { 200: VersionResponseSchema } } },
     async (request) => {
       const { projectId, revision } = request.params as { projectId: string; revision: number };
-      await projectFor(request.principal, projectId);
+      await projectFor(request.principal, projectId, "read");
       return currentDocument(await dependencies.repository.getVersion(projectId, revision));
     },
   );
@@ -530,7 +559,7 @@ export async function buildApp(dependencies: AppDependencies): Promise<FastifyIn
     },
     async (request, reply) => {
       const id = (request.params as { projectId: string }).projectId;
-      await projectFor(request.principal, id);
+      await projectFor(request.principal, id, "read");
       const body = (request.body ?? {}) as { revision?: number };
       const revision = body.revision ?? (await dependencies.repository.getDocument(id)).revision;
       const record = await dependencies.repository.requestIntegrityReport(
@@ -547,7 +576,7 @@ export async function buildApp(dependencies: AppDependencies): Promise<FastifyIn
     { schema: { params, response: { 200: IntegrityReportListSchema } } },
     async (request) => {
       const id = (request.params as { projectId: string }).projectId;
-      await projectFor(request.principal, id);
+      await projectFor(request.principal, id, "read");
       const records = await dependencies.repository.listIntegrityReports(id, 20);
       return { reports: records.map(({ report: _body, ...summary }) => summary) };
     },
@@ -557,13 +586,14 @@ export async function buildApp(dependencies: AppDependencies): Promise<FastifyIn
     { schema: { params: reportParams, response: { 200: IntegrityReportRecordSchema } } },
     async (request) => {
       const { projectId, reportId } = request.params as { projectId: string; reportId: string };
-      await projectFor(request.principal, projectId);
+      await projectFor(request.principal, projectId, "read");
       assertResourceId(reportId);
       const record = await dependencies.repository.getIntegrityReport(reportId);
       if (record.projectId !== projectId) throw new NotFoundError();
       return record;
     },
   );
+  registerCollaborationRoutes(app, collaboration);
   return app;
 }
 
@@ -651,6 +681,7 @@ async function assetFor(
   await authorizer.requireProject(
     principal,
     await dependencies.repository.getProject(asset.projectId),
+    "read",
   );
   return asset;
 }

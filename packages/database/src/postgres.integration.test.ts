@@ -1,6 +1,7 @@
 import { readdir, readFile } from "node:fs/promises";
 import { Pool } from "pg";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { collaborationContract } from "./collaboration-contract.test-support.js";
 import { historyContract } from "./history-contract.test-support.js";
 import { PostgresFigLabRepository } from "./index.js";
 
@@ -11,9 +12,9 @@ describe.skipIf(!databaseUrl)("PostgresFigLabRepository", () => {
 
   beforeAll(async () => {
     await pool.query("DROP SCHEMA IF EXISTS graphile_worker CASCADE");
-    await pool.query(
-      "DROP TABLE IF EXISTS figlab_schema_migrations,export_records,audit_events,assets,upload_sessions,project_versions,project_documents,projects,workspace_members,workspaces,users CASCADE",
-    );
+    // Disposable test database only: start from an empty public schema every run.
+    await pool.query("DROP SCHEMA public CASCADE");
+    await pool.query("CREATE SCHEMA public");
     await pool.query("CREATE TABLE figlab_schema_migrations(name text PRIMARY KEY)");
     // Apply every migration in order, exactly as deploy/migrate.sh does.
     const migrations = new URL("../migrations/", import.meta.url);
@@ -21,7 +22,7 @@ describe.skipIf(!databaseUrl)("PostgresFigLabRepository", () => {
       await pool.query(await readFile(new URL(name, migrations), "utf8"));
     await pool.query("CREATE SCHEMA graphile_worker");
     await pool.query(
-      "CREATE TABLE graphile_worker.jobs(identifier text, payload jsonb, job_key text UNIQUE)",
+      "CREATE TABLE graphile_worker.jobs(identifier text, payload jsonb, job_key text UNIQUE, id bigserial, attempts int NOT NULL DEFAULT 0, max_attempts int NOT NULL DEFAULT 25, last_error text, run_at timestamptz NOT NULL DEFAULT now(), task_identifier text GENERATED ALWAYS AS (identifier) STORED)",
     );
     await pool.query(
       "CREATE FUNCTION graphile_worker.add_job(text,json,job_key text DEFAULT NULL,max_attempts int DEFAULT 25) RETURNS json LANGUAGE plpgsql AS $$ BEGIN INSERT INTO graphile_worker.jobs VALUES ($1,$2,$3) ON CONFLICT ON CONSTRAINT jobs_job_key_key DO NOTHING; RETURN '{}'::json; END $$",
@@ -33,13 +34,18 @@ describe.skipIf(!databaseUrl)("PostgresFigLabRepository", () => {
     const tableNames = [
       "assets",
       "audit_events",
+      "comments",
       "export_records",
       "figlab_schema_migrations",
+      "folders",
+      "integrity_reports",
       "project_documents",
+      "project_templates",
       "project_versions",
       "projects",
       "upload_sessions",
       "users",
+      "workspace_invites",
       "workspace_members",
       "workspaces",
     ];
@@ -156,6 +162,25 @@ describe.skipIf(!databaseUrl)("PostgresFigLabRepository", () => {
         },
       },
     ]);
+  });
+
+  it("reports failed jobs to admins", async () => {
+    await pool.query(
+      "INSERT INTO graphile_worker.jobs(identifier,payload,attempts,last_error) VALUES('verify_upload','{}',3,'sharp: unsupported image')",
+    );
+    expect(await repository.adminFailedJobs(5)).toEqual([
+      expect.objectContaining({
+        task: "verify_upload",
+        attempts: 3,
+        lastError: "sharp: unsupported image",
+      }),
+    ]);
+    expect((await repository.adminOverview()).failedJobs).toBe(1);
+    await pool.query("DELETE FROM graphile_worker.jobs");
+  });
+
+  describe("collaboration", () => {
+    collaborationContract(async () => repository);
   });
 
   describe("history", () => {

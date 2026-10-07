@@ -8,14 +8,17 @@ import { describe, expect, it } from "vitest";
 import {
   addLaneTableCommand,
   addMwLabelsCommand,
+  addPanelLabelsCommand,
   addScaleBarCommand,
   addZoomInsetCommand,
   copyMarkersCommand,
   formatLaneRow,
+  groupObjectsCommand,
   mergeViewsCommand,
   parseLaneRow,
   splitChannelsCommand,
   suggestedLut,
+  templateDocument,
 } from "./index.js";
 
 function view(id: string, assetId = "a", xPt = 10): ImageViewObjectV3 {
@@ -151,5 +154,39 @@ describe("blot and microscopy commands", () => {
     });
     expect(document.sources[1]?.markers).toEqual([{ yPx: 40, kDa: 70 }]);
     expect(() => copyMarkersCommand("a", "c")(documentWith())).toThrowError(/same height/);
+  });
+});
+
+describe("templates", () => {
+  it("keeps the layout without image references", () => {
+    let document = documentWith(view("p"), view("q", "b", 150));
+    document = addScaleBarCommand({ id: "bar", targetId: "p", lengthUm: 20 })(document);
+    document = addLaneTableCommand({ id: "lanes", targetId: "q", lanes: 3 })(document);
+    let next = 0;
+    document = addPanelLabelsCommand({
+      artboardId: "board",
+      targetIds: ["p", "q"],
+      newId: () => `label-${next++}`,
+    })(document);
+    document = groupObjectsCommand("row", ["p", "q"])(document);
+    const template = templateDocument(document);
+    expect(template.sources).toEqual([]);
+    expect(template.objects.map((object) => [object.id, object.type])).toEqual([
+      ["p", "shape"],
+      ["q", "shape"],
+      ["label-0", "text"],
+      ["label-1", "text"],
+    ]);
+    expect(template.objects[1]?.transform).toEqual(view("q", "b", 150).transform);
+    expect(template.objects.some((object) => object.type === "text" && object.panelLabel)).toBe(
+      false,
+    );
+    expect(template.groups).toEqual(
+      document.groups.map((group) => ({
+        ...group,
+        objectIds: group.objectIds.filter((id) => id !== "bar" && id !== "lanes"),
+      })),
+    );
+    expect(JSON.stringify(template)).not.toContain("sourceAssetId");
   });
 });

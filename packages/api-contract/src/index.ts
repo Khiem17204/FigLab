@@ -26,6 +26,27 @@ export const apiRoutes = {
   projectVersion: "/v1/projects/:projectId/versions/:revision",
   projectIntegrityReports: "/v1/projects/:projectId/integrity-reports",
   projectIntegrityReport: "/v1/projects/:projectId/integrity-reports/:reportId",
+  projectFolder: "/v1/projects/:projectId/folder",
+  projectComments: "/v1/projects/:projectId/comments",
+  projectComment: "/v1/projects/:projectId/comments/:commentId",
+  workspaces: "/v1/workspaces",
+  workspace: "/v1/workspaces/:workspaceId",
+  workspaceProjects: "/v1/workspaces/:workspaceId/projects",
+  workspaceMembers: "/v1/workspaces/:workspaceId/members",
+  workspaceMember: "/v1/workspaces/:workspaceId/members/:userId",
+  workspaceInvites: "/v1/workspaces/:workspaceId/invites",
+  workspaceInvite: "/v1/workspaces/:workspaceId/invites/:inviteId",
+  workspaceFolders: "/v1/workspaces/:workspaceId/folders",
+  workspaceFolder: "/v1/workspaces/:workspaceId/folders/:folderId",
+  workspaceTemplates: "/v1/workspaces/:workspaceId/templates",
+  workspaceTemplate: "/v1/workspaces/:workspaceId/templates/:templateId",
+  invite: "/v1/invites/:token",
+  inviteAccept: "/v1/invites/:token/accept",
+  search: "/v1/search",
+  adminOverview: "/v1/admin/overview",
+  adminUsers: "/v1/admin/users",
+  adminWorkspaces: "/v1/admin/workspaces",
+  adminJobs: "/v1/admin/jobs",
 } as const;
 
 export const MAX_EXPORT_DPI = 2400;
@@ -34,7 +55,10 @@ export const MAX_PAGE_SIZE = 200;
 export const ErrorCodeSchema = Type.Union([
   Type.Literal("BAD_REQUEST"),
   Type.Literal("UNAUTHORIZED"),
+  Type.Literal("FORBIDDEN"),
   Type.Literal("NOT_FOUND"),
+  Type.Literal("CONFLICT"),
+  Type.Literal("INVITE_UNAVAILABLE"),
   Type.Literal("REVISION_CONFLICT"),
   Type.Literal("UPLOAD_EXPIRED"),
   Type.Literal("UPLOAD_INVALID"),
@@ -65,6 +89,8 @@ export const CurrentUserResponseSchema = Type.Object(
   {
     email: Type.String({ minLength: 1 }),
     role: Type.Union([Type.Literal("admin"), Type.Literal("member")]),
+    userId: Type.Optional(Type.String({ minLength: 1 })),
+    personalWorkspaceId: Type.Optional(Type.String({ minLength: 1 })),
   },
   { additionalProperties: false },
 );
@@ -78,6 +104,8 @@ export const ProjectSchema = Type.Object(
     workspaceId: Type.String({ minLength: 1 }),
     name: Type.String({ minLength: 1, maxLength: 120 }),
     status: ProjectStatusSchema,
+    folderId: Type.Optional(Type.String({ minLength: 1 })),
+    createdBy: Type.Optional(Type.String({ minLength: 1 })),
     createdAt: Type.String({ minLength: 1 }),
     updatedAt: Type.String({ minLength: 1 }),
   },
@@ -85,7 +113,12 @@ export const ProjectSchema = Type.Object(
 );
 
 export const CreateProjectRequestSchema = Type.Object(
-  { name: Type.String({ minLength: 1, maxLength: 120 }) },
+  {
+    name: Type.String({ minLength: 1, maxLength: 120 }),
+    folderId: Type.Optional(Type.String({ format: "uuid" })),
+    /** A template of the same workspace to start from. */
+    templateId: Type.Optional(Type.String({ format: "uuid" })),
+  },
   { additionalProperties: false },
 );
 
@@ -382,3 +415,5 @@ export type VersionSummary = Static<typeof VersionSummarySchema>;
 export type VersionResponse = Static<typeof VersionResponseSchema>;
 export type IntegrityReportSummary = Static<typeof IntegrityReportSummarySchema>;
 export type IntegrityReportRecord = Static<typeof IntegrityReportRecordSchema>;
+
+export * from "./collaboration.js";

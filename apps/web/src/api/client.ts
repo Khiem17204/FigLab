@@ -1,19 +1,33 @@
 import {
+  type AdminJobListDto,
+  type AdminOverviewDto,
+  type AdminUserListDto,
+  type AdminWorkspaceListDto,
   type AssetDescriptor,
   type AssetStatus,
   type AuditEventPage,
   apiRoutes,
+  type CommentDto,
+  type CreateCommentRequest,
   type CurrentUserResponse,
   type ExportRecord,
+  type Folder,
   type IntegrityReportRecord,
   type IntegrityReportSummary,
+  type InviteDto,
+  type InvitePreviewDto,
   type PrepareUploadResponse,
   type Project,
   type ProjectDocumentResponse,
   type RecordExportRequest,
   type SaveDocumentResponse,
+  type SearchHit,
+  type Template,
   type VersionResponse,
   type VersionSummary,
+  type Workspace,
+  type WorkspaceMemberDto,
+  type WorkspaceRoleDto,
 } from "@figlab/api-contract";
 import type { FigureDocument } from "@figlab/figure-schema";
 
@@ -204,6 +218,179 @@ export class FigLabClient {
     });
   }
 
+  getProject(projectId: string): Promise<Project> {
+    return this.json(path(apiRoutes.project, { projectId }));
+  }
+
+  // Workspaces and labs
+  async listWorkspaces(): Promise<Workspace[]> {
+    return (await this.json<{ workspaces: Workspace[] }>(apiRoutes.workspaces)).workspaces;
+  }
+  createLab(name: string): Promise<Workspace> {
+    return this.json(apiRoutes.workspaces, { method: "POST", body: { name } });
+  }
+  async renameWorkspace(workspaceId: string, name: string): Promise<void> {
+    await this.json(path(apiRoutes.workspace, { workspaceId }), {
+      method: "PATCH",
+      body: { name },
+    });
+  }
+  async listWorkspaceProjects(
+    workspaceId: string,
+    filter: { q?: string; folderId?: string } = {},
+  ): Promise<Project[]> {
+    return (
+      await this.json<{ projects: Project[] }>(
+        withQuery(path(apiRoutes.workspaceProjects, { workspaceId }), filter),
+      )
+    ).projects;
+  }
+  createWorkspaceProject(
+    workspaceId: string,
+    body: { name: string; folderId?: string; templateId?: string },
+  ): Promise<Project> {
+    return this.json(path(apiRoutes.workspaceProjects, { workspaceId }), {
+      method: "POST",
+      body,
+    });
+  }
+  moveProject(projectId: string, folderId: string | null): Promise<Project> {
+    return this.json(path(apiRoutes.projectFolder, { projectId }), {
+      method: "PUT",
+      body: { folderId },
+    });
+  }
+  async listMembers(workspaceId: string): Promise<WorkspaceMemberDto[]> {
+    return (
+      await this.json<{ members: WorkspaceMemberDto[] }>(
+        path(apiRoutes.workspaceMembers, { workspaceId }),
+      )
+    ).members;
+  }
+  setMemberRole(
+    workspaceId: string,
+    userId: string,
+    role: WorkspaceRoleDto,
+  ): Promise<WorkspaceMemberDto> {
+    return this.json(path(apiRoutes.workspaceMember, { workspaceId, userId }), {
+      method: "PUT",
+      body: { role },
+    });
+  }
+  async removeMember(workspaceId: string, userId: string): Promise<void> {
+    await this.json(path(apiRoutes.workspaceMember, { workspaceId, userId }), {
+      method: "DELETE",
+    });
+  }
+  async listInvites(workspaceId: string): Promise<InviteDto[]> {
+    return (
+      await this.json<{ invites: InviteDto[] }>(path(apiRoutes.workspaceInvites, { workspaceId }))
+    ).invites;
+  }
+  createInvite(
+    workspaceId: string,
+    body: { role: Exclude<WorkspaceRoleDto, "owner">; email?: string; expiresInDays?: number },
+  ): Promise<{ invite: InviteDto; token: string }> {
+    return this.json(path(apiRoutes.workspaceInvites, { workspaceId }), {
+      method: "POST",
+      body,
+    });
+  }
+  revokeInvite(workspaceId: string, inviteId: string): Promise<InviteDto> {
+    return this.json(path(apiRoutes.workspaceInvite, { workspaceId, inviteId }), {
+      method: "DELETE",
+    });
+  }
+  previewInvite(token: string): Promise<InvitePreviewDto> {
+    return this.json(path(apiRoutes.invite, { token }));
+  }
+  acceptInvite(token: string): Promise<Workspace> {
+    return this.json(path(apiRoutes.inviteAccept, { token }), { method: "POST" });
+  }
+
+  // Folders, search, templates
+  async listFolders(workspaceId: string): Promise<Folder[]> {
+    return (
+      await this.json<{ folders: Folder[] }>(path(apiRoutes.workspaceFolders, { workspaceId }))
+    ).folders;
+  }
+  createFolder(workspaceId: string, name: string, parentId?: string): Promise<Folder> {
+    return this.json(path(apiRoutes.workspaceFolders, { workspaceId }), {
+      method: "POST",
+      body: { name, ...(parentId ? { parentId } : {}) },
+    });
+  }
+  updateFolder(
+    workspaceId: string,
+    folderId: string,
+    patch: { name?: string; parentId?: string | null; archived?: boolean },
+  ): Promise<Folder> {
+    return this.json(path(apiRoutes.workspaceFolder, { workspaceId, folderId }), {
+      method: "PATCH",
+      body: patch,
+    });
+  }
+  async search(q: string): Promise<SearchHit[]> {
+    return (await this.json<{ results: SearchHit[] }>(withQuery(apiRoutes.search, { q }))).results;
+  }
+  async listTemplates(workspaceId: string): Promise<Template[]> {
+    return (
+      await this.json<{ templates: Template[] }>(
+        path(apiRoutes.workspaceTemplates, { workspaceId }),
+      )
+    ).templates;
+  }
+  createTemplate(workspaceId: string, name: string, projectId: string): Promise<Template> {
+    return this.json(path(apiRoutes.workspaceTemplates, { workspaceId }), {
+      method: "POST",
+      body: { name, projectId },
+    });
+  }
+  async deleteTemplate(workspaceId: string, templateId: string): Promise<void> {
+    await this.json(path(apiRoutes.workspaceTemplate, { workspaceId, templateId }), {
+      method: "DELETE",
+    });
+  }
+
+  // Comments
+  async listComments(projectId: string): Promise<CommentDto[]> {
+    return (
+      await this.json<{ comments: CommentDto[] }>(path(apiRoutes.projectComments, { projectId }))
+    ).comments;
+  }
+  createComment(projectId: string, body: CreateCommentRequest): Promise<CommentDto> {
+    return this.json(path(apiRoutes.projectComments, { projectId }), { method: "POST", body });
+  }
+  updateComment(
+    projectId: string,
+    commentId: string,
+    patch: { body?: string; resolved?: boolean },
+  ): Promise<CommentDto> {
+    return this.json(path(apiRoutes.projectComment, { projectId, commentId }), {
+      method: "PATCH",
+      body: patch,
+    });
+  }
+  async deleteComment(projectId: string, commentId: string): Promise<void> {
+    await this.json(path(apiRoutes.projectComment, { projectId, commentId }), {
+      method: "DELETE",
+    });
+  }
+
+  // Admin
+  adminOverview(): Promise<AdminOverviewDto> {
+    return this.json(apiRoutes.adminOverview);
+  }
+  adminUsers(): Promise<AdminUserListDto> {
+    return this.json(apiRoutes.adminUsers);
+  }
+  adminWorkspaces(): Promise<AdminWorkspaceListDto> {
+    return this.json(apiRoutes.adminWorkspaces);
+  }
+  adminJobs(): Promise<AdminJobListDto> {
+    return this.json(apiRoutes.adminJobs);
+  }
+
   private async json<T>(url: string, init: { method?: string; body?: unknown } = {}): Promise<T> {
     const token = await this.auth?.getAccessToken();
     const headers: Record<string, string> = {
@@ -232,9 +419,9 @@ export class FigLabClient {
   }
 }
 
-function withQuery(url: string, query: Record<string, number | undefined>): string {
+function withQuery(url: string, query: Record<string, number | string | undefined>): string {
   const entries = Object.entries(query).filter(
-    (entry): entry is [string, number] => entry[1] !== undefined,
+    (entry): entry is [string, number | string] => entry[1] !== undefined && entry[1] !== "",
   );
   return entries.length === 0
     ? url

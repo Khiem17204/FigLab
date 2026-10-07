@@ -1,0 +1,90 @@
+/* Functional styles for labs, folders, search, and admin. Visual design is owned by the UI refresh. */
+.workspace-nav {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+}
+.workspace-nav form,
+.project-search form,
+.invite-link,
+.folder-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+.workspace-nav input,
+.workspace-nav select {
+  min-width: 0;
+  max-width: 100%;
+}
+.folder-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.folder-list button[aria-pressed="true"] {
+  font-weight: 600;
+  text-decoration: underline;
+}
+.folder-list button {
+  background: none;
+  border: 0;
+  cursor: pointer;
+  padding: 2px 0;
+  text-align: start;
+}
+.search-results,
+.lab-members table,
+.admin-panel table {
+  font-size: 13px;
+}
+.lab-members,
+.admin-panel,
+.invite-banner,
+.project-search {
+  display: grid;
+  gap: 8px;
+  margin-block-end: 16px;
+}
+.lab-members table,
+.admin-panel table {
+  border-collapse: collapse;
+}
+.lab-members td,
+.lab-members th,
+.admin-panel td,
+.admin-panel th {
+  border-bottom: 1px solid #d9dee8;
+  padding: 4px 6px;
+  text-align: start;
+}
+.invite-link input {
+  flex: 1;
+  min-width: 0;
+}
+.admin-stats {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: 2px 12px;
+}
+.invite-banner {
+  border: 1px solid #0f4cbd;
+  border-radius: 6px;
+  padding: 12px;
+}
+.comment-thread {
+  border-bottom: 1px solid #d9dee8;
+  padding-block: 6px;
+}
+.comment-thread.resolved {
+  opacity: 0.65;
+}
+.comment-reply {
+  margin-inline-start: 1em;
+}
+.read-only-banner {
+  background: #fff7e6;
+  border: 1px solid #f0b54a;
+  border-radius: 4px;
+  padding: 6px 10px;
+}

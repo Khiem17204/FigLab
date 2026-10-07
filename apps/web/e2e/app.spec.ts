@@ -726,3 +726,206 @@ test("calibrates by hand, adds a scale bar and lane labels, and checks integrity
   expect((await download).suggestedFilename()).toMatch(/^cell-atlas-provenance-r\d+\.zip$/);
   expect(exports).toEqual([expect.objectContaining({ format: "pdf", dpi: 300 })]);
 });
+
+const INVITE_TOKEN = "A".repeat(43);
+const personalWorkspace = {
+  id: "workspace-1",
+  name: "Personal workspace",
+  kind: "personal",
+  role: "owner",
+  memberCount: 1,
+  createdAt: "2026-10-01T00:00:00.000Z",
+};
+const labWorkspace = {
+  id: "lab-1",
+  name: "Ramos Lab",
+  kind: "lab",
+  role: "viewer",
+  memberCount: 3,
+  createdAt: "2026-10-02T00:00:00.000Z",
+};
+const labProject = { ...project, id: "project-lab", workspaceId: "lab-1", name: "Lab blots" };
+
+/** Mocks the lab routes for a user who is owner of their personal workspace. */
+async function mockLabs(page: import("@playwright/test").Page, labRole = "owner") {
+  // "none": not a member until the invite is accepted, then a viewer.
+  const lab = { ...labWorkspace, role: labRole === "none" ? "viewer" : labRole };
+  const calls: { method: string; url: string; body?: unknown }[] = [];
+  let joined = false;
+  await page.route(/\/v1\/me$/, (route) =>
+    route.fulfill({
+      json: {
+        email: "pi@lab.test",
+        role: "member",
+        userId: "user-1",
+        personalWorkspaceId: personalWorkspace.id,
+      },
+    }),
+  );
+  await page.route(/\/v1\/workspaces$/, (route) =>
+    route.fulfill({
+      json: {
+        workspaces: joined || labRole !== "none" ? [personalWorkspace, lab] : [personalWorkspace],
+      },
+    }),
+  );
+  await page.route(/\/v1\/workspaces\/[^/]+\/(folders|templates)$/, (route) =>
+    route.fulfill({ json: { folders: [], templates: [] } }),
+  );
+  await page.route(/\/v1\/workspaces\/lab-1\/projects(\?.*)?$/, (route) =>
+    route.fulfill({ json: { projects: [labProject] } }),
+  );
+  await page.route(/\/v1\/workspaces\/lab-1\/members$/, (route) =>
+    route.fulfill({
+      json: {
+        members: [
+          {
+            userId: "user-1",
+            email: "pi@lab.test",
+            role: labRole === "none" ? "viewer" : labRole,
+            joinedAt: "2026-10-02T00:00:00.000Z",
+          },
+          {
+            userId: "user-2",
+            email: "student@lab.test",
+            role: "editor",
+            joinedAt: "2026-10-03T00:00:00.000Z",
+          },
+        ],
+      },
+    }),
+  );
+  await page.route(/\/v1\/workspaces\/lab-1\/invites$/, async (route) => {
+    const method = route.request().method();
+    calls.push({
+      method,
+      url: route.request().url(),
+      body: route.request().postDataJSON() ?? undefined,
+    });
+    if (method === "GET") return route.fulfill({ json: { invites: [] } });
+    return route.fulfill({
+      status: 201,
+      json: {
+        token: INVITE_TOKEN,
+        invite: {
+          id: "invite-1",
+          workspaceId: "lab-1",
+          role: "viewer",
+          createdBy: { id: "user-1", email: "pi@lab.test" },
+          status: "pending",
+          expiresAt: "2026-10-14T00:00:00.000Z",
+          createdAt: "2026-10-07T00:00:00.000Z",
+        },
+      },
+    });
+  });
+  await page.route(new RegExp(`/v1/invites/${INVITE_TOKEN}$`), (route) =>
+    route.fulfill({
+      json: {
+        workspaceId: "lab-1",
+        workspaceName: "Ramos Lab",
+        role: "viewer",
+        status: "pending",
+        expiresAt: "2026-10-14T00:00:00.000Z",
+      },
+    }),
+  );
+  await page.route(new RegExp(`/v1/invites/${INVITE_TOKEN}/accept$`), (route) => {
+    joined = true;
+    calls.push({ method: "POST", url: route.request().url() });
+    return route.fulfill({ json: { ...lab, role: "viewer" } });
+  });
+  return calls;
+}
+
+test("switches to a lab and creates a copyable invite link", async ({ page, context }) => {
+  await context.grantPermissions(["clipboard-read", "clipboard-write"]);
+  const calls = await mockLabs(page);
+  await page.goto("/");
+  await page.getByLabel("Workspace").selectOption("lab-1");
+  await expect(page.getByText("Lab · Ramos Lab")).toBeVisible();
+  await expect(page.getByRole("button", { name: "Open Lab blots" })).toBeVisible();
+  await page.getByRole("button", { name: "Lab members" }).click();
+  await expect(page.getByRole("table", { name: "Members" })).toContainText("student@lab.test");
+  await page.getByLabel("Invite role").selectOption("viewer");
+  await page.getByLabel("Only for email (optional)").fill("new@lab.test");
+  await page.getByRole("button", { name: "Create invite link" }).click();
+  await expect(page.getByLabel("Invite link")).toHaveValue(
+    `http://127.0.0.1:4273/?invite=${INVITE_TOKEN}`.replace("4273", new URL(page.url()).port),
+  );
+  expect(calls.find((call) => call.method === "POST")?.body).toEqual({
+    role: "viewer",
+    email: "new@lab.test",
+  });
+  await page.getByRole("button", { name: "Copy link" }).click();
+  await expect(page.getByRole("status").filter({ hasText: "Invite link copied." })).toBeVisible();
+});
+
+test("joins a lab from an invite link and opens its projects view-only with comments", async ({
+  page,
+}) => {
+  const calls = await mockLabs(page, "none");
+  const comments: { body: string; anchor?: unknown }[] = [];
+  await page.route(/\/v1\/projects\/project-lab\/document$/, (route) =>
+    route.fulfill({ json: { ...documentResponse, projectId: "project-lab" } }),
+  );
+  await page.route(/\/v1\/projects\/project-lab\/comments$/, async (route) => {
+    if (route.request().method() === "POST") {
+      const body = route.request().postDataJSON() as { body: string; anchor?: unknown };
+      comments.push(body);
+      return route.fulfill({
+        status: 201,
+        json: {
+          id: `comment-${comments.length}`,
+          projectId: "project-lab",
+          author: { id: "user-1", email: "pi@lab.test" },
+          body: body.body,
+          ...(body.anchor ? { anchor: body.anchor } : {}),
+          createdAt: "2026-10-07T00:00:00.000Z",
+          updatedAt: "2026-10-07T00:00:00.000Z",
+        },
+      });
+    }
+    return route.fulfill({
+      json: {
+        comments: comments.map((comment, index) => ({
+          id: `comment-${index + 1}`,
+          projectId: "project-lab",
+          author: { id: "user-1", email: "pi@lab.test" },
+          body: comment.body,
+          ...(comment.anchor ? { anchor: comment.anchor } : {}),
+          createdAt: "2026-10-07T00:00:00.000Z",
+          updatedAt: "2026-10-07T00:00:00.000Z",
+        })),
+      },
+    });
+  });
+  let saves = 0;
+  await page.route(/\/v1\/projects\/project-lab\/document$/, async (route) => {
+    if (route.request().method() === "PUT") saves += 1;
+    return route.fulfill({ json: { ...documentResponse, projectId: "project-lab" } });
+  });
+
+  await page.goto(`/?invite=${INVITE_TOKEN}`);
+  await expect(page.getByRole("region", { name: "Lab invite" })).toContainText(
+    "You are invited to join Ramos Lab as viewer.",
+  );
+  await page.getByRole("button", { name: "Join Ramos Lab" }).click();
+  await expect.poll(() => calls.some((call) => call.url.endsWith("/accept"))).toBe(true);
+  await expect(page.getByText("Lab · Ramos Lab")).toBeVisible();
+  expect(new URL(page.url()).search).toBe("");
+
+  await page.getByRole("button", { name: "Open Lab blots" }).click();
+  await expect(page.getByRole("note")).toContainText("View only");
+  await expect(page.getByLabel("Upload original")).toBeHidden();
+  await expect(page.getByRole("region", { name: "Template" })).toHaveCount(0);
+  await page.getByLabel("Comment", { exact: true }).fill("Lane 3 looks saturated");
+  await page.getByRole("button", { name: "Add comment" }).click();
+  await expect(page.getByRole("list", { name: "Comment threads" })).toContainText(
+    "Lane 3 looks saturated",
+  );
+  expect(comments).toEqual([{ body: "Lane 3 looks saturated", anchor: { artboardId: "board-1" } }]);
+  await page.getByRole("button", { name: "Projects" }).click();
+  await expect(page.getByRole("heading", { name: "Projects" })).toBeVisible();
+  expect(saves).toBe(0);
+});
