@@ -22,6 +22,9 @@ describe("public API contracts", () => {
       asset: "/v1/assets/:assetId",
       assetDownloadUrl: "/v1/assets/:assetId/download-url",
       projectExports: "/v1/projects/:projectId/exports",
+      projectAuditEvents: "/v1/projects/:projectId/audit-events",
+      projectVersions: "/v1/projects/:projectId/versions",
+      projectVersion: "/v1/projects/:projectId/versions/:revision",
     });
   });
 
@@ -88,6 +91,22 @@ describe("public API contracts", () => {
 
     expect(Value.Check(RecordExportRequestSchema, request)).toBe(true);
     expect(Value.Check(RecordExportRequestSchema, { ...request, widthPx: 10_001 })).toBe(false);
+  });
+
+  it("records TIFF, PDF, and SVG exports with an optional figure and DPI", () => {
+    const request = {
+      format: "tiff",
+      artboardId: "board-2",
+      dpi: 600,
+      revision: 3,
+      widthPx: 2102,
+      heightPx: 4016,
+      checksumSha256: "d".repeat(64),
+    };
+    expect(Value.Check(RecordExportRequestSchema, request)).toBe(true);
+    expect(Value.Check(RecordExportRequestSchema, { ...request, format: "pdf" })).toBe(true);
+    expect(Value.Check(RecordExportRequestSchema, { ...request, format: "eps" })).toBe(false);
+    expect(Value.Check(RecordExportRequestSchema, { ...request, dpi: 2401 })).toBe(false);
   });
 
   it("uses the typed revision-conflict error envelope", () => {

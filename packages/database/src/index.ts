@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { isDeepStrictEqual } from "node:util";
 
-export type ProjectStatus = "active" | "deleting";
+export type ProjectStatus = "active" | "deleting" | "deleted";
 export type UploadStatus =
   | "reserved"
   | "uploaded"
@@ -19,8 +19,15 @@ export type AuditAction =
   | "DISPLAY_CHANGED"
   | "OBJECT_TRANSFORMED"
   | "OBJECT_REMOVED"
+  | "OBJECT_CREATED"
+  | "OBJECT_CHANGED"
+  | "ARTBOARD_CREATED"
+  | "ARTBOARD_CHANGED"
+  | "ARTBOARD_REMOVED"
+  | "GROUPS_CHANGED"
   | "ASSET_UPLOADED"
   | "EXPORT_CREATED"
+  | "PROJECT_DELETION_REQUESTED"
   | "PROJECT_DELETED";
 
 export type PrincipalRole = "admin" | "member";
@@ -81,18 +88,41 @@ export interface AuditEvent {
   projectId: string;
   action: AuditAction;
   details: Record<string, unknown>;
+  /** The user who caused the event; absent for background work and older events. */
+  actor?: { id: string; email: string };
+  /** Monotonic order across the whole trail; events from one save share `createdAt`. */
+  sequence: number;
   createdAt: string;
 }
+export interface AuditEventPage {
+  events: AuditEvent[];
+  /** Pass as `beforeSequence` to read older events; absent on the last page. */
+  nextBeforeSequence?: number;
+}
+export interface VersionSummary {
+  revision: number;
+  schemaVersion: number;
+  createdAt: string;
+}
+export interface VersionRecord extends VersionSummary {
+  projectId: string;
+  document: unknown;
+}
+export type ExportFormat = "png" | "tiff" | "pdf" | "svg";
 export interface ExportRecord {
   id: string;
   projectId: string;
   revision: number;
-  format: "png";
+  format: ExportFormat;
+  artboardId?: string;
+  dpi?: number;
   widthPx: number;
   heightPx: number;
   checksumSha256: string;
   createdAt: string;
 }
+/** Optional attribution for audited writes. */
+export type ActorOptions = { actorUserId?: string };
 
 export class NotFoundError extends Error {
   constructor() {
@@ -135,16 +165,18 @@ export interface FigLabRepository {
   bootstrapSingleUser(email?: string): Promise<Principal>;
   /** Records an externally authenticated user and provisions their personal workspace once. */
   ensureAuthUser(identity: AuthUserIdentity): Promise<Principal>;
-  createProject(workspaceId: string, name: string): Promise<ProjectRecord>;
+  createProject(workspaceId: string, name: string, options?: ActorOptions): Promise<ProjectRecord>;
   listProjects(workspaceId: string): Promise<ProjectRecord[]>;
+  /** Throws `NotFoundError` for missing and for deleted (tombstoned) projects. */
   getProject(projectId: string): Promise<ProjectRecord>;
-  renameProject(projectId: string, name: string): Promise<ProjectRecord>;
-  markProjectDeleting(projectId: string): Promise<ProjectRecord>;
+  renameProject(projectId: string, name: string, options?: ActorOptions): Promise<ProjectRecord>;
+  markProjectDeleting(projectId: string, options?: ActorOptions): Promise<ProjectRecord>;
   getDocument(projectId: string): Promise<DocumentRecord>;
   saveDocument(
     projectId: string,
     baseRevision: number,
     document: unknown,
+    options?: ActorOptions,
   ): Promise<
     { kind: "saved"; document: DocumentRecord } | { kind: "conflict"; currentRevision: number }
   >;
@@ -177,9 +209,29 @@ export interface FigLabRepository {
     >,
   ): Promise<AssetRecord>;
   assertReadyAssets(projectId: string, ids: Iterable<string>): Promise<void>;
-  recordExport(input: Omit<ExportRecord, "id" | "createdAt">): Promise<ExportRecord>;
+  recordExport(
+    input: Omit<ExportRecord, "id" | "createdAt">,
+    options?: ActorOptions,
+  ): Promise<ExportRecord>;
+  listExports(projectId: string): Promise<ExportRecord[]>;
+  /** Every event for a project, oldest first. */
   listAuditEvents(projectId: string): Promise<AuditEvent[]>;
+  /** Newest-first page of events strictly older than `beforeSequence`. */
+  pageAuditEvents(
+    projectId: string,
+    page: { limit: number; beforeSequence?: number },
+  ): Promise<AuditEventPage>;
+  /** Saved revisions, newest first, strictly older than `beforeRevision`. */
+  listVersions(
+    projectId: string,
+    page: { limit: number; beforeRevision?: number },
+  ): Promise<VersionSummary[]>;
+  getVersion(projectId: string, revision: number): Promise<VersionRecord>;
   listProjectAssets(projectId: string): Promise<AssetRecord[]>;
+  /**
+   * Removes a project's content (documents, versions, uploads, assets) and leaves a tombstone:
+   * the project row (status `deleted`), its audit events, and its export records remain.
+   */
   deleteProjectData(projectId: string): Promise<void>;
 }
 export class SingleUserAuthorizer implements Authorizer {
@@ -196,8 +248,10 @@ export class InMemoryFigLabRepository implements FigLabRepository {
   private readonly documents = new Map<string, DocumentRecord>();
   private readonly uploads = new Map<string, UploadRecord>();
   private readonly assets = new Map<string, AssetRecord>();
-  private readonly auditEvents: AuditEvent[] = [];
+  private readonly auditEvents: (Omit<AuditEvent, "actor"> & { actorUserId?: string })[] = [];
+  private readonly versions: VersionRecord[] = [];
   private readonly exports: ExportRecord[] = [];
+  private nextSequence = 1;
   private readonly queuedJobs: { name: string; payload: Record<string, unknown> }[] = [];
   private principal?: Principal;
   private readonly authUsers = new Map<string, Principal>();
@@ -222,7 +276,11 @@ export class InMemoryFigLabRepository implements FigLabRepository {
     this.authUsers.set(identity.id, principal);
     return { ...principal };
   }
-  async createProject(workspaceId: string, name: string): Promise<ProjectRecord> {
+  async createProject(
+    workspaceId: string,
+    name: string,
+    options: ActorOptions = {},
+  ): Promise<ProjectRecord> {
     const now = timestamp();
     const project = {
       id: randomUUID(),
@@ -240,7 +298,7 @@ export class InMemoryFigLabRepository implements FigLabRepository {
       document: defaultDocument(randomUUID()),
       updatedAt: now,
     });
-    this.recordAudit(project.id, "PROJECT_CREATED", { name });
+    this.recordAudit(project.id, "PROJECT_CREATED", { name }, options.actorUserId);
     return { ...project };
   }
   async listProjects(workspaceId: string): Promise<ProjectRecord[]> {
@@ -250,22 +308,27 @@ export class InMemoryFigLabRepository implements FigLabRepository {
   }
   async getProject(projectId: string): Promise<ProjectRecord> {
     const value = this.projects.get(projectId);
-    if (!value) throw new NotFoundError();
+    if (!value || value.status === "deleted") throw new NotFoundError();
     return { ...value };
   }
-  async renameProject(projectId: string, name: string): Promise<ProjectRecord> {
+  async renameProject(
+    projectId: string,
+    name: string,
+    options: ActorOptions = {},
+  ): Promise<ProjectRecord> {
     const project = await this.getProject(projectId);
     project.name = name;
     project.updatedAt = timestamp();
     this.projects.set(projectId, project);
-    this.recordAudit(projectId, "PROJECT_RENAMED", { name });
+    this.recordAudit(projectId, "PROJECT_RENAMED", { name }, options.actorUserId);
     return { ...project };
   }
-  async markProjectDeleting(projectId: string): Promise<ProjectRecord> {
+  async markProjectDeleting(projectId: string, options: ActorOptions = {}): Promise<ProjectRecord> {
     const project = await this.getProject(projectId);
     project.status = "deleting";
     project.updatedAt = timestamp();
     this.projects.set(projectId, project);
+    this.recordAudit(projectId, "PROJECT_DELETION_REQUESTED", {}, options.actorUserId);
     this.enqueue("delete_project", { projectId });
     return { ...project };
   }
@@ -278,6 +341,7 @@ export class InMemoryFigLabRepository implements FigLabRepository {
     projectId: string,
     baseRevision: number,
     document: unknown,
+    options: ActorOptions = {},
   ): Promise<
     { kind: "saved"; document: DocumentRecord } | { kind: "conflict"; currentRevision: number }
   > {
@@ -291,9 +355,22 @@ export class InMemoryFigLabRepository implements FigLabRepository {
       updatedAt: timestamp(),
     };
     this.documents.set(projectId, updated);
-    this.recordAudit(projectId, "DOCUMENT_UPDATED", deriveDocumentDiff(old.document, document));
+    this.versions.push({
+      projectId,
+      revision: updated.revision,
+      schemaVersion: updated.schemaVersion,
+      document: structuredClone(document),
+      createdAt: updated.updatedAt,
+    });
+    const actor = options.actorUserId;
+    this.recordAudit(
+      projectId,
+      "DOCUMENT_UPDATED",
+      deriveDocumentDiff(old.document, document),
+      actor,
+    );
     for (const event of deriveDocumentAuditEvents(old.document, document))
-      this.recordAudit(projectId, event.action, event.details);
+      this.recordAudit(projectId, event.action, event.details, actor);
     return { kind: "saved", document: structuredClone(updated) };
   }
   async createUpload(input: {
@@ -413,21 +490,70 @@ export class InMemoryFigLabRepository implements FigLabRepository {
       if (asset.projectId !== projectId || asset.status !== "ready") throw new NotFoundError();
     }
   }
-  async recordExport(input: Omit<ExportRecord, "id" | "createdAt">): Promise<ExportRecord> {
+  async recordExport(
+    input: Omit<ExportRecord, "id" | "createdAt">,
+    options: ActorOptions = {},
+  ): Promise<ExportRecord> {
     const document = await this.getDocument(input.projectId);
     if (document.revision !== input.revision) throw new NotFoundError();
     const record = { ...input, id: randomUUID(), createdAt: timestamp() };
     this.exports.push(record);
-    this.recordAudit(input.projectId, "EXPORT_CREATED", {
-      exportId: record.id,
-      revision: input.revision,
-    });
+    this.recordAudit(
+      input.projectId,
+      "EXPORT_CREATED",
+      exportAuditDetails(record),
+      options.actorUserId,
+    );
     return { ...record };
+  }
+  async listExports(projectId: string): Promise<ExportRecord[]> {
+    return this.exports
+      .filter((record) => record.projectId === projectId)
+      .reverse()
+      .map((record) => ({ ...record }));
   }
   async listAuditEvents(projectId: string): Promise<AuditEvent[]> {
     return this.auditEvents
       .filter((event) => event.projectId === projectId)
-      .map((event) => structuredClone(event));
+      .map((event) => this.withActor(event));
+  }
+  async pageAuditEvents(
+    projectId: string,
+    page: { limit: number; beforeSequence?: number },
+  ): Promise<AuditEventPage> {
+    const matching = this.auditEvents
+      .filter(
+        (event) =>
+          event.projectId === projectId &&
+          (page.beforeSequence === undefined || event.sequence < page.beforeSequence),
+      )
+      .reverse();
+    const events = matching.slice(0, page.limit).map((event) => this.withActor(event));
+    const last = events.at(-1);
+    return matching.length > page.limit && last
+      ? { events, nextBeforeSequence: last.sequence }
+      : { events };
+  }
+  async listVersions(
+    projectId: string,
+    page: { limit: number; beforeRevision?: number },
+  ): Promise<VersionSummary[]> {
+    return this.versions
+      .filter(
+        (version) =>
+          version.projectId === projectId &&
+          (page.beforeRevision === undefined || version.revision < page.beforeRevision),
+      )
+      .reverse()
+      .slice(0, page.limit)
+      .map(({ revision, schemaVersion, createdAt }) => ({ revision, schemaVersion, createdAt }));
+  }
+  async getVersion(projectId: string, revision: number): Promise<VersionRecord> {
+    const version = this.versions.find(
+      (candidate) => candidate.projectId === projectId && candidate.revision === revision,
+    );
+    if (!version) throw new NotFoundError();
+    return structuredClone(version);
   }
   async listProjectAssets(projectId: string): Promise<AssetRecord[]> {
     return [...this.assets.values()]
@@ -435,12 +561,16 @@ export class InMemoryFigLabRepository implements FigLabRepository {
       .map((asset) => structuredClone(asset));
   }
   async deleteProjectData(projectId: string): Promise<void> {
-    const project = await this.getProject(projectId);
+    const project = this.projects.get(projectId);
+    if (!project) throw new NotFoundError();
+    if (project.status === "deleted") return;
     for (const asset of await this.listProjectAssets(projectId)) this.assets.delete(asset.id);
     for (const [id, upload] of this.uploads)
       if (upload.projectId === projectId) this.uploads.delete(id);
     this.documents.delete(projectId);
-    this.projects.delete(projectId);
+    for (let index = this.versions.length - 1; index >= 0; index -= 1)
+      if (this.versions[index]?.projectId === projectId) this.versions.splice(index, 1);
+    this.projects.set(projectId, { ...project, status: "deleted", updatedAt: timestamp() });
     this.recordAudit(projectId, "PROJECT_DELETED", { name: project.name });
   }
   enqueue(name: string, payload: Record<string, unknown>): void {
@@ -453,8 +583,24 @@ export class InMemoryFigLabRepository implements FigLabRepository {
     projectId: string,
     action: AuditAction,
     details: Record<string, unknown>,
+    actorUserId?: string,
   ): void {
-    this.auditEvents.push({ id: randomUUID(), projectId, action, details, createdAt: timestamp() });
+    this.auditEvents.push({
+      id: randomUUID(),
+      projectId,
+      action,
+      details,
+      sequence: this.nextSequence++,
+      createdAt: timestamp(),
+      ...(actorUserId ? { actorUserId } : {}),
+    });
+  }
+  private withActor(event: (typeof this.auditEvents)[number]): AuditEvent {
+    const { actorUserId, ...rest } = structuredClone(event);
+    const actor = [this.principal, ...this.authUsers.values()].find(
+      (user) => user !== undefined && user.id === actorUserId,
+    );
+    return actor ? { ...rest, actor: { id: actor.id, email: actor.email } } : rest;
   }
 }
 
@@ -463,7 +609,7 @@ export function schemaVersionOf(document: unknown): number {
   return typeof version === "number" ? version : 1;
 }
 
-function deriveDocumentDiff(before: unknown, after: unknown): Record<string, unknown> {
+export function deriveDocumentDiff(before: unknown, after: unknown): Record<string, unknown> {
   const oldDocument = before as { objects?: unknown[]; artboards?: unknown[] };
   const newDocument = after as { objects?: unknown[]; artboards?: unknown[] };
   return {
@@ -474,46 +620,80 @@ function deriveDocumentDiff(before: unknown, after: unknown): Record<string, unk
   };
 }
 
+export function exportAuditDetails(record: ExportRecord): Record<string, unknown> {
+  return {
+    exportId: record.id,
+    revision: record.revision,
+    format: record.format,
+    widthPx: record.widthPx,
+    heightPx: record.heightPx,
+    checksumSha256: record.checksumSha256,
+    ...(record.artboardId === undefined ? {} : { artboardId: record.artboardId }),
+    ...(record.dpi === undefined ? {} : { dpi: record.dpi }),
+  };
+}
+
 type AuditableObject = {
   id: string;
+  type?: string;
   transform: unknown;
-  view: { viewport: unknown; display: unknown };
-};
+  view?: { viewport: unknown; display: unknown };
+} & Record<string, unknown>;
+type AuditEventDraft = { action: AuditAction; details: Record<string, unknown> };
 
-export function deriveDocumentAuditEvents(
-  before: unknown,
-  after: unknown,
-): { action: AuditAction; details: Record<string, unknown> }[] {
+/**
+ * Derives audit events from two stored documents, so the trail reflects what was saved rather
+ * than what a client claims it did. Image views report crop, display, and transform changes
+ * separately; other objects report creation, content/style changes, and transforms.
+ */
+export function deriveDocumentAuditEvents(before: unknown, after: unknown): AuditEventDraft[] {
   const prior = documentObjects(before);
   const next = documentObjects(after);
-  const events: { action: AuditAction; details: Record<string, unknown> }[] = [];
+  const events: AuditEventDraft[] = [];
 
   for (const [objectId, object] of next) {
     const old = prior.get(objectId);
+    const isView = object.view !== undefined;
     if (!old) {
-      events.push({
-        action: "CROP_CREATED",
-        details: { objectId, viewport: structuredClone(object.view.viewport) },
-      });
+      events.push(
+        isView
+          ? {
+              action: "CROP_CREATED",
+              details: { objectId, viewport: structuredClone(object.view?.viewport) },
+            }
+          : {
+              action: "OBJECT_CREATED",
+              details: { objectId, type: object.type, object: structuredClone(object) },
+            },
+      );
       continue;
     }
-    if (!sameValue(old.view.viewport, object.view.viewport))
+    if (isView && old.view) {
+      if (!sameValue(old.view.viewport, object.view?.viewport))
+        events.push({
+          action: "CROP_CHANGED",
+          details: {
+            objectId,
+            before: structuredClone(old.view.viewport),
+            after: structuredClone(object.view?.viewport),
+          },
+        });
+      if (!sameValue(old.view.display, object.view?.display))
+        events.push({
+          action: "DISPLAY_CHANGED",
+          details: {
+            objectId,
+            before: structuredClone(old.view.display),
+            after: structuredClone(object.view?.display),
+          },
+        });
+    }
+    const oldRest = withoutKeys(old, ["transform", "view"]);
+    const newRest = withoutKeys(object, ["transform", "view"]);
+    if (!sameValue(oldRest, newRest))
       events.push({
-        action: "CROP_CHANGED",
-        details: {
-          objectId,
-          before: structuredClone(old.view.viewport),
-          after: structuredClone(object.view.viewport),
-        },
-      });
-    if (!sameValue(old.view.display, object.view.display))
-      events.push({
-        action: "DISPLAY_CHANGED",
-        details: {
-          objectId,
-          before: structuredClone(old.view.display),
-          after: structuredClone(object.view.display),
-        },
+        action: "OBJECT_CHANGED",
+        details: { objectId, ...changedFields(oldRest, newRest) },
       });
     if (!sameValue(old.transform, object.transform))
       events.push({
@@ -528,31 +708,87 @@ export function deriveDocumentAuditEvents(
   for (const objectId of prior.keys())
     if (!next.has(objectId)) events.push({ action: "OBJECT_REMOVED", details: { objectId } });
 
+  const priorBoards = documentArtboards(before);
+  const nextBoards = documentArtboards(after);
+  for (const [artboardId, artboard] of nextBoards) {
+    const old = priorBoards.get(artboardId);
+    if (!old)
+      events.push({
+        action: "ARTBOARD_CREATED",
+        details: { artboardId, artboard: structuredClone(artboard) },
+      });
+    else if (!sameValue(old, artboard))
+      events.push({
+        action: "ARTBOARD_CHANGED",
+        details: { artboardId, ...changedFields(old, artboard) },
+      });
+  }
+  for (const artboardId of priorBoards.keys())
+    if (!nextBoards.has(artboardId))
+      events.push({ action: "ARTBOARD_REMOVED", details: { artboardId } });
+
+  const priorGroups = arrayField(before, "groups");
+  const nextGroups = arrayField(after, "groups");
+  if (!sameValue(priorGroups, nextGroups))
+    events.push({
+      action: "GROUPS_CHANGED",
+      details: { before: structuredClone(priorGroups), after: structuredClone(nextGroups) },
+    });
+
   return events;
 }
 
 function documentObjects(document: unknown): Map<string, AuditableObject> {
-  if (typeof document !== "object" || document === null || !("objects" in document))
-    return new Map();
-  const objects = (document as { objects?: unknown }).objects;
-  if (!Array.isArray(objects)) return new Map();
   return new Map(
-    objects
+    arrayField(document, "objects")
       .filter(
         (object): object is AuditableObject =>
           typeof object === "object" &&
           object !== null &&
           "id" in object &&
           typeof object.id === "string" &&
-          "transform" in object &&
-          "view" in object &&
-          typeof object.view === "object" &&
-          object.view !== null &&
-          "viewport" in object.view &&
-          "display" in object.view,
+          "transform" in object,
       )
       .map((object) => [object.id, object]),
   );
+}
+
+function documentArtboards(document: unknown): Map<string, Record<string, unknown>> {
+  return new Map(
+    arrayField(document, "artboards")
+      .filter(
+        (artboard): artboard is Record<string, unknown> & { id: string } =>
+          typeof artboard === "object" &&
+          artboard !== null &&
+          "id" in artboard &&
+          typeof artboard.id === "string",
+      )
+      .map((artboard) => [artboard.id, artboard]),
+  );
+}
+
+function arrayField(document: unknown, key: string): unknown[] {
+  if (typeof document !== "object" || document === null || !(key in document)) return [];
+  const value = (document as Record<string, unknown>)[key];
+  return Array.isArray(value) ? value : [];
+}
+
+function withoutKeys(value: Record<string, unknown>, keys: string[]): Record<string, unknown> {
+  return Object.fromEntries(Object.entries(value).filter(([key]) => !keys.includes(key)));
+}
+
+/** Before/after values of only the top-level fields that differ. */
+function changedFields(
+  before: Record<string, unknown>,
+  after: Record<string, unknown>,
+): { before: Record<string, unknown>; after: Record<string, unknown> } {
+  const keys = [...new Set([...Object.keys(before), ...Object.keys(after)])].filter(
+    (key) => !sameValue(before[key], after[key]),
+  );
+  return {
+    before: structuredClone(Object.fromEntries(keys.map((key) => [key, before[key]]))),
+    after: structuredClone(Object.fromEntries(keys.map((key) => [key, after[key]]))),
+  };
 }
 
 function sameValue(left: unknown, right: unknown): boolean {

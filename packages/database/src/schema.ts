@@ -1,4 +1,5 @@
 import {
+  bigint,
   integer,
   jsonb,
   pgTable,
@@ -48,6 +49,7 @@ export const projects = pgTable("projects", {
     .references(() => workspaces.id),
   name: text("name").notNull(),
   status: text("status").notNull(),
+  deletedAt: timestamp("deleted_at", { withTimezone: true }),
   ...dates,
 });
 export const projectDocuments = pgTable("project_documents", {
@@ -113,6 +115,8 @@ export const auditEvents = pgTable("audit_events", {
     .references(() => projects.id),
   action: text("action").notNull(),
   details: jsonb("details").notNull(),
+  actorUserId: uuid("actor_user_id").references(() => users.id),
+  seq: bigint("seq", { mode: "number" }).generatedByDefaultAsIdentity(),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull(),
 });
 export const exportRecords = pgTable("export_records", {
@@ -126,5 +130,7 @@ export const exportRecords = pgTable("export_records", {
   heightPx: integer("height_px").notNull(),
   checksumSha256: text("checksum_sha256").notNull(),
   metadata: jsonb("metadata").notNull(),
+  artboardId: text("artboard_id"),
+  dpi: integer("dpi"),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull(),
 });

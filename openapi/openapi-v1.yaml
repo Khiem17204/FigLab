@@ -356,7 +356,7 @@ paths:
                       schemaVersion:
                         type: number
                         enum:
-                        - 1
+                        - 2
                       artboards:
                         minItems: 1
                         type: array
@@ -388,121 +388,487 @@ paths:
                       objects:
                         type: array
                         items:
+                          anyOf:
+                          - additionalProperties: false
+                            type: object
+                            required:
+                            - id
+                            - type
+                            - artboardId
+                            - transform
+                            - zIndex
+                            - locked
+                            - hidden
+                            - view
+                            properties:
+                              id:
+                                minLength: 1
+                                type: string
+                              type:
+                                type: string
+                                enum:
+                                - image-view
+                              artboardId:
+                                minLength: 1
+                                type: string
+                              transform:
+                                additionalProperties: false
+                                type: object
+                                required:
+                                - xPt
+                                - yPt
+                                - widthPt
+                                - heightPt
+                                - rotationDeg
+                                properties:
+                                  xPt:
+                                    type: number
+                                  yPt:
+                                    type: number
+                                  widthPt:
+                                    exclusiveMinimum: 0
+                                    type: number
+                                  heightPt:
+                                    exclusiveMinimum: 0
+                                    type: number
+                                  rotationDeg:
+                                    type: number
+                                    enum:
+                                    - 0
+                              zIndex:
+                                type: integer
+                              locked:
+                                type: boolean
+                              hidden:
+                                type: boolean
+                              view:
+                                additionalProperties: false
+                                type: object
+                                required:
+                                - sourceAssetId
+                                - viewport
+                                - display
+                                properties:
+                                  sourceAssetId:
+                                    minLength: 1
+                                    type: string
+                                  viewport:
+                                    additionalProperties: false
+                                    type: object
+                                    required:
+                                    - x
+                                    - y
+                                    - width
+                                    - height
+                                    properties:
+                                      x:
+                                        minimum: 0
+                                        maximum: 1
+                                        type: number
+                                      y:
+                                        minimum: 0
+                                        maximum: 1
+                                        type: number
+                                      width:
+                                        exclusiveMinimum: 0
+                                        maximum: 1
+                                        type: number
+                                      height:
+                                        exclusiveMinimum: 0
+                                        maximum: 1
+                                        type: number
+                                  display:
+                                    additionalProperties: false
+                                    type: object
+                                    required:
+                                    - brightness
+                                    - contrast
+                                    - gamma
+                                    - invert
+                                    properties:
+                                      brightness:
+                                        minimum: -1
+                                        maximum: 1
+                                        type: number
+                                      contrast:
+                                        minimum: 0
+                                        maximum: 4
+                                        type: number
+                                      gamma:
+                                        minimum: 0.1
+                                        maximum: 10
+                                        type: number
+                                      invert:
+                                        type: boolean
+                          - additionalProperties: false
+                            type: object
+                            required:
+                            - id
+                            - artboardId
+                            - zIndex
+                            - locked
+                            - hidden
+                            - type
+                            - transform
+                            - text
+                            properties:
+                              id:
+                                minLength: 1
+                                type: string
+                              artboardId:
+                                minLength: 1
+                                type: string
+                              zIndex:
+                                type: integer
+                              locked:
+                                type: boolean
+                              hidden:
+                                type: boolean
+                              type:
+                                type: string
+                                enum:
+                                - text
+                              transform:
+                                additionalProperties: false
+                                type: object
+                                required:
+                                - xPt
+                                - yPt
+                                - widthPt
+                                - heightPt
+                                - rotationDeg
+                                properties:
+                                  xPt:
+                                    type: number
+                                  yPt:
+                                    type: number
+                                  widthPt:
+                                    exclusiveMinimum: 0
+                                    type: number
+                                  heightPt:
+                                    exclusiveMinimum: 0
+                                    type: number
+                                  rotationDeg:
+                                    minimum: -180
+                                    maximum: 180
+                                    type: number
+                              text:
+                                additionalProperties: false
+                                type: object
+                                required:
+                                - content
+                                - style
+                                properties:
+                                  content:
+                                    minLength: 1
+                                    maxLength: 2000
+                                    type: string
+                                  style:
+                                    additionalProperties: false
+                                    type: object
+                                    required:
+                                    - fontSizePt
+                                    - bold
+                                    - italic
+                                    - underline
+                                    - colorHex
+                                    - align
+                                    - backgroundHex
+                                    properties:
+                                      fontSizePt:
+                                        minimum: 2
+                                        maximum: 144
+                                        type: number
+                                      bold:
+                                        type: boolean
+                                      italic:
+                                        type: boolean
+                                      underline:
+                                        type: boolean
+                                      colorHex:
+                                        pattern: "^#[0-9A-Fa-f]{6}$"
+                                        type: string
+                                      align:
+                                        anyOf:
+                                        - type: string
+                                          enum:
+                                          - start
+                                        - type: string
+                                          enum:
+                                          - middle
+                                        - type: string
+                                          enum:
+                                          - end
+                                      backgroundHex:
+                                        anyOf:
+                                        - pattern: "^#[0-9A-Fa-f]{6}$"
+                                          type: string
+                                        - type: 'null'
+                              panelLabel:
+                                additionalProperties: false
+                                type: object
+                                required:
+                                - targetObjectId
+                                - auto
+                                properties:
+                                  targetObjectId:
+                                    minLength: 1
+                                    type: string
+                                  auto:
+                                    type: boolean
+                          - additionalProperties: false
+                            type: object
+                            required:
+                            - id
+                            - artboardId
+                            - zIndex
+                            - locked
+                            - hidden
+                            - type
+                            - transform
+                            - line
+                            properties:
+                              id:
+                                minLength: 1
+                                type: string
+                              artboardId:
+                                minLength: 1
+                                type: string
+                              zIndex:
+                                type: integer
+                              locked:
+                                type: boolean
+                              hidden:
+                                type: boolean
+                              type:
+                                type: string
+                                enum:
+                                - line
+                              transform:
+                                additionalProperties: false
+                                type: object
+                                required:
+                                - xPt
+                                - yPt
+                                - widthPt
+                                - heightPt
+                                - rotationDeg
+                                properties:
+                                  xPt:
+                                    type: number
+                                  yPt:
+                                    type: number
+                                  widthPt:
+                                    minimum: 0
+                                    type: number
+                                  heightPt:
+                                    minimum: 0
+                                    type: number
+                                  rotationDeg:
+                                    type: number
+                                    enum:
+                                    - 0
+                              line:
+                                additionalProperties: false
+                                type: object
+                                required:
+                                - direction
+                                - heads
+                                - stroke
+                                properties:
+                                  direction:
+                                    anyOf:
+                                    - type: string
+                                      enum:
+                                      - down
+                                    - type: string
+                                      enum:
+                                      - up
+                                  heads:
+                                    anyOf:
+                                    - type: string
+                                      enum:
+                                      - none
+                                    - type: string
+                                      enum:
+                                      - start
+                                    - type: string
+                                      enum:
+                                      - end
+                                    - type: string
+                                      enum:
+                                      - both
+                                  stroke:
+                                    additionalProperties: false
+                                    type: object
+                                    required:
+                                    - colorHex
+                                    - widthPt
+                                    - dashed
+                                    properties:
+                                      colorHex:
+                                        pattern: "^#[0-9A-Fa-f]{6}$"
+                                        type: string
+                                      widthPt:
+                                        minimum: 0.1
+                                        maximum: 20
+                                        type: number
+                                      dashed:
+                                        type: boolean
+                          - additionalProperties: false
+                            type: object
+                            required:
+                            - id
+                            - artboardId
+                            - zIndex
+                            - locked
+                            - hidden
+                            - type
+                            - transform
+                            - shape
+                            properties:
+                              id:
+                                minLength: 1
+                                type: string
+                              artboardId:
+                                minLength: 1
+                                type: string
+                              zIndex:
+                                type: integer
+                              locked:
+                                type: boolean
+                              hidden:
+                                type: boolean
+                              type:
+                                type: string
+                                enum:
+                                - shape
+                              transform:
+                                additionalProperties: false
+                                type: object
+                                required:
+                                - xPt
+                                - yPt
+                                - widthPt
+                                - heightPt
+                                - rotationDeg
+                                properties:
+                                  xPt:
+                                    type: number
+                                  yPt:
+                                    type: number
+                                  widthPt:
+                                    exclusiveMinimum: 0
+                                    type: number
+                                  heightPt:
+                                    exclusiveMinimum: 0
+                                    type: number
+                                  rotationDeg:
+                                    minimum: -180
+                                    maximum: 180
+                                    type: number
+                              shape:
+                                anyOf:
+                                - additionalProperties: false
+                                  type: object
+                                  required:
+                                  - kind
+                                  - stroke
+                                  - fillHex
+                                  properties:
+                                    kind:
+                                      anyOf:
+                                      - type: string
+                                        enum:
+                                        - rect
+                                      - type: string
+                                        enum:
+                                        - ellipse
+                                    stroke:
+                                      anyOf:
+                                      - additionalProperties: false
+                                        type: object
+                                        required:
+                                        - colorHex
+                                        - widthPt
+                                        - dashed
+                                        properties:
+                                          colorHex:
+                                            pattern: "^#[0-9A-Fa-f]{6}$"
+                                            type: string
+                                          widthPt:
+                                            minimum: 0.1
+                                            maximum: 20
+                                            type: number
+                                          dashed:
+                                            type: boolean
+                                      - type: 'null'
+                                    fillHex:
+                                      anyOf:
+                                      - pattern: "^#[0-9A-Fa-f]{6}$"
+                                        type: string
+                                      - type: 'null'
+                                - additionalProperties: false
+                                  type: object
+                                  required:
+                                  - kind
+                                  - opening
+                                  - stroke
+                                  properties:
+                                    kind:
+                                      type: string
+                                      enum:
+                                      - bracket
+                                    opening:
+                                      anyOf:
+                                      - type: string
+                                        enum:
+                                        - down
+                                      - type: string
+                                        enum:
+                                        - up
+                                      - type: string
+                                        enum:
+                                        - left
+                                      - type: string
+                                        enum:
+                                        - right
+                                    stroke:
+                                      additionalProperties: false
+                                      type: object
+                                      required:
+                                      - colorHex
+                                      - widthPt
+                                      - dashed
+                                      properties:
+                                        colorHex:
+                                          pattern: "^#[0-9A-Fa-f]{6}$"
+                                          type: string
+                                        widthPt:
+                                          minimum: 0.1
+                                          maximum: 20
+                                          type: number
+                                        dashed:
+                                          type: boolean
+                      groups:
+                        type: array
+                        items:
                           additionalProperties: false
                           type: object
                           required:
                           - id
-                          - type
-                          - artboardId
-                          - transform
-                          - zIndex
-                          - locked
-                          - hidden
-                          - view
+                          - objectIds
                           properties:
                             id:
                               minLength: 1
                               type: string
-                            type:
-                              type: string
-                              enum:
-                              - image-view
-                            artboardId:
-                              minLength: 1
-                              type: string
-                            transform:
-                              additionalProperties: false
-                              type: object
-                              required:
-                              - xPt
-                              - yPt
-                              - widthPt
-                              - heightPt
-                              - rotationDeg
-                              properties:
-                                xPt:
-                                  type: number
-                                yPt:
-                                  type: number
-                                widthPt:
-                                  exclusiveMinimum: 0
-                                  type: number
-                                heightPt:
-                                  exclusiveMinimum: 0
-                                  type: number
-                                rotationDeg:
-                                  type: number
-                                  enum:
-                                  - 0
-                            zIndex:
-                              type: integer
-                            locked:
-                              type: boolean
-                            hidden:
-                              type: boolean
-                            view:
-                              additionalProperties: false
-                              type: object
-                              required:
-                              - sourceAssetId
-                              - viewport
-                              - display
-                              properties:
-                                sourceAssetId:
-                                  minLength: 1
-                                  type: string
-                                viewport:
-                                  additionalProperties: false
-                                  type: object
-                                  required:
-                                  - x
-                                  - y
-                                  - width
-                                  - height
-                                  properties:
-                                    x:
-                                      minimum: 0
-                                      maximum: 1
-                                      type: number
-                                    y:
-                                      minimum: 0
-                                      maximum: 1
-                                      type: number
-                                    width:
-                                      exclusiveMinimum: 0
-                                      maximum: 1
-                                      type: number
-                                    height:
-                                      exclusiveMinimum: 0
-                                      maximum: 1
-                                      type: number
-                                display:
-                                  additionalProperties: false
-                                  type: object
-                                  required:
-                                  - brightness
-                                  - contrast
-                                  - gamma
-                                  - invert
-                                  properties:
-                                    brightness:
-                                      minimum: -1
-                                      maximum: 1
-                                      type: number
-                                    contrast:
-                                      minimum: 0
-                                      maximum: 4
-                                      type: number
-                                    gamma:
-                                      minimum: 0.1
-                                      maximum: 10
-                                      type: number
-                                    invert:
-                                      type: boolean
-                      groups:
-                        type: array
-                        minItems: 0
-                        maxItems: 0
+                            objectIds:
+                              minItems: 2
+                              uniqueItems: true
+                              type: array
+                              items:
+                                minLength: 1
+                                type: string
                       constraints:
                         type: array
                         minItems: 0
@@ -530,203 +896,542 @@ paths:
                   minimum: 0
                   type: integer
                 document:
-                  additionalProperties: false
-                  type: object
-                  required:
-                  - schemaVersion
-                  - artboards
-                  - objects
-                  - groups
-                  - constraints
-                  - styles
-                  properties:
-                    schemaVersion:
-                      type: number
-                      enum:
-                      - 1
-                    artboards:
-                      minItems: 1
-                      type: array
-                      items:
-                        additionalProperties: false
-                        type: object
-                        required:
-                        - id
-                        - name
-                        - widthPt
-                        - heightPt
-                        - backgroundHex
-                        properties:
-                          id:
-                            minLength: 1
-                            type: string
-                          name:
-                            minLength: 1
-                            type: string
-                          widthPt:
-                            exclusiveMinimum: 0
-                            type: number
-                          heightPt:
-                            exclusiveMinimum: 0
-                            type: number
-                          backgroundHex:
-                            pattern: "^#[0-9A-Fa-f]{6}$"
-                            type: string
-                    objects:
-                      type: array
-                      items:
-                        additionalProperties: false
-                        type: object
-                        required:
-                        - id
-                        - type
-                        - artboardId
-                        - transform
-                        - zIndex
-                        - locked
-                        - hidden
-                        - view
-                        properties:
-                          id:
-                            minLength: 1
-                            type: string
-                          type:
-                            type: string
-                            enum:
-                            - image-view
-                          artboardId:
-                            minLength: 1
-                            type: string
-                          transform:
-                            additionalProperties: false
+                  anyOf:
+                  - additionalProperties: false
+                    type: object
+                    required:
+                    - schemaVersion
+                    - artboards
+                    - objects
+                    - groups
+                    - constraints
+                    - styles
+                    properties:
+                      schemaVersion:
+                        type: number
+                        enum:
+                        - 2
+                      artboards:
+                        minItems: 1
+                        type: array
+                        items:
+                          additionalProperties: false
+                          type: object
+                          required:
+                          - id
+                          - name
+                          - widthPt
+                          - heightPt
+                          - backgroundHex
+                          properties:
+                            id:
+                              minLength: 1
+                              type: string
+                            name:
+                              minLength: 1
+                              type: string
+                            widthPt:
+                              exclusiveMinimum: 0
+                              type: number
+                            heightPt:
+                              exclusiveMinimum: 0
+                              type: number
+                            backgroundHex:
+                              pattern: "^#[0-9A-Fa-f]{6}$"
+                              type: string
+                      objects:
+                        type: array
+                        items:
+                          anyOf:
+                          - additionalProperties: false
                             type: object
                             required:
-                            - xPt
-                            - yPt
-                            - widthPt
-                            - heightPt
-                            - rotationDeg
+                            - id
+                            - type
+                            - artboardId
+                            - transform
+                            - zIndex
+                            - locked
+                            - hidden
+                            - view
                             properties:
-                              xPt:
-                                type: number
-                              yPt:
-                                type: number
-                              widthPt:
-                                exclusiveMinimum: 0
-                                type: number
-                              heightPt:
-                                exclusiveMinimum: 0
-                                type: number
-                              rotationDeg:
-                                type: number
-                                enum:
-                                - 0
-                          zIndex:
-                            type: integer
-                          locked:
-                            type: boolean
-                          hidden:
-                            type: boolean
-                          view:
-                            additionalProperties: false
-                            type: object
-                            required:
-                            - sourceAssetId
-                            - viewport
-                            - display
-                            properties:
-                              sourceAssetId:
+                              id:
                                 minLength: 1
                                 type: string
-                              viewport:
+                              type:
+                                type: string
+                                enum:
+                                - image-view
+                              artboardId:
+                                minLength: 1
+                                type: string
+                              transform:
                                 additionalProperties: false
                                 type: object
                                 required:
-                                - x
-                                - y
-                                - width
-                                - height
+                                - xPt
+                                - yPt
+                                - widthPt
+                                - heightPt
+                                - rotationDeg
                                 properties:
-                                  x:
-                                    minimum: 0
-                                    maximum: 1
+                                  xPt:
                                     type: number
-                                  y:
-                                    minimum: 0
-                                    maximum: 1
+                                  yPt:
                                     type: number
-                                  width:
+                                  widthPt:
                                     exclusiveMinimum: 0
-                                    maximum: 1
                                     type: number
-                                  height:
+                                  heightPt:
                                     exclusiveMinimum: 0
-                                    maximum: 1
                                     type: number
-                              display:
+                                  rotationDeg:
+                                    type: number
+                                    enum:
+                                    - 0
+                              zIndex:
+                                type: integer
+                              locked:
+                                type: boolean
+                              hidden:
+                                type: boolean
+                              view:
                                 additionalProperties: false
                                 type: object
                                 required:
-                                - brightness
-                                - contrast
-                                - gamma
-                                - invert
+                                - sourceAssetId
+                                - viewport
+                                - display
                                 properties:
-                                  brightness:
-                                    minimum: -1
-                                    maximum: 1
+                                  sourceAssetId:
+                                    minLength: 1
+                                    type: string
+                                  viewport:
+                                    additionalProperties: false
+                                    type: object
+                                    required:
+                                    - x
+                                    - y
+                                    - width
+                                    - height
+                                    properties:
+                                      x:
+                                        minimum: 0
+                                        maximum: 1
+                                        type: number
+                                      y:
+                                        minimum: 0
+                                        maximum: 1
+                                        type: number
+                                      width:
+                                        exclusiveMinimum: 0
+                                        maximum: 1
+                                        type: number
+                                      height:
+                                        exclusiveMinimum: 0
+                                        maximum: 1
+                                        type: number
+                                  display:
+                                    additionalProperties: false
+                                    type: object
+                                    required:
+                                    - brightness
+                                    - contrast
+                                    - gamma
+                                    - invert
+                                    properties:
+                                      brightness:
+                                        minimum: -1
+                                        maximum: 1
+                                        type: number
+                                      contrast:
+                                        minimum: 0
+                                        maximum: 4
+                                        type: number
+                                      gamma:
+                                        minimum: 0.1
+                                        maximum: 10
+                                        type: number
+                                      invert:
+                                        type: boolean
+                          - additionalProperties: false
+                            type: object
+                            required:
+                            - id
+                            - artboardId
+                            - zIndex
+                            - locked
+                            - hidden
+                            - type
+                            - transform
+                            - text
+                            properties:
+                              id:
+                                minLength: 1
+                                type: string
+                              artboardId:
+                                minLength: 1
+                                type: string
+                              zIndex:
+                                type: integer
+                              locked:
+                                type: boolean
+                              hidden:
+                                type: boolean
+                              type:
+                                type: string
+                                enum:
+                                - text
+                              transform:
+                                additionalProperties: false
+                                type: object
+                                required:
+                                - xPt
+                                - yPt
+                                - widthPt
+                                - heightPt
+                                - rotationDeg
+                                properties:
+                                  xPt:
                                     type: number
-                                  contrast:
-                                    minimum: 0
-                                    maximum: 4
+                                  yPt:
                                     type: number
-                                  gamma:
-                                    minimum: 0.1
-                                    maximum: 10
+                                  widthPt:
+                                    exclusiveMinimum: 0
                                     type: number
-                                  invert:
+                                  heightPt:
+                                    exclusiveMinimum: 0
+                                    type: number
+                                  rotationDeg:
+                                    minimum: -180
+                                    maximum: 180
+                                    type: number
+                              text:
+                                additionalProperties: false
+                                type: object
+                                required:
+                                - content
+                                - style
+                                properties:
+                                  content:
+                                    minLength: 1
+                                    maxLength: 2000
+                                    type: string
+                                  style:
+                                    additionalProperties: false
+                                    type: object
+                                    required:
+                                    - fontSizePt
+                                    - bold
+                                    - italic
+                                    - underline
+                                    - colorHex
+                                    - align
+                                    - backgroundHex
+                                    properties:
+                                      fontSizePt:
+                                        minimum: 2
+                                        maximum: 144
+                                        type: number
+                                      bold:
+                                        type: boolean
+                                      italic:
+                                        type: boolean
+                                      underline:
+                                        type: boolean
+                                      colorHex:
+                                        pattern: "^#[0-9A-Fa-f]{6}$"
+                                        type: string
+                                      align:
+                                        anyOf:
+                                        - type: string
+                                          enum:
+                                          - start
+                                        - type: string
+                                          enum:
+                                          - middle
+                                        - type: string
+                                          enum:
+                                          - end
+                                      backgroundHex:
+                                        anyOf:
+                                        - pattern: "^#[0-9A-Fa-f]{6}$"
+                                          type: string
+                                        - type: 'null'
+                              panelLabel:
+                                additionalProperties: false
+                                type: object
+                                required:
+                                - targetObjectId
+                                - auto
+                                properties:
+                                  targetObjectId:
+                                    minLength: 1
+                                    type: string
+                                  auto:
                                     type: boolean
-                    groups:
-                      type: array
-                      minItems: 0
-                      maxItems: 0
-                    constraints:
-                      type: array
-                      minItems: 0
-                      maxItems: 0
-                    styles:
-                      type: array
-                      minItems: 0
-                      maxItems: 0
-      parameters:
-      - schema:
-          minLength: 1
-          type: string
-        in: path
-        name: projectId
-        required: true
-      responses:
-        '200':
-          description: Default Response
-          content:
-            application/json:
-              schema:
-                additionalProperties: false
-                type: object
-                required:
-                - projectId
-                - revision
-                - document
-                - updatedAt
-                properties:
-                  projectId:
-                    minLength: 1
-                    type: string
-                  revision:
-                    minimum: 1
-                    type: integer
-                  document:
-                    additionalProperties: false
+                          - additionalProperties: false
+                            type: object
+                            required:
+                            - id
+                            - artboardId
+                            - zIndex
+                            - locked
+                            - hidden
+                            - type
+                            - transform
+                            - line
+                            properties:
+                              id:
+                                minLength: 1
+                                type: string
+                              artboardId:
+                                minLength: 1
+                                type: string
+                              zIndex:
+                                type: integer
+                              locked:
+                                type: boolean
+                              hidden:
+                                type: boolean
+                              type:
+                                type: string
+                                enum:
+                                - line
+                              transform:
+                                additionalProperties: false
+                                type: object
+                                required:
+                                - xPt
+                                - yPt
+                                - widthPt
+                                - heightPt
+                                - rotationDeg
+                                properties:
+                                  xPt:
+                                    type: number
+                                  yPt:
+                                    type: number
+                                  widthPt:
+                                    minimum: 0
+                                    type: number
+                                  heightPt:
+                                    minimum: 0
+                                    type: number
+                                  rotationDeg:
+                                    type: number
+                                    enum:
+                                    - 0
+                              line:
+                                additionalProperties: false
+                                type: object
+                                required:
+                                - direction
+                                - heads
+                                - stroke
+                                properties:
+                                  direction:
+                                    anyOf:
+                                    - type: string
+                                      enum:
+                                      - down
+                                    - type: string
+                                      enum:
+                                      - up
+                                  heads:
+                                    anyOf:
+                                    - type: string
+                                      enum:
+                                      - none
+                                    - type: string
+                                      enum:
+                                      - start
+                                    - type: string
+                                      enum:
+                                      - end
+                                    - type: string
+                                      enum:
+                                      - both
+                                  stroke:
+                                    additionalProperties: false
+                                    type: object
+                                    required:
+                                    - colorHex
+                                    - widthPt
+                                    - dashed
+                                    properties:
+                                      colorHex:
+                                        pattern: "^#[0-9A-Fa-f]{6}$"
+                                        type: string
+                                      widthPt:
+                                        minimum: 0.1
+                                        maximum: 20
+                                        type: number
+                                      dashed:
+                                        type: boolean
+                          - additionalProperties: false
+                            type: object
+                            required:
+                            - id
+                            - artboardId
+                            - zIndex
+                            - locked
+                            - hidden
+                            - type
+                            - transform
+                            - shape
+                            properties:
+                              id:
+                                minLength: 1
+                                type: string
+                              artboardId:
+                                minLength: 1
+                                type: string
+                              zIndex:
+                                type: integer
+                              locked:
+                                type: boolean
+                              hidden:
+                                type: boolean
+                              type:
+                                type: string
+                                enum:
+                                - shape
+                              transform:
+                                additionalProperties: false
+                                type: object
+                                required:
+                                - xPt
+                                - yPt
+                                - widthPt
+                                - heightPt
+                                - rotationDeg
+                                properties:
+                                  xPt:
+                                    type: number
+                                  yPt:
+                                    type: number
+                                  widthPt:
+                                    exclusiveMinimum: 0
+                                    type: number
+                                  heightPt:
+                                    exclusiveMinimum: 0
+                                    type: number
+                                  rotationDeg:
+                                    minimum: -180
+                                    maximum: 180
+                                    type: number
+                              shape:
+                                anyOf:
+                                - additionalProperties: false
+                                  type: object
+                                  required:
+                                  - kind
+                                  - stroke
+                                  - fillHex
+                                  properties:
+                                    kind:
+                                      anyOf:
+                                      - type: string
+                                        enum:
+                                        - rect
+                                      - type: string
+                                        enum:
+                                        - ellipse
+                                    stroke:
+                                      anyOf:
+                                      - additionalProperties: false
+                                        type: object
+                                        required:
+                                        - colorHex
+                                        - widthPt
+                                        - dashed
+                                        properties:
+                                          colorHex:
+                                            pattern: "^#[0-9A-Fa-f]{6}$"
+                                            type: string
+                                          widthPt:
+                                            minimum: 0.1
+                                            maximum: 20
+                                            type: number
+                                          dashed:
+                                            type: boolean
+                                      - type: 'null'
+                                    fillHex:
+                                      anyOf:
+                                      - pattern: "^#[0-9A-Fa-f]{6}$"
+                                        type: string
+                                      - type: 'null'
+                                - additionalProperties: false
+                                  type: object
+                                  required:
+                                  - kind
+                                  - opening
+                                  - stroke
+                                  properties:
+                                    kind:
+                                      type: string
+                                      enum:
+                                      - bracket
+                                    opening:
+                                      anyOf:
+                                      - type: string
+                                        enum:
+                                        - down
+                                      - type: string
+                                        enum:
+                                        - up
+                                      - type: string
+                                        enum:
+                                        - left
+                                      - type: string
+                                        enum:
+                                        - right
+                                    stroke:
+                                      additionalProperties: false
+                                      type: object
+                                      required:
+                                      - colorHex
+                                      - widthPt
+                                      - dashed
+                                      properties:
+                                        colorHex:
+                                          pattern: "^#[0-9A-Fa-f]{6}$"
+                                          type: string
+                                        widthPt:
+                                          minimum: 0.1
+                                          maximum: 20
+                                          type: number
+                                        dashed:
+                                          type: boolean
+                      groups:
+                        type: array
+                        items:
+                          additionalProperties: false
+                          type: object
+                          required:
+                          - id
+                          - objectIds
+                          properties:
+                            id:
+                              minLength: 1
+                              type: string
+                            objectIds:
+                              minItems: 2
+                              uniqueItems: true
+                              type: array
+                              items:
+                                minLength: 1
+                                type: string
+                      constraints:
+                        type: array
+                        minItems: 0
+                        maxItems: 0
+                      styles:
+                        type: array
+                        minItems: 0
+                        maxItems: 0
+                  - additionalProperties: false
                     type: object
                     required:
                     - schemaVersion
@@ -886,6 +1591,568 @@ paths:
                         type: array
                         minItems: 0
                         maxItems: 0
+                      constraints:
+                        type: array
+                        minItems: 0
+                        maxItems: 0
+                      styles:
+                        type: array
+                        minItems: 0
+                        maxItems: 0
+      parameters:
+      - schema:
+          minLength: 1
+          type: string
+        in: path
+        name: projectId
+        required: true
+      responses:
+        '200':
+          description: Default Response
+          content:
+            application/json:
+              schema:
+                additionalProperties: false
+                type: object
+                required:
+                - projectId
+                - revision
+                - document
+                - updatedAt
+                properties:
+                  projectId:
+                    minLength: 1
+                    type: string
+                  revision:
+                    minimum: 1
+                    type: integer
+                  document:
+                    additionalProperties: false
+                    type: object
+                    required:
+                    - schemaVersion
+                    - artboards
+                    - objects
+                    - groups
+                    - constraints
+                    - styles
+                    properties:
+                      schemaVersion:
+                        type: number
+                        enum:
+                        - 2
+                      artboards:
+                        minItems: 1
+                        type: array
+                        items:
+                          additionalProperties: false
+                          type: object
+                          required:
+                          - id
+                          - name
+                          - widthPt
+                          - heightPt
+                          - backgroundHex
+                          properties:
+                            id:
+                              minLength: 1
+                              type: string
+                            name:
+                              minLength: 1
+                              type: string
+                            widthPt:
+                              exclusiveMinimum: 0
+                              type: number
+                            heightPt:
+                              exclusiveMinimum: 0
+                              type: number
+                            backgroundHex:
+                              pattern: "^#[0-9A-Fa-f]{6}$"
+                              type: string
+                      objects:
+                        type: array
+                        items:
+                          anyOf:
+                          - additionalProperties: false
+                            type: object
+                            required:
+                            - id
+                            - type
+                            - artboardId
+                            - transform
+                            - zIndex
+                            - locked
+                            - hidden
+                            - view
+                            properties:
+                              id:
+                                minLength: 1
+                                type: string
+                              type:
+                                type: string
+                                enum:
+                                - image-view
+                              artboardId:
+                                minLength: 1
+                                type: string
+                              transform:
+                                additionalProperties: false
+                                type: object
+                                required:
+                                - xPt
+                                - yPt
+                                - widthPt
+                                - heightPt
+                                - rotationDeg
+                                properties:
+                                  xPt:
+                                    type: number
+                                  yPt:
+                                    type: number
+                                  widthPt:
+                                    exclusiveMinimum: 0
+                                    type: number
+                                  heightPt:
+                                    exclusiveMinimum: 0
+                                    type: number
+                                  rotationDeg:
+                                    type: number
+                                    enum:
+                                    - 0
+                              zIndex:
+                                type: integer
+                              locked:
+                                type: boolean
+                              hidden:
+                                type: boolean
+                              view:
+                                additionalProperties: false
+                                type: object
+                                required:
+                                - sourceAssetId
+                                - viewport
+                                - display
+                                properties:
+                                  sourceAssetId:
+                                    minLength: 1
+                                    type: string
+                                  viewport:
+                                    additionalProperties: false
+                                    type: object
+                                    required:
+                                    - x
+                                    - y
+                                    - width
+                                    - height
+                                    properties:
+                                      x:
+                                        minimum: 0
+                                        maximum: 1
+                                        type: number
+                                      y:
+                                        minimum: 0
+                                        maximum: 1
+                                        type: number
+                                      width:
+                                        exclusiveMinimum: 0
+                                        maximum: 1
+                                        type: number
+                                      height:
+                                        exclusiveMinimum: 0
+                                        maximum: 1
+                                        type: number
+                                  display:
+                                    additionalProperties: false
+                                    type: object
+                                    required:
+                                    - brightness
+                                    - contrast
+                                    - gamma
+                                    - invert
+                                    properties:
+                                      brightness:
+                                        minimum: -1
+                                        maximum: 1
+                                        type: number
+                                      contrast:
+                                        minimum: 0
+                                        maximum: 4
+                                        type: number
+                                      gamma:
+                                        minimum: 0.1
+                                        maximum: 10
+                                        type: number
+                                      invert:
+                                        type: boolean
+                          - additionalProperties: false
+                            type: object
+                            required:
+                            - id
+                            - artboardId
+                            - zIndex
+                            - locked
+                            - hidden
+                            - type
+                            - transform
+                            - text
+                            properties:
+                              id:
+                                minLength: 1
+                                type: string
+                              artboardId:
+                                minLength: 1
+                                type: string
+                              zIndex:
+                                type: integer
+                              locked:
+                                type: boolean
+                              hidden:
+                                type: boolean
+                              type:
+                                type: string
+                                enum:
+                                - text
+                              transform:
+                                additionalProperties: false
+                                type: object
+                                required:
+                                - xPt
+                                - yPt
+                                - widthPt
+                                - heightPt
+                                - rotationDeg
+                                properties:
+                                  xPt:
+                                    type: number
+                                  yPt:
+                                    type: number
+                                  widthPt:
+                                    exclusiveMinimum: 0
+                                    type: number
+                                  heightPt:
+                                    exclusiveMinimum: 0
+                                    type: number
+                                  rotationDeg:
+                                    minimum: -180
+                                    maximum: 180
+                                    type: number
+                              text:
+                                additionalProperties: false
+                                type: object
+                                required:
+                                - content
+                                - style
+                                properties:
+                                  content:
+                                    minLength: 1
+                                    maxLength: 2000
+                                    type: string
+                                  style:
+                                    additionalProperties: false
+                                    type: object
+                                    required:
+                                    - fontSizePt
+                                    - bold
+                                    - italic
+                                    - underline
+                                    - colorHex
+                                    - align
+                                    - backgroundHex
+                                    properties:
+                                      fontSizePt:
+                                        minimum: 2
+                                        maximum: 144
+                                        type: number
+                                      bold:
+                                        type: boolean
+                                      italic:
+                                        type: boolean
+                                      underline:
+                                        type: boolean
+                                      colorHex:
+                                        pattern: "^#[0-9A-Fa-f]{6}$"
+                                        type: string
+                                      align:
+                                        anyOf:
+                                        - type: string
+                                          enum:
+                                          - start
+                                        - type: string
+                                          enum:
+                                          - middle
+                                        - type: string
+                                          enum:
+                                          - end
+                                      backgroundHex:
+                                        anyOf:
+                                        - pattern: "^#[0-9A-Fa-f]{6}$"
+                                          type: string
+                                        - type: 'null'
+                              panelLabel:
+                                additionalProperties: false
+                                type: object
+                                required:
+                                - targetObjectId
+                                - auto
+                                properties:
+                                  targetObjectId:
+                                    minLength: 1
+                                    type: string
+                                  auto:
+                                    type: boolean
+                          - additionalProperties: false
+                            type: object
+                            required:
+                            - id
+                            - artboardId
+                            - zIndex
+                            - locked
+                            - hidden
+                            - type
+                            - transform
+                            - line
+                            properties:
+                              id:
+                                minLength: 1
+                                type: string
+                              artboardId:
+                                minLength: 1
+                                type: string
+                              zIndex:
+                                type: integer
+                              locked:
+                                type: boolean
+                              hidden:
+                                type: boolean
+                              type:
+                                type: string
+                                enum:
+                                - line
+                              transform:
+                                additionalProperties: false
+                                type: object
+                                required:
+                                - xPt
+                                - yPt
+                                - widthPt
+                                - heightPt
+                                - rotationDeg
+                                properties:
+                                  xPt:
+                                    type: number
+                                  yPt:
+                                    type: number
+                                  widthPt:
+                                    minimum: 0
+                                    type: number
+                                  heightPt:
+                                    minimum: 0
+                                    type: number
+                                  rotationDeg:
+                                    type: number
+                                    enum:
+                                    - 0
+                              line:
+                                additionalProperties: false
+                                type: object
+                                required:
+                                - direction
+                                - heads
+                                - stroke
+                                properties:
+                                  direction:
+                                    anyOf:
+                                    - type: string
+                                      enum:
+                                      - down
+                                    - type: string
+                                      enum:
+                                      - up
+                                  heads:
+                                    anyOf:
+                                    - type: string
+                                      enum:
+                                      - none
+                                    - type: string
+                                      enum:
+                                      - start
+                                    - type: string
+                                      enum:
+                                      - end
+                                    - type: string
+                                      enum:
+                                      - both
+                                  stroke:
+                                    additionalProperties: false
+                                    type: object
+                                    required:
+                                    - colorHex
+                                    - widthPt
+                                    - dashed
+                                    properties:
+                                      colorHex:
+                                        pattern: "^#[0-9A-Fa-f]{6}$"
+                                        type: string
+                                      widthPt:
+                                        minimum: 0.1
+                                        maximum: 20
+                                        type: number
+                                      dashed:
+                                        type: boolean
+                          - additionalProperties: false
+                            type: object
+                            required:
+                            - id
+                            - artboardId
+                            - zIndex
+                            - locked
+                            - hidden
+                            - type
+                            - transform
+                            - shape
+                            properties:
+                              id:
+                                minLength: 1
+                                type: string
+                              artboardId:
+                                minLength: 1
+                                type: string
+                              zIndex:
+                                type: integer
+                              locked:
+                                type: boolean
+                              hidden:
+                                type: boolean
+                              type:
+                                type: string
+                                enum:
+                                - shape
+                              transform:
+                                additionalProperties: false
+                                type: object
+                                required:
+                                - xPt
+                                - yPt
+                                - widthPt
+                                - heightPt
+                                - rotationDeg
+                                properties:
+                                  xPt:
+                                    type: number
+                                  yPt:
+                                    type: number
+                                  widthPt:
+                                    exclusiveMinimum: 0
+                                    type: number
+                                  heightPt:
+                                    exclusiveMinimum: 0
+                                    type: number
+                                  rotationDeg:
+                                    minimum: -180
+                                    maximum: 180
+                                    type: number
+                              shape:
+                                anyOf:
+                                - additionalProperties: false
+                                  type: object
+                                  required:
+                                  - kind
+                                  - stroke
+                                  - fillHex
+                                  properties:
+                                    kind:
+                                      anyOf:
+                                      - type: string
+                                        enum:
+                                        - rect
+                                      - type: string
+                                        enum:
+                                        - ellipse
+                                    stroke:
+                                      anyOf:
+                                      - additionalProperties: false
+                                        type: object
+                                        required:
+                                        - colorHex
+                                        - widthPt
+                                        - dashed
+                                        properties:
+                                          colorHex:
+                                            pattern: "^#[0-9A-Fa-f]{6}$"
+                                            type: string
+                                          widthPt:
+                                            minimum: 0.1
+                                            maximum: 20
+                                            type: number
+                                          dashed:
+                                            type: boolean
+                                      - type: 'null'
+                                    fillHex:
+                                      anyOf:
+                                      - pattern: "^#[0-9A-Fa-f]{6}$"
+                                        type: string
+                                      - type: 'null'
+                                - additionalProperties: false
+                                  type: object
+                                  required:
+                                  - kind
+                                  - opening
+                                  - stroke
+                                  properties:
+                                    kind:
+                                      type: string
+                                      enum:
+                                      - bracket
+                                    opening:
+                                      anyOf:
+                                      - type: string
+                                        enum:
+                                        - down
+                                      - type: string
+                                        enum:
+                                        - up
+                                      - type: string
+                                        enum:
+                                        - left
+                                      - type: string
+                                        enum:
+                                        - right
+                                    stroke:
+                                      additionalProperties: false
+                                      type: object
+                                      required:
+                                      - colorHex
+                                      - widthPt
+                                      - dashed
+                                      properties:
+                                        colorHex:
+                                          pattern: "^#[0-9A-Fa-f]{6}$"
+                                          type: string
+                                        widthPt:
+                                          minimum: 0.1
+                                          maximum: 20
+                                          type: number
+                                        dashed:
+                                          type: boolean
+                      groups:
+                        type: array
+                        items:
+                          additionalProperties: false
+                          type: object
+                          required:
+                          - id
+                          - objectIds
+                          properties:
+                            id:
+                              minLength: 1
+                              type: string
+                            objectIds:
+                              minItems: 2
+                              uniqueItems: true
+                              type: array
+                              items:
+                                minLength: 1
+                                type: string
                       constraints:
                         type: array
                         minItems: 0
@@ -1256,9 +2523,27 @@ paths:
               - checksumSha256
               properties:
                 format:
+                  anyOf:
+                  - type: string
+                    enum:
+                    - png
+                  - type: string
+                    enum:
+                    - tiff
+                  - type: string
+                    enum:
+                    - pdf
+                  - type: string
+                    enum:
+                    - svg
+                artboardId:
+                  minLength: 1
+                  maxLength: 200
                   type: string
-                  enum:
-                  - png
+                dpi:
+                  minimum: 1
+                  maximum: 2400
+                  type: integer
                 revision:
                   minimum: 0
                   type: integer
@@ -1286,6 +2571,7 @@ paths:
           content:
             application/json:
               schema:
+                additionalProperties: false
                 type: object
                 required:
                 - id
@@ -1298,22 +2584,45 @@ paths:
                 - createdAt
                 properties:
                   id:
+                    minLength: 1
                     type: string
                   projectId:
+                    minLength: 1
                     type: string
                   revision:
+                    minimum: 0
                     type: integer
                   format:
+                    anyOf:
+                    - type: string
+                      enum:
+                      - png
+                    - type: string
+                      enum:
+                      - tiff
+                    - type: string
+                      enum:
+                      - pdf
+                    - type: string
+                      enum:
+                      - svg
+                  artboardId:
+                    minLength: 1
                     type: string
-                    enum:
-                    - png
+                  dpi:
+                    minimum: 1
+                    type: integer
                   widthPx:
+                    minimum: 1
                     type: integer
                   heightPx:
+                    minimum: 1
                     type: integer
                   checksumSha256:
+                    pattern: "^[a-f0-9]{64}$"
                     type: string
                   createdAt:
+                    minLength: 1
                     type: string
         '400':
           description: Default Response
@@ -1330,4 +2639,784 @@ paths:
                     enum:
                     - BAD_REQUEST
                   message:
+                    type: string
+    get:
+      parameters:
+      - schema:
+          minLength: 1
+          type: string
+        in: path
+        name: projectId
+        required: true
+      responses:
+        '200':
+          description: Default Response
+          content:
+            application/json:
+              schema:
+                additionalProperties: false
+                type: object
+                required:
+                - exports
+                properties:
+                  exports:
+                    type: array
+                    items:
+                      additionalProperties: false
+                      type: object
+                      required:
+                      - id
+                      - projectId
+                      - revision
+                      - format
+                      - widthPx
+                      - heightPx
+                      - checksumSha256
+                      - createdAt
+                      properties:
+                        id:
+                          minLength: 1
+                          type: string
+                        projectId:
+                          minLength: 1
+                          type: string
+                        revision:
+                          minimum: 0
+                          type: integer
+                        format:
+                          anyOf:
+                          - type: string
+                            enum:
+                            - png
+                          - type: string
+                            enum:
+                            - tiff
+                          - type: string
+                            enum:
+                            - pdf
+                          - type: string
+                            enum:
+                            - svg
+                        artboardId:
+                          minLength: 1
+                          type: string
+                        dpi:
+                          minimum: 1
+                          type: integer
+                        widthPx:
+                          minimum: 1
+                          type: integer
+                        heightPx:
+                          minimum: 1
+                          type: integer
+                        checksumSha256:
+                          pattern: "^[a-f0-9]{64}$"
+                          type: string
+                        createdAt:
+                          minLength: 1
+                          type: string
+  "/v1/projects/{projectId}/audit-events":
+    get:
+      parameters:
+      - schema:
+          minimum: 1
+          maximum: 200
+          type: integer
+        in: query
+        name: limit
+        required: false
+      - schema:
+          minimum: 1
+          type: integer
+        in: query
+        name: beforeSequence
+        required: false
+      - schema:
+          minLength: 1
+          type: string
+        in: path
+        name: projectId
+        required: true
+      responses:
+        '200':
+          description: Default Response
+          content:
+            application/json:
+              schema:
+                additionalProperties: false
+                type: object
+                required:
+                - events
+                properties:
+                  events:
+                    type: array
+                    items:
+                      additionalProperties: false
+                      type: object
+                      required:
+                      - id
+                      - action
+                      - details
+                      - sequence
+                      - createdAt
+                      properties:
+                        id:
+                          minLength: 1
+                          type: string
+                        action:
+                          minLength: 1
+                          type: string
+                        details:
+                          type: object
+                          additionalProperties: {}
+                        actor:
+                          additionalProperties: false
+                          type: object
+                          required:
+                          - id
+                          - email
+                          properties:
+                            id:
+                              minLength: 1
+                              type: string
+                            email:
+                              minLength: 1
+                              type: string
+                        sequence:
+                          minimum: 1
+                          type: integer
+                        createdAt:
+                          minLength: 1
+                          type: string
+                  nextBeforeSequence:
+                    minimum: 1
+                    type: integer
+  "/v1/projects/{projectId}/versions":
+    get:
+      parameters:
+      - schema:
+          minimum: 1
+          maximum: 200
+          type: integer
+        in: query
+        name: limit
+        required: false
+      - schema:
+          minimum: 1
+          type: integer
+        in: query
+        name: beforeRevision
+        required: false
+      - schema:
+          minLength: 1
+          type: string
+        in: path
+        name: projectId
+        required: true
+      responses:
+        '200':
+          description: Default Response
+          content:
+            application/json:
+              schema:
+                additionalProperties: false
+                type: object
+                required:
+                - versions
+                properties:
+                  versions:
+                    type: array
+                    items:
+                      additionalProperties: false
+                      type: object
+                      required:
+                      - revision
+                      - schemaVersion
+                      - createdAt
+                      properties:
+                        revision:
+                          minimum: 1
+                          type: integer
+                        schemaVersion:
+                          minimum: 1
+                          type: integer
+                        createdAt:
+                          minLength: 1
+                          type: string
+  "/v1/projects/{projectId}/versions/{revision}":
+    get:
+      parameters:
+      - schema:
+          minLength: 1
+          type: string
+        in: path
+        name: projectId
+        required: true
+      - schema:
+          minimum: 1
+          type: integer
+        in: path
+        name: revision
+        required: true
+      responses:
+        '200':
+          description: Default Response
+          content:
+            application/json:
+              schema:
+                additionalProperties: false
+                type: object
+                required:
+                - projectId
+                - revision
+                - schemaVersion
+                - document
+                - createdAt
+                properties:
+                  projectId:
+                    minLength: 1
+                    type: string
+                  revision:
+                    minimum: 1
+                    type: integer
+                  schemaVersion:
+                    minimum: 1
+                    type: integer
+                  document:
+                    additionalProperties: false
+                    type: object
+                    required:
+                    - schemaVersion
+                    - artboards
+                    - objects
+                    - groups
+                    - constraints
+                    - styles
+                    properties:
+                      schemaVersion:
+                        type: number
+                        enum:
+                        - 2
+                      artboards:
+                        minItems: 1
+                        type: array
+                        items:
+                          additionalProperties: false
+                          type: object
+                          required:
+                          - id
+                          - name
+                          - widthPt
+                          - heightPt
+                          - backgroundHex
+                          properties:
+                            id:
+                              minLength: 1
+                              type: string
+                            name:
+                              minLength: 1
+                              type: string
+                            widthPt:
+                              exclusiveMinimum: 0
+                              type: number
+                            heightPt:
+                              exclusiveMinimum: 0
+                              type: number
+                            backgroundHex:
+                              pattern: "^#[0-9A-Fa-f]{6}$"
+                              type: string
+                      objects:
+                        type: array
+                        items:
+                          anyOf:
+                          - additionalProperties: false
+                            type: object
+                            required:
+                            - id
+                            - type
+                            - artboardId
+                            - transform
+                            - zIndex
+                            - locked
+                            - hidden
+                            - view
+                            properties:
+                              id:
+                                minLength: 1
+                                type: string
+                              type:
+                                type: string
+                                enum:
+                                - image-view
+                              artboardId:
+                                minLength: 1
+                                type: string
+                              transform:
+                                additionalProperties: false
+                                type: object
+                                required:
+                                - xPt
+                                - yPt
+                                - widthPt
+                                - heightPt
+                                - rotationDeg
+                                properties:
+                                  xPt:
+                                    type: number
+                                  yPt:
+                                    type: number
+                                  widthPt:
+                                    exclusiveMinimum: 0
+                                    type: number
+                                  heightPt:
+                                    exclusiveMinimum: 0
+                                    type: number
+                                  rotationDeg:
+                                    type: number
+                                    enum:
+                                    - 0
+                              zIndex:
+                                type: integer
+                              locked:
+                                type: boolean
+                              hidden:
+                                type: boolean
+                              view:
+                                additionalProperties: false
+                                type: object
+                                required:
+                                - sourceAssetId
+                                - viewport
+                                - display
+                                properties:
+                                  sourceAssetId:
+                                    minLength: 1
+                                    type: string
+                                  viewport:
+                                    additionalProperties: false
+                                    type: object
+                                    required:
+                                    - x
+                                    - y
+                                    - width
+                                    - height
+                                    properties:
+                                      x:
+                                        minimum: 0
+                                        maximum: 1
+                                        type: number
+                                      y:
+                                        minimum: 0
+                                        maximum: 1
+                                        type: number
+                                      width:
+                                        exclusiveMinimum: 0
+                                        maximum: 1
+                                        type: number
+                                      height:
+                                        exclusiveMinimum: 0
+                                        maximum: 1
+                                        type: number
+                                  display:
+                                    additionalProperties: false
+                                    type: object
+                                    required:
+                                    - brightness
+                                    - contrast
+                                    - gamma
+                                    - invert
+                                    properties:
+                                      brightness:
+                                        minimum: -1
+                                        maximum: 1
+                                        type: number
+                                      contrast:
+                                        minimum: 0
+                                        maximum: 4
+                                        type: number
+                                      gamma:
+                                        minimum: 0.1
+                                        maximum: 10
+                                        type: number
+                                      invert:
+                                        type: boolean
+                          - additionalProperties: false
+                            type: object
+                            required:
+                            - id
+                            - artboardId
+                            - zIndex
+                            - locked
+                            - hidden
+                            - type
+                            - transform
+                            - text
+                            properties:
+                              id:
+                                minLength: 1
+                                type: string
+                              artboardId:
+                                minLength: 1
+                                type: string
+                              zIndex:
+                                type: integer
+                              locked:
+                                type: boolean
+                              hidden:
+                                type: boolean
+                              type:
+                                type: string
+                                enum:
+                                - text
+                              transform:
+                                additionalProperties: false
+                                type: object
+                                required:
+                                - xPt
+                                - yPt
+                                - widthPt
+                                - heightPt
+                                - rotationDeg
+                                properties:
+                                  xPt:
+                                    type: number
+                                  yPt:
+                                    type: number
+                                  widthPt:
+                                    exclusiveMinimum: 0
+                                    type: number
+                                  heightPt:
+                                    exclusiveMinimum: 0
+                                    type: number
+                                  rotationDeg:
+                                    minimum: -180
+                                    maximum: 180
+                                    type: number
+                              text:
+                                additionalProperties: false
+                                type: object
+                                required:
+                                - content
+                                - style
+                                properties:
+                                  content:
+                                    minLength: 1
+                                    maxLength: 2000
+                                    type: string
+                                  style:
+                                    additionalProperties: false
+                                    type: object
+                                    required:
+                                    - fontSizePt
+                                    - bold
+                                    - italic
+                                    - underline
+                                    - colorHex
+                                    - align
+                                    - backgroundHex
+                                    properties:
+                                      fontSizePt:
+                                        minimum: 2
+                                        maximum: 144
+                                        type: number
+                                      bold:
+                                        type: boolean
+                                      italic:
+                                        type: boolean
+                                      underline:
+                                        type: boolean
+                                      colorHex:
+                                        pattern: "^#[0-9A-Fa-f]{6}$"
+                                        type: string
+                                      align:
+                                        anyOf:
+                                        - type: string
+                                          enum:
+                                          - start
+                                        - type: string
+                                          enum:
+                                          - middle
+                                        - type: string
+                                          enum:
+                                          - end
+                                      backgroundHex:
+                                        anyOf:
+                                        - pattern: "^#[0-9A-Fa-f]{6}$"
+                                          type: string
+                                        - type: 'null'
+                              panelLabel:
+                                additionalProperties: false
+                                type: object
+                                required:
+                                - targetObjectId
+                                - auto
+                                properties:
+                                  targetObjectId:
+                                    minLength: 1
+                                    type: string
+                                  auto:
+                                    type: boolean
+                          - additionalProperties: false
+                            type: object
+                            required:
+                            - id
+                            - artboardId
+                            - zIndex
+                            - locked
+                            - hidden
+                            - type
+                            - transform
+                            - line
+                            properties:
+                              id:
+                                minLength: 1
+                                type: string
+                              artboardId:
+                                minLength: 1
+                                type: string
+                              zIndex:
+                                type: integer
+                              locked:
+                                type: boolean
+                              hidden:
+                                type: boolean
+                              type:
+                                type: string
+                                enum:
+                                - line
+                              transform:
+                                additionalProperties: false
+                                type: object
+                                required:
+                                - xPt
+                                - yPt
+                                - widthPt
+                                - heightPt
+                                - rotationDeg
+                                properties:
+                                  xPt:
+                                    type: number
+                                  yPt:
+                                    type: number
+                                  widthPt:
+                                    minimum: 0
+                                    type: number
+                                  heightPt:
+                                    minimum: 0
+                                    type: number
+                                  rotationDeg:
+                                    type: number
+                                    enum:
+                                    - 0
+                              line:
+                                additionalProperties: false
+                                type: object
+                                required:
+                                - direction
+                                - heads
+                                - stroke
+                                properties:
+                                  direction:
+                                    anyOf:
+                                    - type: string
+                                      enum:
+                                      - down
+                                    - type: string
+                                      enum:
+                                      - up
+                                  heads:
+                                    anyOf:
+                                    - type: string
+                                      enum:
+                                      - none
+                                    - type: string
+                                      enum:
+                                      - start
+                                    - type: string
+                                      enum:
+                                      - end
+                                    - type: string
+                                      enum:
+                                      - both
+                                  stroke:
+                                    additionalProperties: false
+                                    type: object
+                                    required:
+                                    - colorHex
+                                    - widthPt
+                                    - dashed
+                                    properties:
+                                      colorHex:
+                                        pattern: "^#[0-9A-Fa-f]{6}$"
+                                        type: string
+                                      widthPt:
+                                        minimum: 0.1
+                                        maximum: 20
+                                        type: number
+                                      dashed:
+                                        type: boolean
+                          - additionalProperties: false
+                            type: object
+                            required:
+                            - id
+                            - artboardId
+                            - zIndex
+                            - locked
+                            - hidden
+                            - type
+                            - transform
+                            - shape
+                            properties:
+                              id:
+                                minLength: 1
+                                type: string
+                              artboardId:
+                                minLength: 1
+                                type: string
+                              zIndex:
+                                type: integer
+                              locked:
+                                type: boolean
+                              hidden:
+                                type: boolean
+                              type:
+                                type: string
+                                enum:
+                                - shape
+                              transform:
+                                additionalProperties: false
+                                type: object
+                                required:
+                                - xPt
+                                - yPt
+                                - widthPt
+                                - heightPt
+                                - rotationDeg
+                                properties:
+                                  xPt:
+                                    type: number
+                                  yPt:
+                                    type: number
+                                  widthPt:
+                                    exclusiveMinimum: 0
+                                    type: number
+                                  heightPt:
+                                    exclusiveMinimum: 0
+                                    type: number
+                                  rotationDeg:
+                                    minimum: -180
+                                    maximum: 180
+                                    type: number
+                              shape:
+                                anyOf:
+                                - additionalProperties: false
+                                  type: object
+                                  required:
+                                  - kind
+                                  - stroke
+                                  - fillHex
+                                  properties:
+                                    kind:
+                                      anyOf:
+                                      - type: string
+                                        enum:
+                                        - rect
+                                      - type: string
+                                        enum:
+                                        - ellipse
+                                    stroke:
+                                      anyOf:
+                                      - additionalProperties: false
+                                        type: object
+                                        required:
+                                        - colorHex
+                                        - widthPt
+                                        - dashed
+                                        properties:
+                                          colorHex:
+                                            pattern: "^#[0-9A-Fa-f]{6}$"
+                                            type: string
+                                          widthPt:
+                                            minimum: 0.1
+                                            maximum: 20
+                                            type: number
+                                          dashed:
+                                            type: boolean
+                                      - type: 'null'
+                                    fillHex:
+                                      anyOf:
+                                      - pattern: "^#[0-9A-Fa-f]{6}$"
+                                        type: string
+                                      - type: 'null'
+                                - additionalProperties: false
+                                  type: object
+                                  required:
+                                  - kind
+                                  - opening
+                                  - stroke
+                                  properties:
+                                    kind:
+                                      type: string
+                                      enum:
+                                      - bracket
+                                    opening:
+                                      anyOf:
+                                      - type: string
+                                        enum:
+                                        - down
+                                      - type: string
+                                        enum:
+                                        - up
+                                      - type: string
+                                        enum:
+                                        - left
+                                      - type: string
+                                        enum:
+                                        - right
+                                    stroke:
+                                      additionalProperties: false
+                                      type: object
+                                      required:
+                                      - colorHex
+                                      - widthPt
+                                      - dashed
+                                      properties:
+                                        colorHex:
+                                          pattern: "^#[0-9A-Fa-f]{6}$"
+                                          type: string
+                                        widthPt:
+                                          minimum: 0.1
+                                          maximum: 20
+                                          type: number
+                                        dashed:
+                                          type: boolean
+                      groups:
+                        type: array
+                        items:
+                          additionalProperties: false
+                          type: object
+                          required:
+                          - id
+                          - objectIds
+                          properties:
+                            id:
+                              minLength: 1
+                              type: string
+                            objectIds:
+                              minItems: 2
+                              uniqueItems: true
+                              type: array
+                              items:
+                                minLength: 1
+                                type: string
+                      constraints:
+                        type: array
+                        minItems: 0
+                        maxItems: 0
+                      styles:
+                        type: array
+                        minItems: 0
+                        maxItems: 0
+                  createdAt:
+                    minLength: 1
                     type: string

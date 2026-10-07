@@ -6,6 +6,7 @@ import {
   type PrepareUploadResponse,
   type Project,
   type ProjectDocumentResponse,
+  type RecordExportRequest,
   type SaveDocumentResponse,
 } from "@figlab/api-contract";
 import type { FigureDocument } from "@figlab/figure-schema";
@@ -150,16 +151,7 @@ export class FigLabClient {
     return asset;
   }
 
-  recordExport(
-    projectId: string,
-    metadata: {
-      format: "png";
-      revision: number;
-      widthPx: number;
-      heightPx: number;
-      checksumSha256: string;
-    },
-  ): Promise<void> {
+  recordExport(projectId: string, metadata: RecordExportRequest): Promise<void> {
     return this.json(path(apiRoutes.projectExports, { projectId }), {
       method: "POST",
       body: metadata,

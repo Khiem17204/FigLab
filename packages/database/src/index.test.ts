@@ -1,5 +1,6 @@
 import { getTableConfig } from "drizzle-orm/pg-core";
 import { describe, expect, it } from "vitest";
+import { historyContract } from "./history-contract.test-support.js";
 import { InMemoryFigLabRepository, PostgresFigLabRepository } from "./index.js";
 import { workspaceMembers } from "./schema.js";
 
@@ -169,5 +170,12 @@ describe("InMemoryFigLabRepository.ensureAuthUser", () => {
     });
     expect(again.workspaceId).toBe(first.workspaceId);
     expect(other.workspaceId).not.toBe(first.workspaceId);
+  });
+});
+
+describe("InMemoryFigLabRepository history", () => {
+  historyContract(async () => {
+    const repository = new InMemoryFigLabRepository();
+    return { repository, principal: await repository.bootstrapSingleUser() };
   });
 });

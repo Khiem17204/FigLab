@@ -1,6 +1,7 @@
-import { readFile } from "node:fs/promises";
+import { readdir, readFile } from "node:fs/promises";
 import { Pool } from "pg";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { historyContract } from "./history-contract.test-support.js";
 import { PostgresFigLabRepository } from "./index.js";
 
 const databaseUrl = process.env.TEST_DATABASE_URL;
@@ -9,24 +10,15 @@ describe.skipIf(!databaseUrl)("PostgresFigLabRepository", () => {
   const repository = new PostgresFigLabRepository(pool);
 
   beforeAll(async () => {
-    const migration = await readFile(
-      new URL("../migrations/0000_initial.sql", import.meta.url),
-      "utf8",
-    );
     await pool.query("DROP SCHEMA IF EXISTS graphile_worker CASCADE");
     await pool.query(
       "DROP TABLE IF EXISTS figlab_schema_migrations,export_records,audit_events,assets,upload_sessions,project_versions,project_documents,projects,workspace_members,workspaces,users CASCADE",
     );
     await pool.query("CREATE TABLE figlab_schema_migrations(name text PRIMARY KEY)");
-    await pool.query(migration);
-    const rowSecurityMigration = await readFile(
-      new URL("../migrations/0001_enable_rls.sql", import.meta.url),
-      "utf8",
-    );
-    await pool.query(rowSecurityMigration);
-    await pool.query(
-      await readFile(new URL("../migrations/0002_member_user_index.sql", import.meta.url), "utf8"),
-    );
+    // Apply every migration in order, exactly as deploy/migrate.sh does.
+    const migrations = new URL("../migrations/", import.meta.url);
+    for (const name of (await readdir(migrations)).filter((file) => file.endsWith(".sql")).sort())
+      await pool.query(await readFile(new URL(name, migrations), "utf8"));
     await pool.query("CREATE SCHEMA graphile_worker");
     await pool.query(
       "CREATE TABLE graphile_worker.jobs(identifier text, payload jsonb, job_key text UNIQUE)",
@@ -164,5 +156,12 @@ describe.skipIf(!databaseUrl)("PostgresFigLabRepository", () => {
         },
       },
     ]);
+  });
+
+  describe("history", () => {
+    historyContract(async () => ({
+      repository,
+      principal: await repository.bootstrapSingleUser(),
+    }));
   });
 });

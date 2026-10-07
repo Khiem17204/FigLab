@@ -36,9 +36,9 @@ Production: https://figlab.netlify.app (Netlify site `figlab`) on Supabase proje
   `pnpm-lock.yaml` committed. Match the surrounding style and comment density.
 - Domain logic stays in pure packages (`figure-schema`, `editor-core`, `image-processing`)
   with no browser or database dependencies.
-- HTTP changes go in `packages/api-contract` first. Then regenerate `openapi/openapi-v1.yaml`:
-  build the app with the in-memory repository, call `app.swagger({ yaml: true })`, and pipe it
-  through `ruby -ryaml -e 'print YAML.dump(YAML.load(STDIN.read))'` to keep the existing format.
+- HTTP changes go in `packages/api-contract` first. Then regenerate `openapi/openapi-v1.yaml`
+  with `corepack pnpm openapi` (`apps/api/scripts/generate-openapi.ts`, piped through Ruby's YAML
+  dumper to keep the existing format).
 - Document changes need a new schema version plus the migration entry point in
   `packages/figure-schema`; old documents must still open.
 - Tests rely on accessible names ("Upload original", "Create project", "Export PNG",
@@ -118,8 +118,11 @@ There is no Redis or separate queue. Graphile Worker keeps jobs in Postgres in b
 - Editing: pointer-move previews, pointer-up commits one command. Undo keeps at most 100
   snapshots. Autosave debounce is 1000 ms.
 - Storage: `project_documents` holds the current document, `project_versions` the history.
-- Audit events are derived on the server from document diffs (crop, display, transform/remove,
-  upload, export). There is no read endpoint yet.
+- Audit events are derived on the server from document diffs. Image views report crop, display,
+  and transform changes; other objects report create/change/transform/remove; artboards and
+  groups report their own changes; uploads, exports, renames, and deletion are recorded too.
+  Each event records its actor (`actor_user_id`) and a monotonic `seq`. Deleting a project
+  tombstones it (`status = 'deleted'`): content goes, the audit trail and export records stay.
 
 **Assets.** `AssetDescriptor` lives outside the document: verified MIME type, SHA-256,
 dimensions, bit depth, channels. States are `pending-verification` → `ready` | `rejected`, and
@@ -164,7 +167,9 @@ personal workspace. Shared workspaces are not built yet.
 | `POST /v1/uploads/:id/complete` | Finalize and enqueue verification. |
 | `GET /v1/assets/:id` | Asset status and descriptor. |
 | `POST /v1/assets/:id/download-url` | Short-lived signed GET. |
-| `POST /v1/projects/:id/exports` | Record export metadata. |
+| `GET/POST /v1/projects/:id/exports` | List / record export metadata (format, figure, DPI). |
+| `GET /v1/projects/:id/audit-events` | Audit trail, newest first (`limit`, `beforeSequence`). |
+| `GET /v1/projects/:id/versions[/:revision]` | Saved revisions; a revision's document is migrated to current. |
 
 Error codes: `BAD_REQUEST`, `UNAUTHORIZED`, `NOT_FOUND`, `UPLOAD_INVALID`, `UPLOAD_EXPIRED`,
 `ASSET_NOT_READY`, `UNSUPPORTED_IMAGE`, `REVISION_CONFLICT`, `INTERNAL_ERROR`.

@@ -6,7 +6,6 @@ import {
   type ImageViewObjectV1,
   isImageView,
   type NormalizedRect,
-  type ObjectTransformV1,
 } from "@figlab/figure-schema";
 
 import { pruneGroups } from "./arrange.js";

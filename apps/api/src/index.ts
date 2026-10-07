@@ -3,11 +3,16 @@ import { pathToFileURL } from "node:url";
 import swagger from "@fastify/swagger";
 import {
   AssetDescriptorSchema,
+  AuditEventPageSchema,
+  AuditEventsQuerySchema,
   apiRoutes,
   CreateProjectRequestSchema,
   CurrentUserResponseSchema,
   DownloadUrlResponseSchema,
   ErrorEnvelopeSchema,
+  type ExportFormat,
+  ExportListResponseSchema,
+  ExportRecordSchema,
   MAX_UPLOAD_BYTES,
   PrepareUploadRequestSchema,
   ProjectDocumentResponseSchema,
@@ -17,6 +22,9 @@ import {
   SaveDocumentRequestSchema,
   SaveDocumentResponseSchema,
   UpdateProjectRequestSchema,
+  VersionListResponseSchema,
+  VersionResponseSchema,
+  VersionsQuerySchema,
   validateRecordExportRequest,
 } from "@figlab/api-contract";
 import {
@@ -67,16 +75,11 @@ const uploadSchema = Type.Object({
     expiresAt: Type.String(),
   }),
 });
-const exportSchema = Type.Object({
-  id: Type.String(),
-  projectId: Type.String(),
-  revision: Type.Integer(),
-  format: Type.Literal("png"),
-  widthPx: Type.Integer(),
-  heightPx: Type.Integer(),
-  checksumSha256: Type.String(),
-  createdAt: Type.String(),
+const versionParams = Type.Object({
+  projectId: Type.String({ minLength: 1 }),
+  revision: Type.Integer({ minimum: 1 }),
 });
+const DEFAULT_PAGE_SIZE = 50;
 const DEFAULT_SINGLE_USER_EMAIL = "local-admin@figlab.invalid";
 
 declare module "fastify" {
@@ -202,6 +205,7 @@ export async function buildApp(dependencies: AppDependencies): Promise<FastifyIn
       const project = await dependencies.repository.createProject(
         request.principal.workspaceId,
         body.name,
+        actor(request.principal),
       );
       return reply.status(201).send(project);
     },
@@ -218,7 +222,11 @@ export async function buildApp(dependencies: AppDependencies): Promise<FastifyIn
     async (request) => {
       const id = (request.params as { projectId: string }).projectId;
       await projectFor(request.principal, id);
-      return dependencies.repository.renameProject(id, (request.body as { name: string }).name);
+      return dependencies.repository.renameProject(
+        id,
+        (request.body as { name: string }).name,
+        actor(request.principal),
+      );
     },
   );
   app.delete(
@@ -227,7 +235,10 @@ export async function buildApp(dependencies: AppDependencies): Promise<FastifyIn
     async (request, reply) => {
       const id = (request.params as { projectId: string }).projectId;
       await projectFor(request.principal, id);
-      const deleting = await dependencies.repository.markProjectDeleting(id);
+      const deleting = await dependencies.repository.markProjectDeleting(
+        id,
+        actor(request.principal),
+      );
       jobsEnqueued();
       return reply.status(202).send(deleting);
     },
@@ -264,7 +275,12 @@ export async function buildApp(dependencies: AppDependencies): Promise<FastifyIn
       const body = request.body as { baseRevision: number; document: unknown };
       const document = migrateFigureDocument(body.document);
       await dependencies.repository.assertReadyAssets(id, sourceAssetIds(document));
-      const saved = await dependencies.repository.saveDocument(id, body.baseRevision, document);
+      const saved = await dependencies.repository.saveDocument(
+        id,
+        body.baseRevision,
+        document,
+        actor(request.principal),
+      );
       if (saved.kind === "conflict")
         return reply.status(409).send({
           code: "REVISION_CONFLICT",
@@ -399,7 +415,7 @@ export async function buildApp(dependencies: AppDependencies): Promise<FastifyIn
         params,
         body: RecordExportRequestSchema,
         response: {
-          201: exportSchema,
+          201: ExportRecordSchema,
           400: Type.Object({ code: Type.Literal("BAD_REQUEST"), message: Type.String() }),
         },
       },
@@ -408,7 +424,9 @@ export async function buildApp(dependencies: AppDependencies): Promise<FastifyIn
       const id = (request.params as { projectId: string }).projectId;
       await projectFor(request.principal, id);
       const body = request.body as {
-        format: "png";
+        format: ExportFormat;
+        artboardId?: string;
+        dpi?: number;
         revision: number;
         widthPx: number;
         heightPx: number;
@@ -416,9 +434,80 @@ export async function buildApp(dependencies: AppDependencies): Promise<FastifyIn
       };
       if (!validateRecordExportRequest(body))
         return reply.status(400).send({ code: "BAD_REQUEST", message: "Invalid export metadata" });
+      if (body.artboardId !== undefined) {
+        const current = await dependencies.repository.getDocument(id);
+        const document = migrateFigureDocument(current.document);
+        if (!document.artboards.some((artboard) => artboard.id === body.artboardId))
+          return reply
+            .status(400)
+            .send({ code: "BAD_REQUEST", message: "Export names an unknown figure" });
+      }
       return reply
         .status(201)
-        .send(await dependencies.repository.recordExport({ projectId: id, ...body }));
+        .send(
+          await dependencies.repository.recordExport(
+            { projectId: id, ...body },
+            actor(request.principal),
+          ),
+        );
+    },
+  );
+  app.get(
+    apiRoutes.projectExports,
+    { schema: { params, response: { 200: ExportListResponseSchema } } },
+    async (request) => {
+      const id = (request.params as { projectId: string }).projectId;
+      await projectFor(request.principal, id);
+      return { exports: await dependencies.repository.listExports(id) };
+    },
+  );
+  app.get(
+    apiRoutes.projectAuditEvents,
+    {
+      schema: {
+        params,
+        querystring: AuditEventsQuerySchema,
+        response: { 200: AuditEventPageSchema },
+      },
+    },
+    async (request) => {
+      const id = (request.params as { projectId: string }).projectId;
+      await projectFor(request.principal, id);
+      const query = request.query as { limit?: number; beforeSequence?: number };
+      return dependencies.repository.pageAuditEvents(id, {
+        limit: query.limit ?? DEFAULT_PAGE_SIZE,
+        ...(query.beforeSequence === undefined ? {} : { beforeSequence: query.beforeSequence }),
+      });
+    },
+  );
+  app.get(
+    apiRoutes.projectVersions,
+    {
+      schema: {
+        params,
+        querystring: VersionsQuerySchema,
+        response: { 200: VersionListResponseSchema },
+      },
+    },
+    async (request) => {
+      const id = (request.params as { projectId: string }).projectId;
+      await projectFor(request.principal, id);
+      const query = request.query as { limit?: number; beforeRevision?: number };
+      return {
+        versions: await dependencies.repository.listVersions(id, {
+          limit: query.limit ?? DEFAULT_PAGE_SIZE,
+          ...(query.beforeRevision === undefined ? {} : { beforeRevision: query.beforeRevision }),
+        }),
+      };
+    },
+  );
+  app.get(
+    apiRoutes.projectVersion,
+    { schema: { params: versionParams, response: { 200: VersionResponseSchema } } },
+    async (request) => {
+      const { projectId, revision } = request.params as { projectId: string; revision: number };
+      await projectFor(request.principal, projectId);
+      return currentDocument(await dependencies.repository.getVersion(projectId, revision));
     },
   );
   return app;
@@ -510,6 +599,9 @@ async function assetFor(
     await dependencies.repository.getProject(asset.projectId),
   );
   return asset;
+}
+function actor(principal: Principal): { actorUserId: string } {
+  return { actorUserId: principal.id };
 }
 function resourceId(value: string): string {
   assertResourceId(value);

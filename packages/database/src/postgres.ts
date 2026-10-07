@@ -3,8 +3,10 @@ import { and, eq } from "drizzle-orm";
 import { drizzle, type NodePgDatabase } from "drizzle-orm/node-postgres";
 import { Pool, type PoolClient, type QueryResultRow } from "pg";
 import type {
+  ActorOptions,
   AssetRecord,
   AuditEvent,
+  AuditEventPage,
   AuthUserIdentity,
   DocumentRecord,
   ExportRecord,
@@ -12,10 +14,14 @@ import type {
   Principal,
   ProjectRecord,
   UploadRecord,
+  VersionRecord,
+  VersionSummary,
 } from "./index.js";
 import {
   assertResourceId,
   deriveDocumentAuditEvents,
+  deriveDocumentDiff,
+  exportAuditDetails,
   NotFoundError,
   schemaVersionOf,
   UploadExpiredError,
@@ -92,7 +98,11 @@ export class PostgresFigLabRepository implements FigLabRepository {
       return { id: identity.id, email: identity.email, workspaceId };
     });
   }
-  async createProject(workspaceId: string, name: string): Promise<ProjectRecord> {
+  async createProject(
+    workspaceId: string,
+    name: string,
+    options: ActorOptions = {},
+  ): Promise<ProjectRecord> {
     assertResourceId(workspaceId);
     return this.transaction(async (client) => {
       const id = randomUUID();
@@ -106,7 +116,7 @@ export class PostgresFigLabRepository implements FigLabRepository {
         "INSERT INTO project_documents(project_id,revision,schema_version,document,created_at,updated_at) VALUES($1,0,$2,$3,$4,$4)",
         [id, document.schemaVersion, document, now],
       );
-      await this.insertAudit(client, id, "PROJECT_CREATED", { name });
+      await this.insertAudit(client, id, "PROJECT_CREATED", { name }, options.actorUserId);
       return projectRow(first(result.rows));
     });
   }
@@ -135,7 +145,7 @@ export class PostgresFigLabRepository implements FigLabRepository {
       .from(schema.projects)
       .where(eq(schema.projects.id, projectId));
     const row = rows[0];
-    if (!row) throw new NotFoundError();
+    if (!row || row.status === "deleted") throw new NotFoundError();
     return {
       id: row.id,
       workspaceId: row.workspaceId,
@@ -145,26 +155,37 @@ export class PostgresFigLabRepository implements FigLabRepository {
       updatedAt: row.updatedAt.toISOString(),
     };
   }
-  async renameProject(projectId: string, name: string): Promise<ProjectRecord> {
+  async renameProject(
+    projectId: string,
+    name: string,
+    options: ActorOptions = {},
+  ): Promise<ProjectRecord> {
     assertResourceId(projectId);
     return this.transaction(async (client) => {
       const result = await client.query(
-        "UPDATE projects SET name=$2,updated_at=now() WHERE id=$1 RETURNING *",
+        "UPDATE projects SET name=$2,updated_at=now() WHERE id=$1 AND status<>'deleted' RETURNING *",
         [projectId, name],
       );
       const project = projectRow(first(result.rows));
-      await this.insertAudit(client, projectId, "PROJECT_RENAMED", { name });
+      await this.insertAudit(client, projectId, "PROJECT_RENAMED", { name }, options.actorUserId);
       return project;
     });
   }
-  async markProjectDeleting(projectId: string): Promise<ProjectRecord> {
+  async markProjectDeleting(projectId: string, options: ActorOptions = {}): Promise<ProjectRecord> {
     assertResourceId(projectId);
     return this.transaction(async (client) => {
       const result = await client.query(
-        "UPDATE projects SET status='deleting',updated_at=now() WHERE id=$1 RETURNING *",
+        "UPDATE projects SET status='deleting',updated_at=now() WHERE id=$1 AND status<>'deleted' RETURNING *",
         [projectId],
       );
       const project = projectRow(first(result.rows));
+      await this.insertAudit(
+        client,
+        projectId,
+        "PROJECT_DELETION_REQUESTED",
+        {},
+        options.actorUserId,
+      );
       await addJob(client, "delete_project", { projectId }, `delete_project:${projectId}`);
       return project;
     });
@@ -180,6 +201,7 @@ export class PostgresFigLabRepository implements FigLabRepository {
     projectId: string,
     baseRevision: number,
     document: unknown,
+    options: ActorOptions = {},
   ): Promise<
     { kind: "saved"; document: DocumentRecord } | { kind: "conflict"; currentRevision: number }
   > {
@@ -206,14 +228,16 @@ export class PostgresFigLabRepository implements FigLabRepository {
         "INSERT INTO project_versions(id,project_id,revision,schema_version,document,created_at) VALUES($1,$2,$3,$4,$5,now())",
         [randomUUID(), projectId, record.revision, schemaVersionOf(document), document],
       );
+      const actor = options.actorUserId;
       await this.insertAudit(
         client,
         projectId,
         "DOCUMENT_UPDATED",
-        documentDiff(first(prior.rows).document, document),
+        deriveDocumentDiff(first(prior.rows).document, document),
+        actor,
       );
       for (const event of deriveDocumentAuditEvents(first(prior.rows).document, document))
-        await this.insertAudit(client, projectId, event.action, event.details);
+        await this.insertAudit(client, projectId, event.action, event.details, actor);
       return { kind: "saved", document: record };
     });
   }
@@ -362,7 +386,10 @@ export class PostgresFigLabRepository implements FigLabRepository {
     );
     if (Number(first(result.rows).count) !== values.length) throw new NotFoundError();
   }
-  async recordExport(input: Omit<ExportRecord, "id" | "createdAt">): Promise<ExportRecord> {
+  async recordExport(
+    input: Omit<ExportRecord, "id" | "createdAt">,
+    options: ActorOptions = {},
+  ): Promise<ExportRecord> {
     assertResourceId(input.projectId);
     return this.transaction(async (client) => {
       const revision = await client.query(
@@ -372,7 +399,7 @@ export class PostgresFigLabRepository implements FigLabRepository {
       if (revision.rowCount === 0) throw new NotFoundError();
       const id = randomUUID();
       const result = await client.query(
-        "INSERT INTO export_records(id,project_id,revision,format,width_px,height_px,checksum_sha256,metadata,created_at) VALUES($1,$2,$3,$4,$5,$6,$7,'{}'::jsonb,now()) RETURNING *",
+        "INSERT INTO export_records(id,project_id,revision,format,width_px,height_px,checksum_sha256,metadata,artboard_id,dpi,created_at) VALUES($1,$2,$3,$4,$5,$6,$7,'{}'::jsonb,$8,$9,now()) RETURNING *",
         [
           id,
           input.projectId,
@@ -381,22 +408,80 @@ export class PostgresFigLabRepository implements FigLabRepository {
           input.widthPx,
           input.heightPx,
           input.checksumSha256,
+          input.artboardId ?? null,
+          input.dpi ?? null,
         ],
       );
-      await this.insertAudit(client, input.projectId, "EXPORT_CREATED", {
-        exportId: id,
-        revision: input.revision,
-      });
-      return exportRow(first(result.rows));
+      const record = exportRow(first(result.rows));
+      await this.insertAudit(
+        client,
+        input.projectId,
+        "EXPORT_CREATED",
+        exportAuditDetails(record),
+        options.actorUserId,
+      );
+      return record;
     });
+  }
+  async listExports(projectId: string): Promise<ExportRecord[]> {
+    assertResourceId(projectId);
+    const result = await this.pool.query(
+      "SELECT * FROM export_records WHERE project_id=$1 ORDER BY created_at DESC, id",
+      [projectId],
+    );
+    return result.rows.map(exportRow);
   }
   async listAuditEvents(projectId: string): Promise<AuditEvent[]> {
     assertResourceId(projectId);
-    const result = await this.pool.query(
-      "SELECT * FROM audit_events WHERE project_id=$1 ORDER BY created_at",
-      [projectId],
-    );
+    const result = await this.pool.query(`${AUDIT_SELECT} WHERE e.project_id=$1 ORDER BY e.seq`, [
+      projectId,
+    ]);
     return result.rows.map(auditRow);
+  }
+  async pageAuditEvents(
+    projectId: string,
+    page: { limit: number; beforeSequence?: number },
+  ): Promise<AuditEventPage> {
+    assertResourceId(projectId);
+    const result = await this.pool.query(
+      `${AUDIT_SELECT} WHERE e.project_id=$1 AND ($2::bigint IS NULL OR e.seq < $2) ORDER BY e.seq DESC LIMIT $3`,
+      [projectId, page.beforeSequence ?? null, page.limit + 1],
+    );
+    const events = result.rows.slice(0, page.limit).map(auditRow);
+    const last = events.at(-1);
+    return result.rows.length > page.limit && last
+      ? { events, nextBeforeSequence: last.sequence }
+      : { events };
+  }
+  async listVersions(
+    projectId: string,
+    page: { limit: number; beforeRevision?: number },
+  ): Promise<VersionSummary[]> {
+    assertResourceId(projectId);
+    const result = await this.pool.query(
+      "SELECT revision,schema_version,created_at FROM project_versions WHERE project_id=$1 AND ($2::integer IS NULL OR revision < $2) ORDER BY revision DESC LIMIT $3",
+      [projectId, page.beforeRevision ?? null, page.limit],
+    );
+    return result.rows.map((row) => ({
+      revision: Number(row.revision),
+      schemaVersion: Number(row.schema_version),
+      createdAt: date(row.created_at),
+    }));
+  }
+  async getVersion(projectId: string, revision: number): Promise<VersionRecord> {
+    assertResourceId(projectId);
+    const result = await this.pool.query(
+      "SELECT * FROM project_versions WHERE project_id=$1 AND revision=$2",
+      [projectId, revision],
+    );
+    const row = first(result.rows);
+    return {
+      projectId: row.project_id,
+      revision: Number(row.revision),
+      schemaVersion: Number(row.schema_version),
+      document: row.document,
+      createdAt: date(row.created_at),
+    };
   }
   async listProjectAssets(projectId: string): Promise<AssetRecord[]> {
     assertResourceId(projectId);
@@ -406,13 +491,21 @@ export class PostgresFigLabRepository implements FigLabRepository {
   async deleteProjectData(projectId: string): Promise<void> {
     assertResourceId(projectId);
     await this.transaction(async (client) => {
-      await client.query("DELETE FROM export_records WHERE project_id=$1", [projectId]);
-      await client.query("DELETE FROM audit_events WHERE project_id=$1", [projectId]);
+      const project = await client.query(
+        "SELECT name,status FROM projects WHERE id=$1 FOR UPDATE",
+        [projectId],
+      );
+      const row = first(project.rows);
+      if (row.status === "deleted") return;
       await client.query("DELETE FROM assets WHERE project_id=$1", [projectId]);
       await client.query("DELETE FROM upload_sessions WHERE project_id=$1", [projectId]);
       await client.query("DELETE FROM project_versions WHERE project_id=$1", [projectId]);
       await client.query("DELETE FROM project_documents WHERE project_id=$1", [projectId]);
-      await client.query("DELETE FROM projects WHERE id=$1", [projectId]);
+      await client.query(
+        "UPDATE projects SET status='deleted',deleted_at=now(),updated_at=now() WHERE id=$1",
+        [projectId],
+      );
+      await this.insertAudit(client, projectId, "PROJECT_DELETED", { name: row.name });
     });
   }
   private async insertAudit(
@@ -420,10 +513,11 @@ export class PostgresFigLabRepository implements FigLabRepository {
     projectId: string,
     action: string,
     details: Record<string, unknown>,
+    actorUserId?: string,
   ): Promise<void> {
     await client.query(
-      "INSERT INTO audit_events(id,project_id,action,details,created_at) VALUES($1,$2,$3,$4,now())",
-      [randomUUID(), projectId, action, details],
+      "INSERT INTO audit_events(id,project_id,action,details,actor_user_id,created_at) VALUES($1,$2,$3,$4,$5,now())",
+      [randomUUID(), projectId, action, details, actorUserId ?? null],
     );
   }
   private async transaction<T>(operation: (client: PoolClient) => Promise<T>): Promise<T> {
@@ -556,28 +650,26 @@ function exportRow(row: QueryResultRow): ExportRecord {
     projectId: row.project_id,
     revision: Number(row.revision),
     format: row.format,
+    ...(row.artboard_id === null || row.artboard_id === undefined
+      ? {}
+      : { artboardId: row.artboard_id }),
+    ...(row.dpi === null || row.dpi === undefined ? {} : { dpi: Number(row.dpi) }),
     widthPx: Number(row.width_px),
     heightPx: Number(row.height_px),
     checksumSha256: row.checksum_sha256,
     createdAt: date(row.created_at),
   };
 }
+const AUDIT_SELECT =
+  "SELECT e.*, u.email AS actor_email FROM audit_events e LEFT JOIN users u ON u.id = e.actor_user_id";
 function auditRow(row: QueryResultRow): AuditEvent {
   return {
     id: row.id,
     projectId: row.project_id,
     action: row.action,
     details: row.details,
+    ...(row.actor_user_id ? { actor: { id: row.actor_user_id, email: row.actor_email } } : {}),
+    sequence: Number(row.seq),
     createdAt: date(row.created_at),
-  };
-}
-function documentDiff(before: unknown, after: unknown): Record<string, unknown> {
-  const left = before as { objects?: unknown[]; artboards?: unknown[] };
-  const right = after as { objects?: unknown[]; artboards?: unknown[] };
-  return {
-    objectCountBefore: left.objects?.length ?? 0,
-    objectCountAfter: right.objects?.length ?? 0,
-    artboardCountBefore: left.artboards?.length ?? 0,
-    artboardCountAfter: right.artboards?.length ?? 0,
   };
 }
