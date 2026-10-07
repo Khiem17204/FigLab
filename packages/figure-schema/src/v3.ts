@@ -65,6 +65,24 @@ export const ScientificImageViewV3Schema = Type.Object(
   { additionalProperties: false },
 );
 
+const infoText = Type.Optional(Type.String({ maxLength: 200 }));
+
+/**
+ * What a panel shows, recorded with the figure so legends and integrity reports can name it:
+ * the target protein, antibody and its dilution, lot, supplier, and free notes.
+ */
+export const SampleInfoV3Schema = Type.Object(
+  {
+    target: infoText,
+    antibody: infoText,
+    dilution: infoText,
+    lot: infoText,
+    supplier: infoText,
+    notes: Type.Optional(Type.String({ maxLength: 1000 })),
+  },
+  { additionalProperties: false },
+);
+
 const objectBase = {
   id: IdSchema,
   artboardId: IdSchema,
@@ -79,6 +97,7 @@ export const ImageViewObjectV3Schema = Type.Object(
     type: Type.Literal("image-view"),
     transform: ObjectTransformV1Schema,
     view: ScientificImageViewV3Schema,
+    sampleInfo: Type.Optional(SampleInfoV3Schema),
   },
   { additionalProperties: false },
 );
@@ -106,6 +125,7 @@ export const CompositeObjectV3Schema = Type.Object(
       },
       { additionalProperties: false },
     ),
+    sampleInfo: Type.Optional(SampleInfoV3Schema),
   },
   { additionalProperties: false },
 );
@@ -278,6 +298,7 @@ export type ZoomLinkObjectV3 = Static<typeof ZoomLinkObjectV3Schema>;
 export type LaneTableObjectV3 = Static<typeof LaneTableObjectV3Schema>;
 export type MwLabelsObjectV3 = Static<typeof MwLabelsObjectV3Schema>;
 export type LaneCellV3 = Static<typeof LaneCellV3Schema>;
+export type SampleInfoV3 = Static<typeof SampleInfoV3Schema>;
 export type FigureObjectV3 = Static<typeof FigureObjectV3Schema>;
 export type SourceInfoV3 = Static<typeof SourceInfoV3Schema>;
 export type SourceCalibrationV3 = Static<typeof SourceCalibrationV3Schema>;

@@ -1,5 +1,6 @@
 export * from "./canvas.js";
 export * from "./compose.js";
+export * from "./densitometry.js";
 export * from "./encode.js";
 export * from "./export.js";
 export * from "./fonts.js";

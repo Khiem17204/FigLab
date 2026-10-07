@@ -25,6 +25,7 @@ import { IntegrityPanel } from "./figure-tools/integrity-panel";
 import { handleFigureShortcut } from "./figure-tools/keyboard";
 import { ObjectInspector } from "./figure-tools/object-inspector";
 import { PanelInspector } from "./figure-tools/panel-inspector";
+import { QuantifyPanel } from "./figure-tools/quantify-panel";
 import { rasterizeVectorItems } from "./figure-tools/rasterize";
 import { SourceInspector } from "./figure-tools/source-inspector";
 import "./styles.css";
@@ -456,6 +457,7 @@ export function FigLabEditor({
           )}
           <ObjectInspector metrics={metrics} session={session} />
           <PanelInspector assets={assets} rasterSources={rasterSources} session={session} />
+          <QuantifyPanel download={downloadBlob} rasterSources={rasterSources} session={session} />
           <ExportPanel
             activeArtboardId={state.activeArtboardId}
             document={state.document}

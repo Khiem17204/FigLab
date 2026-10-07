@@ -177,3 +177,20 @@
 .comparison figcaption {
   font-size: 11px;
 }
+.quantification-table {
+  border-collapse: collapse;
+  font-size: 12px;
+}
+.quantification-table td,
+.quantification-table th {
+  border: 1px solid #d9dee8;
+  padding: 2px 4px;
+}
+.quantification-chart {
+  width: 100%;
+  height: 60px;
+  background: #f8fafc;
+}
+.quantification-chart path {
+  fill: #0f4cbd;
+}

@@ -5,6 +5,7 @@ import {
   IDENTITY_DISPLAY_V3,
   type ImagePanelObject,
   isImagePanel,
+  type SampleInfoV3,
 } from "@figlab/figure-schema";
 import { cropSourceRect, luminance, panelCrop, type SourceSizes } from "./panel-render.js";
 import type { RasterRegion, RasterSourceResolver, SourcePixelRect } from "./raster.js";
@@ -50,6 +51,8 @@ export type SourceReadingIntegrity = {
 
 export type PanelIntegrity = {
   objectId: string;
+  /** Target, antibody, dilution, lot, supplier, and notes recorded on the panel. */
+  sampleInfo?: SampleInfoV3;
   kind: ImagePanelObject["type"];
   artboardId: string;
   artboardName: string;
@@ -313,6 +316,7 @@ export async function buildIntegrityReport(input: {
       artboardId: object.artboardId,
       artboardName: artboardName.get(object.artboardId) ?? object.artboardId,
       ...(labels.has(object.id) ? { label: labels.get(object.id) as string } : {}),
+      ...(object.sampleInfo ? { sampleInfo: object.sampleInfo } : {}),
       readings: results,
       findings: dedupe(findings),
     });
@@ -441,6 +445,26 @@ export function legendText(panels: ReadonlyArray<PanelIntegrity>): string {
     sentences.push(
       `Pseudocolor and channel merges use linear lookup tables (${pseudocolor.join(", ")}).`,
     );
+  const antibodies = panels.filter(
+    (panel) => panel.sampleInfo?.antibody || panel.sampleInfo?.target,
+  );
+  if (antibodies.length > 0)
+    sentences.push(
+      `Detection: ${antibodies
+        .map((panel) => {
+          const info = panel.sampleInfo ?? {};
+          const details = [
+            info.antibody,
+            info.dilution,
+            info.supplier,
+            info.lot ? `lot ${info.lot}` : undefined,
+          ]
+            .filter(Boolean)
+            .join(", ");
+          return `${named(panel)} ${info.target ?? ""}${details ? ` (${details})` : ""}`.trim();
+        })
+        .join("; ")}.`,
+    );
   const inverted = withCode("invert");
   if (inverted.length > 0) sentences.push(`Intensities were inverted in ${inverted.join(", ")}.`);
   return sentences.join(" ");
@@ -457,7 +481,15 @@ export function integrityReportHtml(report: IntegrityReport): string {
   return `<!doctype html><html lang="en"><head><meta charset="utf-8"><title>Integrity report — ${html(report.projectName)}</title><style>body{font:14px/1.45 system-ui,sans-serif;margin:32px;max-width:960px}table{border-collapse:collapse;width:100%;margin:8px 0 16px}td,th{border:1px solid #ccc;padding:4px 6px;text-align:left;font-size:12px}code{font-size:11px;word-break:break-all}.warn strong{color:#b00020}.disclose strong{color:#8a5a00}.info strong{color:#555}</style></head><body><h1>Integrity report</h1><p>${html(report.projectName)} · revision ${report.revision} · generated ${html(report.generatedAt)}</p><h2>Suggested legend text</h2><p>${html(report.legendText)}</p><h2>Figure-wide findings</h2><ul>${report.findings.map(finding).join("") || "<li>None.</li>"}</ul>${report.panels
     .map(
       (panel) =>
-        `<h2>${html(panel.label ? `Panel ${panel.label}` : panel.objectId)} <small>(${html(panel.artboardName)}, ${panel.kind})</small></h2><table><tr><th>Original</th><th>SHA-256</th><th>Crop (px)</th><th>Saturated in original</th><th>Clipped by display</th></tr>${panel.readings.map(reading).join("")}</table><ul>${panel.findings.map(finding).join("") || "<li>No adjustments.</li>"}</ul>`,
+        `<h2>${html(panel.label ? `Panel ${panel.label}` : panel.objectId)} <small>(${html(panel.artboardName)}, ${panel.kind})</small></h2>${
+          panel.sampleInfo
+            ? `<p>${html(
+                Object.entries(panel.sampleInfo)
+                  .map(([key, value]) => `${key}: ${value}`)
+                  .join(" · "),
+              )}</p>`
+            : ""
+        }<table><tr><th>Original</th><th>SHA-256</th><th>Crop (px)</th><th>Saturated in original</th><th>Clipped by display</th></tr>${panel.readings.map(reading).join("")}</table><ul>${panel.findings.map(finding).join("") || "<li>No adjustments.</li>"}</ul>`,
     )
     .join("")}</body></html>`;
 }

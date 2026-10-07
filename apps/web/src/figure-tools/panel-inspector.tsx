@@ -341,6 +341,45 @@ export function PanelInspector({
           onChange={(display) => setView({ display })}
         />
         <fieldset>
+          <legend>Sample</legend>
+          {(
+            [
+              ["target", "Target protein"],
+              ["antibody", "Antibody"],
+              ["dilution", "Dilution"],
+              ["lot", "Lot"],
+              ["supplier", "Supplier"],
+              ["notes", "Notes"],
+            ] as const
+          ).map(([key, label]) => (
+            <label key={key}>
+              {label}
+              <input
+                defaultValue={view.sampleInfo?.[key] ?? ""}
+                key={`${view.id}-${key}-${view.sampleInfo?.[key] ?? ""}`}
+                maxLength={key === "notes" ? 1000 : 200}
+                onBlur={(event) => {
+                  const value = event.currentTarget.value.trim();
+                  if (value === (view.sampleInfo?.[key] ?? "")) return;
+                  apply(
+                    updateObjectCommand(view.id, (current) => {
+                      if (current.type !== "image-view") return current;
+                      const next = { ...current.sampleInfo, [key]: value || undefined };
+                      const cleaned = Object.fromEntries(
+                        Object.entries(next).filter(([, entry]) => entry),
+                      );
+                      const { sampleInfo: _old, ...rest } = current;
+                      return Object.keys(cleaned).length > 0
+                        ? { ...rest, sampleInfo: cleaned }
+                        : rest;
+                    }),
+                  );
+                }}
+              />
+            </label>
+          ))}
+        </fieldset>
+        <fieldset>
           <legend>Add to this panel</legend>
           <Button
             disabled={!source?.calibration}
