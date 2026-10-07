@@ -1,0 +1,6 @@
+/* Self-hosted so local single-user installs work offline and send no requests to font CDNs. */
+@import "@fontsource-variable/figtree";
+@import "@fontsource-variable/bricolage-grotesque";
+@import "@fontsource/ibm-plex-mono/400.css";
+@import "@fontsource/ibm-plex-mono/500.css";
+@import "@fontsource/caveat/600.css";

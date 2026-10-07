@@ -1,0 +1,190 @@
+/*
+ * FigLab "Bench Notebook" tokens. Light values live on :root; the dusk-blue dark theme applies
+ * when the OS prefers dark (unless the user picked light) or when <html data-theme="dark">.
+ * Components read only these variables, so a theme is a token swap.
+ */
+:root {
+  /* Surfaces */
+  --fl-bg: #fafbff;
+  --fl-grid: rgb(76 95 213 / 0.06);
+  --fl-surface: #ffffff;
+  --fl-surface-2: #f1f3fe;
+  --fl-surface-3: #e6e9ff;
+  --fl-canvas: #eef0f8;
+  --fl-overlay: rgb(27 30 58 / 0.36);
+
+  /* Text */
+  --fl-ink: #1b1e3a;
+  --fl-muted: #5a5f7e;
+  --fl-placeholder: #6b7091;
+
+  /* Lines: outline marks objects (cards, buttons), line divides regions, field borders controls */
+  --fl-outline: #1b1e3a;
+  --fl-line: #d5d9ee;
+  --fl-field-border: #7e84af;
+
+  /* Brand */
+  --fl-primary: #4c5fd5;
+  --fl-primary-hover: #3f51c4;
+  --fl-on-primary: #ffffff;
+  --fl-primary-soft: #e6e9ff;
+  --fl-primary-ink: #3442a8;
+  --fl-track: #dadef7;
+  --fl-focus: #4c5fd5;
+
+  /* Highlighter accents */
+  --fl-highlight: #fff1a6;
+  --fl-pink: #ffd3e2;
+  --fl-sky: #cde7ff;
+  --fl-mint: #d9f5e5;
+
+  /* Status */
+  --fl-success-bg: #d9f5e5;
+  --fl-success-ink: #155c3b;
+  --fl-warning-bg: #fff1a6;
+  --fl-warning-ink: #5e4800;
+  --fl-danger-bg: #ffd3e2;
+  --fl-danger-ink: #8a1846;
+  --fl-danger-solid: #c0315f;
+  --fl-on-danger-solid: #ffffff;
+  --fl-info-bg: #cde7ff;
+  --fl-info-ink: #1d4a7a;
+
+  /* Mascot */
+  --fl-mascot-body: #cde7ff;
+  --fl-mascot-line: #1b1e3a;
+  --fl-mascot-cheek: #ffb3cb;
+  --fl-mascot-shine: #ffffff;
+
+  /* Elevation: "sticker" shadows are flat offsets; pop shadows float overlays */
+  --fl-sticker: 2px 2px 0 rgb(27 30 58 / 0.9);
+  --fl-sticker-lg: 4px 5px 0 rgb(27 30 58 / 0.9);
+  --fl-pop: 0 18px 40px -12px rgb(27 30 58 / 0.32), 0 2px 6px rgb(27 30 58 / 0.08);
+  --fl-paper-shadow: 0 1px 2px rgb(0 0 0 / 0.12), 0 14px 34px -10px rgb(27 30 58 / 0.28);
+
+  /* Shape */
+  --fl-r-xl: 18px;
+  --fl-r-lg: 14px;
+  --fl-r-md: 10px;
+  --fl-r-sm: 7px;
+  --fl-r-btn: 9px;
+  --fl-bw: 1.5px;
+
+  /* Type */
+  --fl-font-display:
+    "Bricolage Grotesque Variable", "Figtree Variable", ui-sans-serif, system-ui, sans-serif;
+  --fl-font-body:
+    "Figtree Variable", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  --fl-font-mono: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  --fl-font-hand: "Caveat", "Comic Sans MS", cursive;
+  --fl-text-xs: 12px;
+  --fl-text-sm: 13px;
+  --fl-text-md: 14px;
+  --fl-text-base: 15px;
+  --fl-text-lg: 18px;
+  --fl-text-xl: 22px;
+  --fl-text-2xl: 28px;
+  --fl-text-3xl: 36px;
+
+  /* Motion */
+  --fl-ease-out: cubic-bezier(0.2, 0.8, 0.2, 1);
+  --fl-ease-spring: cubic-bezier(0.3, 1.45, 0.6, 1);
+  --fl-dur-fast: 120ms;
+  --fl-dur: 200ms;
+
+  color-scheme: light;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --fl-bg: #262a44;
+    --fl-grid: rgb(180 190 255 / 0.05);
+    --fl-surface: #2e3352;
+    --fl-surface-2: #383e60;
+    --fl-surface-3: #414870;
+    --fl-canvas: #3a3d50;
+    --fl-overlay: rgb(12 14 30 / 0.55);
+    --fl-ink: #dce0f5;
+    --fl-muted: #aeb3d2;
+    --fl-placeholder: #9da2c4;
+    --fl-outline: #7880b4;
+    --fl-line: #474e78;
+    --fl-field-border: #8088bc;
+    --fl-primary: #9aa8ff;
+    --fl-primary-hover: #b4beff;
+    --fl-on-primary: #1a1d3d;
+    --fl-primary-soft: #3e4677;
+    --fl-primary-ink: #c3cbff;
+    --fl-track: #474e78;
+    --fl-focus: #c3cbff;
+    --fl-highlight: #5b5432;
+    --fl-pink: #5b3550;
+    --fl-sky: #2d4468;
+    --fl-mint: #2a4a44;
+    --fl-success-bg: #2a4a44;
+    --fl-success-ink: #a6e9c6;
+    --fl-warning-bg: #4f4a2e;
+    --fl-warning-ink: #ffe58a;
+    --fl-danger-bg: #55304a;
+    --fl-danger-ink: #ffbcd2;
+    --fl-danger-solid: #ff9ebe;
+    --fl-on-danger-solid: #1a1d3d;
+    --fl-info-bg: #2d4468;
+    --fl-info-ink: #b9dcff;
+    --fl-mascot-body: #5a72b0;
+    --fl-mascot-line: #e4e7fa;
+    --fl-mascot-cheek: #e07a9e;
+    --fl-mascot-shine: #e4e7fa;
+    --fl-sticker: 2px 2px 0 rgb(14 16 36 / 0.45);
+    --fl-sticker-lg: 4px 5px 0 rgb(14 16 36 / 0.45);
+    --fl-pop: 0 18px 40px -12px rgb(8 10 24 / 0.6), 0 2px 6px rgb(8 10 24 / 0.3);
+    --fl-paper-shadow: 0 1px 2px rgb(0 0 0 / 0.3), 0 14px 34px -10px rgb(0 0 0 / 0.5);
+    color-scheme: dark;
+  }
+}
+
+:root[data-theme="dark"] {
+  --fl-bg: #262a44;
+  --fl-grid: rgb(180 190 255 / 0.05);
+  --fl-surface: #2e3352;
+  --fl-surface-2: #383e60;
+  --fl-surface-3: #414870;
+  --fl-canvas: #3a3d50;
+  --fl-overlay: rgb(12 14 30 / 0.55);
+  --fl-ink: #dce0f5;
+  --fl-muted: #aeb3d2;
+  --fl-placeholder: #9da2c4;
+  --fl-outline: #7880b4;
+  --fl-line: #474e78;
+  --fl-field-border: #8088bc;
+  --fl-primary: #9aa8ff;
+  --fl-primary-hover: #b4beff;
+  --fl-on-primary: #1a1d3d;
+  --fl-primary-soft: #3e4677;
+  --fl-primary-ink: #c3cbff;
+  --fl-track: #474e78;
+  --fl-focus: #c3cbff;
+  --fl-highlight: #5b5432;
+  --fl-pink: #5b3550;
+  --fl-sky: #2d4468;
+  --fl-mint: #2a4a44;
+  --fl-success-bg: #2a4a44;
+  --fl-success-ink: #a6e9c6;
+  --fl-warning-bg: #4f4a2e;
+  --fl-warning-ink: #ffe58a;
+  --fl-danger-bg: #55304a;
+  --fl-danger-ink: #ffbcd2;
+  --fl-danger-solid: #ff9ebe;
+  --fl-on-danger-solid: #1a1d3d;
+  --fl-info-bg: #2d4468;
+  --fl-info-ink: #b9dcff;
+  --fl-mascot-body: #5a72b0;
+  --fl-mascot-line: #e4e7fa;
+  --fl-mascot-cheek: #e07a9e;
+  --fl-mascot-shine: #e4e7fa;
+  --fl-sticker: 2px 2px 0 rgb(14 16 36 / 0.45);
+  --fl-sticker-lg: 4px 5px 0 rgb(14 16 36 / 0.45);
+  --fl-pop: 0 18px 40px -12px rgb(8 10 24 / 0.6), 0 2px 6px rgb(8 10 24 / 0.3);
+  --fl-paper-shadow: 0 1px 2px rgb(0 0 0 / 0.3), 0 14px 34px -10px rgb(0 0 0 / 0.5);
+  color-scheme: dark;
+}
