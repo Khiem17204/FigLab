@@ -627,7 +627,11 @@ export async function buildApp(dependencies: AppDependencies): Promise<FastifyIn
 /** Builds the API from environment variables without binding a port. */
 export async function createAppFromEnv(
   environment: NodeJS.ProcessEnv = process.env,
-  options: { maxConnections?: number; onJobsEnqueued?: () => void } = {},
+  options: {
+    maxConnections?: number;
+    idleTimeoutMillis?: number;
+    onJobsEnqueued?: () => void;
+  } = {},
 ): Promise<FastifyInstance> {
   const publicAppUrl = required(environment, "PUBLIC_APP_URL");
   const authMode = environment.AUTH_MODE ?? "single-user";
@@ -638,6 +642,7 @@ export async function createAppFromEnv(
     assertSingleUserConfiguration(publicAppUrl, allowInsecureSingleUserRemote);
   const { repository, close } = createPostgresRepository(required(environment, "DATABASE_URL"), {
     ...(options.maxConnections ? { maxConnections: options.maxConnections } : {}),
+    ...(options.idleTimeoutMillis ? { idleTimeoutMillis: options.idleTimeoutMillis } : {}),
     ...(environment.DATABASE_CA_CERT ? { caCert: environment.DATABASE_CA_CERT } : {}),
   });
   const identity =

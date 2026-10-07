@@ -280,7 +280,12 @@ Error codes: `BAD_REQUEST`, `UNAUTHORIZED`, `FORBIDDEN`, `NOT_FOUND`, `CONFLICT`
 **Known limits:**
 - Supabase's built-in SMTP only reaches team members and is rate-limited; configure custom
   SMTP before inviting users.
-- No shared workspaces or admin screens yet.
+- Supabase's session pooler admits 15 clients in total, across every warm function instance
+  of every deploy, and frozen instances keep their connections. The API holds at most 2 per
+  instance and closes idle ones after 1 s, but bursts (several drafts, many parallel requests)
+  can still fail with `EMAXCONNSESSION`; failed jobs show in the admin view and retry on the
+  next drain. The durable fix is pointing the API (not the jobs worker) at the transaction
+  pooler (port 6543); that is a Netlify env change and needs approval.
 - A job killed by a function timeout stays locked for up to 4 hours (Graphile lock expiry).
 
 ## Local operations

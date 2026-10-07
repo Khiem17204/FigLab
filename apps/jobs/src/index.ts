@@ -204,7 +204,7 @@ export async function startJobsFromEnv(
 export async function drainJobsOnce(environment: NodeJS.ProcessEnv = process.env): Promise<void> {
   const databaseUrl = required(environment, "DATABASE_URL");
   const caCert = environment.DATABASE_CA_CERT;
-  const pool = { maxConnections: 2, ...(caCert ? { caCert } : {}) };
+  const pool = { maxConnections: 2, idleTimeoutMillis: 1_000, ...(caCert ? { caCert } : {}) };
   const { repository, close } = createPostgresRepository(databaseUrl, pool);
   const pgPool = createPgPool(databaseUrl, pool);
   try {

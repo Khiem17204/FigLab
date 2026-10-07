@@ -1305,6 +1305,11 @@ export class PostgresFigLabRepository implements FigLabRepository {
 
 export interface PgPoolOptions {
   maxConnections?: number;
+  /**
+   * Closes idle clients after this long. Serverless hosts freeze idle instances with their
+   * connections open, so a short timeout returns connections before an instance goes quiet.
+   */
+  idleTimeoutMillis?: number;
   /** PEM CA that must have signed the server certificate (for example Supabase's root CA). */
   caCert?: string;
 }
@@ -1324,6 +1329,7 @@ export function createPgPool(connectionString: string, options: PgPoolOptions = 
   const pool = new Pool({
     connectionString: url,
     ...(options.maxConnections ? { max: options.maxConnections } : {}),
+    ...(options.idleTimeoutMillis ? { idleTimeoutMillis: options.idleTimeoutMillis } : {}),
     ...(options.caCert ? { ssl: { ca: options.caCert, rejectUnauthorized: true } } : {}),
   });
   // An idle client can be dropped by a pooler; log it instead of crashing the process.
