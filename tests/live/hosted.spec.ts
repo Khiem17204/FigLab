@@ -350,6 +350,104 @@ test.describe
       expect(old.document.schemaVersion).toBe(2);
     });
 
+    test("admin band-crops a blot, calibrates, annotates, and gets integrity evidence", async ({
+      page,
+    }) => {
+      await signIn(page, admin.email, admin.password);
+      await openProject(page);
+      await page.getByRole("button", { name: "Original · gradient.png" }).click();
+      await page.getByRole("button", { name: "Band (line) crop" }).click();
+      await page.getByLabel("Band height (px)").fill("20");
+      const canvas = page.getByTestId("source-canvas");
+      await canvas.scrollIntoViewIfNeeded();
+      const box = await canvas.evaluate((element) => {
+        const rect = element.getBoundingClientRect();
+        return {
+          left: rect.left,
+          top: rect.top,
+          width: (element as HTMLElement).clientWidth,
+          height: (element as HTMLElement).clientHeight,
+        };
+      });
+      const scale = Math.min(box.width / 160, box.height / 120);
+      const at = (x: number, y: number) => ({
+        x: box.left + (box.width - 160 * scale) / 2 + x * scale,
+        y: box.top + (box.height - 120 * scale) / 2 + y * scale,
+      });
+      const from = at(30, 50);
+      const to = at(130, 65);
+      await page.mouse.move(from.x, from.y);
+      await page.mouse.down();
+      await page.mouse.move(to.x, to.y, { steps: 5 });
+      await page.mouse.up();
+      await expect(
+        page.getByRole("status").filter({ hasText: /Band crop rotated 8\.5/ }),
+      ).toBeVisible();
+
+      await page.getByLabel("Pixel size (µm/px)").fill("0.25");
+      await page.getByRole("button", { name: "Set pixel size" }).click();
+      await page
+        .getByRole("button", { name: /Move view-/ })
+        .last()
+        .click();
+      await page.getByRole("button", { name: "Add scale bar" }).click();
+      await page
+        .getByRole("button", { name: /Move view-/ })
+        .last()
+        .click();
+      await page.getByRole("button", { name: "Add lane labels" }).click();
+      await expect(page.locator(".editor-header").getByRole("status")).toHaveText("Saved", {
+        timeout: 15_000,
+      });
+
+      await page.getByRole("button", { name: "Request server report" }).click();
+      await expect(page.getByRole("list", { name: "Server reports" })).toBeVisible();
+      await expect
+        .poll(
+          async () => {
+            await page.getByRole("button", { name: "Refresh server reports" }).click();
+            return page.getByRole("list", { name: "Server reports" }).innerText();
+          },
+          { timeout: 420_000, intervals: [5_000] },
+        )
+        .toMatch(/ready/);
+      await page
+        .getByRole("button", { name: /Open report for revision/ })
+        .first()
+        .click();
+      const findings = page.getByRole("list", { name: "Integrity findings" });
+      await expect(findings).toContainText("rotated 8.5° with bilinear resampling");
+      await expect(findings).toContainText("manually entered pixel size");
+
+      const download = page.waitForEvent("download");
+      await page.getByRole("button", { name: "Download provenance bundle" }).click();
+      const bundle = await readFile((await (await download).path()) ?? "");
+      for (const name of [
+        "README.txt",
+        "figure.json",
+        "figures.pdf",
+        "integrity-report.json",
+        "integrity-report.html",
+        "crops.csv",
+        "uncropped-originals.pdf",
+      ])
+        expect(bundle.includes(Buffer.from(name))).toBe(true);
+
+      const token = await accessToken(admin.email, admin.password);
+      const stored = (await (await api(`/v1/projects/${projectId}/document`, token)).json()) as {
+        document: {
+          sources: { calibration: { origin: string } | null }[];
+          objects: { type: string }[];
+        };
+      };
+      expect(
+        stored.document.sources.some((source) => source.calibration?.origin === "manual"),
+      ).toBe(true);
+      expect(stored.document.objects.map((object) => object.type)).toEqual(
+        expect.arrayContaining(["scale-bar", "lane-table"]),
+      );
+    });
+
     test("a stale tab gets a revision conflict and keeps local work", async ({ browser }) => {
       const context = await (browser as Browser).newContext();
       const first = await context.newPage();
