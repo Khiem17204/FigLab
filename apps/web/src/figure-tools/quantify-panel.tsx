@@ -8,7 +8,7 @@ import {
   quantifyLanes,
   rawViewSamples,
 } from "@figlab/image-processing";
-import { Button } from "@figlab/ui";
+import { Button, Section } from "@figlab/ui";
 import { useState } from "react";
 import { useStore } from "zustand";
 import type { StoreApi } from "zustand/vanilla";
@@ -80,8 +80,7 @@ export function QuantifyPanel({
       : undefined);
 
   return (
-    <section aria-label="Quantification" className="figure-tools-panel">
-      <h3>Band quantification</h3>
+    <Section className="figure-tools-panel" label="Quantification" title="Band quantification">
       {lanes === 0 ? (
         <p>Add lane labels to this panel first; quantification measures the labelled lanes.</p>
       ) : (
@@ -228,6 +227,6 @@ export function QuantifyPanel({
           </Button>
         </>
       )}
-    </section>
+    </Section>
   );
 }

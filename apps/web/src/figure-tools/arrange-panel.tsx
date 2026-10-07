@@ -16,7 +16,7 @@ import {
 } from "@figlab/editor-core";
 import type { FigureObject } from "@figlab/figure-schema";
 import type { TextMetrics } from "@figlab/image-processing";
-import { Button } from "@figlab/ui";
+import { Button, Section } from "@figlab/ui";
 import { useState } from "react";
 import { useStore } from "zustand";
 import type { StoreApi } from "zustand/vanilla";
@@ -93,7 +93,7 @@ export function ArrangePanel({
   );
 
   return (
-    <section aria-label="Figure tools" className="figure-tools-panel">
+    <Section className="figure-tools-panel" label="Figure tools" title="Figure tools">
       <fieldset>
         <legend>Tools</legend>
         {TOOLS.map(([tool, label]) => (
@@ -266,6 +266,6 @@ export function ArrangePanel({
           ))}
         </ul>
       </fieldset>
-    </section>
+    </Section>
   );
 }

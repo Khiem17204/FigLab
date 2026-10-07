@@ -199,7 +199,6 @@
   font-size: var(--fl-text-lg);
   line-height: 1.25;
   overflow-wrap: anywhere;
-  padding-right: 64px;
 }
 .project-meta p {
   margin: 4px 0 0;
@@ -209,10 +208,25 @@
 .project-actions {
   position: absolute;
   z-index: 2;
+  top: 10px;
   right: 10px;
-  bottom: 12px;
   display: flex;
   gap: 2px;
+  padding: 2px;
+  border-radius: calc(var(--fl-r-sm) + 2px);
+  background: color-mix(in srgb, var(--fl-surface) 92%, transparent);
+  border: 1px solid var(--fl-line);
+  opacity: 0;
+  transition: opacity var(--fl-dur-fast) var(--fl-ease-out);
+}
+.project-card:hover .project-actions,
+.project-card:focus-within .project-actions {
+  opacity: 1;
+}
+@media (hover: none) {
+  .project-actions {
+    opacity: 1;
+  }
 }
 .project-card.skeleton {
   min-height: 236px;
@@ -238,6 +252,64 @@
 }
 .dashboard-empty {
   padding: 48px 24px;
+}
+
+/* Lab and folder navigation appears once workspaces load. */
+.dashboard-layout[data-sidebar] {
+  display: grid;
+  grid-template-columns: 272px minmax(0, 1fr);
+  align-items: start;
+}
+.side-nav {
+  position: sticky;
+  top: 60px;
+  height: calc(100vh - 60px);
+  overflow: auto;
+  padding: 24px 18px 40px 22px;
+  border-right: 1px solid var(--fl-line);
+  background: color-mix(in srgb, var(--fl-surface) 70%, transparent);
+}
+.dashboard-layout[data-sidebar] .dashboard {
+  margin: 0;
+  max-width: 1120px;
+}
+.create-form {
+  flex-wrap: wrap;
+}
+.create-form > label {
+  display: grid;
+  gap: 6px;
+  font-size: var(--fl-text-sm);
+  font-weight: 600;
+}
+.create-form > label select {
+  min-height: 40px;
+}
+.dashboard-tools {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px 20px;
+}
+.dashboard-tools .folder-actions {
+  margin-left: auto;
+}
+.project-folder {
+  position: relative;
+  z-index: 2;
+  padding: 0 16px 14px;
+  margin-top: -6px;
+}
+.project-folder label {
+  display: grid;
+  gap: 4px;
+  font-size: var(--fl-text-xs);
+  font-weight: 600;
+  color: var(--fl-muted);
+}
+.project-folder select {
+  width: 100%;
 }
 
 /* ---------- Auth ---------- */
@@ -413,6 +485,11 @@
     display: none;
   }
 }
+@media (max-width: 1100px) {
+  .dashboard-layout[data-sidebar] {
+    grid-template-columns: 236px minmax(0, 1fr);
+  }
+}
 @media (max-width: 720px) {
   .brand-tagline {
     display: none;
@@ -474,6 +551,10 @@
   height: 12px;
 }
 .save-chip[data-state="saving"] {
+  background: var(--fl-info-bg);
+  color: var(--fl-info-ink);
+}
+.save-chip[data-state="read-only"] {
   background: var(--fl-info-bg);
   color: var(--fl-info-ink);
 }
@@ -748,7 +829,7 @@
   display: grid;
   grid-template-columns: minmax(200px, 236px) minmax(0, 1fr);
   gap: 10px;
-  height: clamp(150px, 26vh, 280px);
+  height: clamp(130px, 24vh, 280px);
   min-height: 0;
 }
 .original-body > .source-tools {

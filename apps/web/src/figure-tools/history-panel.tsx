@@ -1,6 +1,6 @@
 import type { AuditEventDto, ExportRecord, VersionSummary } from "@figlab/api-contract";
 import type { FigureDocument } from "@figlab/figure-schema";
-import { Button, useDialogs } from "@figlab/ui";
+import { Button, Section, useDialogs } from "@figlab/ui";
 import { useCallback, useEffect, useState } from "react";
 
 import type { FigLabClient } from "../api/client";
@@ -100,8 +100,7 @@ export function HistoryPanel({
   }, [refresh, revision, refreshKey]);
 
   return (
-    <section aria-label="History" className="figure-tools-panel">
-      <h3>History</h3>
+    <Section className="figure-tools-panel" label="History" title="History">
       <Button onClick={() => void refresh()}>Refresh history</Button>
       {status && <p role="status">{status}</p>}
       <h4>Audit trail</h4>
@@ -166,6 +165,6 @@ export function HistoryPanel({
           </li>
         ))}
       </ol>
-    </section>
+    </Section>
   );
 }

@@ -1,5 +1,5 @@
 import type { CommentDto, Project } from "@figlab/api-contract";
-import { Button, useDialogs } from "@figlab/ui";
+import { Button, Section, useDialogs } from "@figlab/ui";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { useStore } from "zustand";
@@ -78,8 +78,7 @@ export function CommentsPanel({
   const openCount = all.filter((comment) => !comment.parentId && !comment.resolvedAt).length;
 
   return (
-    <section aria-label="Comments" className="figure-tools-panel">
-      <h3>{`Comments (${openCount} open)`}</h3>
+    <Section className="figure-tools-panel" label="Comments" title={`Comments (${openCount} open)`}>
       <form
         onSubmit={(event) => {
           event.preventDefault();
@@ -220,7 +219,7 @@ export function CommentsPanel({
           );
         })}
       </ul>
-    </section>
+    </Section>
   );
 }
 
@@ -253,8 +252,7 @@ export function TemplatePanel({
   const [name, setName] = useState("");
   const [status, setStatus] = useState("");
   return (
-    <section aria-label="Template" className="figure-tools-panel">
-      <h3>Template</h3>
+    <Section className="figure-tools-panel" label="Template" title="Template">
       <form
         onSubmit={async (event) => {
           event.preventDefault();
@@ -282,6 +280,6 @@ export function TemplatePanel({
         <Button type="submit">Save as template</Button>
       </form>
       {status && <p role="status">{status}</p>}
-    </section>
+    </Section>
   );
 }

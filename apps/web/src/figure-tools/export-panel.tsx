@@ -1,6 +1,6 @@
 import type { ExportFormat } from "@figlab/api-contract";
 import type { FigureDocument } from "@figlab/figure-schema";
-import { Button } from "@figlab/ui";
+import { Button, Section } from "@figlab/ui";
 import { useState } from "react";
 
 import { DEFAULT_DPI, EXPORT_DPI_CHOICES, type ExportScope, plannedExport } from "./export-figure";
@@ -40,8 +40,7 @@ export function ExportPanel({
   const planned = validDpi ? plannedExport({ document, scope, activeArtboardId, dpi }) : [];
   const label = FORMATS.find(([value]) => value === format)?.[1] ?? format;
   return (
-    <section aria-labelledby="figure-export" className="export-controls figure-tools-panel">
-      <h3 id="figure-export">Export</h3>
+    <Section className="export-controls figure-tools-panel" label="Export" title="Export">
       <label>
         Format
         <select onChange={(event) => setFormat(event.target.value as ExportFormat)} value={format}>
@@ -112,6 +111,6 @@ export function ExportPanel({
         Export {label}
       </Button>
       <p role="status">{status}</p>
-    </section>
+    </Section>
   );
 }

@@ -11,7 +11,7 @@ import {
   presetSizePt,
   ptToMm,
 } from "@figlab/figure-schema";
-import { Button, useDialogs } from "@figlab/ui";
+import { Button, CopyIcon, IconButton, PlusIcon, TrashIcon, useDialogs } from "@figlab/ui";
 import { useStore } from "zustand";
 import type { StoreApi } from "zustand/vanilla";
 
@@ -57,7 +57,9 @@ export function FiguresBar({ session }: { session: StoreApi<EditorSessionState> 
           {artboard.name}
         </Button>
       ))}
-      <Button
+      <IconButton
+        icon={<PlusIcon size={16} />}
+        label="Add figure"
         onClick={() => {
           const id = newId();
           apply(
@@ -71,12 +73,15 @@ export function FiguresBar({ session }: { session: StoreApi<EditorSessionState> 
             { selectedIds: [], activeArtboardId: id },
           );
         }}
-      >
-        Add figure
-      </Button>
+        size="sm"
+        tooltipSide="bottom"
+      />
       {active && (
         <>
-          <Button
+          <IconButton
+            icon={<CopyIcon size={16} />}
+            label="Duplicate figure"
+            size="sm"
             onClick={() => {
               const id = newId();
               apply(
@@ -87,11 +92,13 @@ export function FiguresBar({ session }: { session: StoreApi<EditorSessionState> 
                 },
               );
             }}
-          >
-            Duplicate figure
-          </Button>
-          <Button
+          />
+          <IconButton
             disabled={artboards.length < 2}
+            icon={<TrashIcon size={16} />}
+            label="Delete figure"
+            size="sm"
+            variant="danger"
             onClick={async () => {
               const confirmed = await dialogs.confirm({
                 title: `Delete “${active.name}”?`,
@@ -101,9 +108,8 @@ export function FiguresBar({ session }: { session: StoreApi<EditorSessionState> 
               });
               if (confirmed) apply(removeArtboardCommand(active.id), { selectedIds: [] });
             }}
-          >
-            Delete figure
-          </Button>
+          />
+          <span aria-hidden="true" className="figures-bar-divider" />
           <label>
             Figure name
             <input

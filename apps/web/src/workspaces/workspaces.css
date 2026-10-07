@@ -1,8 +1,32 @@
-/* Functional styles for labs, folders, search, and admin. Visual design is owned by the UI refresh. */
+/* Labs, folders, search, invites and admin views, styled with @figlab/ui tokens. */
+
 .workspace-nav {
   display: grid;
-  gap: 8px;
+  gap: 14px;
   min-width: 0;
+  font-size: var(--fl-text-sm);
+}
+.workspace-nav > label:not(.inline) {
+  display: grid;
+  gap: 4px;
+  font: 500 11px / 1.2 var(--fl-font-mono);
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  color: var(--fl-muted);
+}
+.workspace-nav > label:not(.inline) select {
+  font-size: var(--fl-text-md);
+  font-weight: 600;
+  min-height: 36px;
+  text-transform: none;
+  letter-spacing: 0;
+}
+.workspace-nav > strong {
+  margin-top: 4px;
+  font: 500 11px / 1.2 var(--fl-font-mono);
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  color: var(--fl-muted);
 }
 .workspace-nav form,
 .project-search form,
@@ -10,81 +34,237 @@
 .folder-actions {
   display: flex;
   flex-wrap: wrap;
-  gap: 4px;
+  gap: 6px;
 }
-.workspace-nav input,
-.workspace-nav select {
-  min-width: 0;
-  max-width: 100%;
+.workspace-nav form input {
+  flex: 1 1 120px;
+}
+.workspace-nav .inline {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: var(--fl-text-xs);
+  color: var(--fl-muted);
 }
 .folder-list {
   list-style: none;
   margin: 0;
   padding: 0;
+  display: grid;
+  gap: 1px;
 }
-.folder-list button[aria-pressed="true"] {
-  font-weight: 600;
-  text-decoration: underline;
+.folder-list li {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  border-radius: var(--fl-r-sm);
 }
 .folder-list button {
-  background: none;
+  flex: 1;
+  min-width: 0;
+  padding: 6px 8px;
   border: 0;
-  cursor: pointer;
-  padding: 2px 0;
+  border-radius: var(--fl-r-sm);
+  background: none;
+  color: var(--fl-ink);
+  font: 500 var(--fl-text-sm) var(--fl-font-body);
   text-align: start;
+  cursor: pointer;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
-.search-results,
-.lab-members table,
-.admin-panel table {
-  font-size: 13px;
+.folder-list button:hover {
+  background: var(--fl-surface-2);
 }
-.lab-members,
-.admin-panel,
-.invite-banner,
+.folder-list button[aria-pressed="true"] {
+  background: var(--fl-primary-soft);
+  color: var(--fl-primary-ink);
+  font-weight: 700;
+}
+.folder-list li > button[aria-label^="Delete template"] {
+  flex: none;
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  text-align: center;
+  color: var(--fl-muted);
+}
+.folder-list li > button[aria-label^="Delete template"]:hover {
+  background: var(--fl-danger-bg);
+  color: var(--fl-danger-ink);
+}
+.workspace-nav ul[aria-label="Templates"] li {
+  padding-left: 8px;
+  justify-content: space-between;
+  font-weight: 500;
+}
+.workspace-nav .folder-actions label {
+  display: grid;
+  gap: 4px;
+  width: 100%;
+  font-size: var(--fl-text-xs);
+  font-weight: 600;
+  color: var(--fl-muted);
+}
+
 .project-search {
   display: grid;
   gap: 8px;
-  margin-block-end: 16px;
+  min-width: 0;
+  flex: 1 1 320px;
+}
+.project-search form input {
+  flex: 1 1 200px;
+  min-height: 36px;
+}
+.search-results {
+  list-style: none;
+  margin: 0;
+  padding: 6px;
+  display: grid;
+  gap: 2px;
+  background: var(--fl-surface);
+  border: 1px solid var(--fl-line);
+  border-radius: var(--fl-r-md);
+  font-size: var(--fl-text-sm);
+}
+.search-results li {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: baseline;
+  padding: 6px 8px;
+  border-radius: var(--fl-r-sm);
+  color: var(--fl-muted);
+}
+.search-results li:hover {
+  background: var(--fl-surface-2);
+}
+.search-results button {
+  border: 0;
+  padding: 0;
+  background: none;
+  color: var(--fl-primary-ink);
+  font: 700 var(--fl-text-sm) var(--fl-font-body);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  cursor: pointer;
+}
+
+.lab-members,
+.admin-panel,
+.invite-banner {
+  display: grid;
+  gap: 12px;
+  padding: 18px 20px;
+  background: var(--fl-surface);
+  border: var(--fl-bw) solid var(--fl-outline);
+  border-radius: var(--fl-r-lg);
+  box-shadow: var(--fl-sticker);
+}
+.lab-members h2,
+.admin-panel h2 {
+  margin: 0;
+  font-size: var(--fl-text-xl);
+}
+.lab-members h3,
+.admin-panel h3 {
+  margin: 6px 0 0;
+  font: 500 var(--fl-text-xs) / 1.3 var(--fl-font-mono);
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  color: var(--fl-muted);
+}
+.admin-panel > .fl-button {
+  justify-self: start;
+}
+/* Lab actions sit side by side; everything else takes a full row. */
+.lab-members {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+}
+.lab-members > :not(.fl-button) {
+  flex: 1 1 100%;
 }
 .lab-members table,
 .admin-panel table {
   border-collapse: collapse;
+  width: 100%;
+  font-size: var(--fl-text-sm);
 }
 .lab-members td,
 .lab-members th,
 .admin-panel td,
 .admin-panel th {
-  border-bottom: 1px solid #d9dee8;
-  padding: 4px 6px;
+  border-bottom: 1px solid var(--fl-line);
+  padding: 8px 10px;
   text-align: start;
+  vertical-align: middle;
+}
+.lab-members th,
+.admin-panel th {
+  font: 500 11px var(--fl-font-mono);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--fl-muted);
+}
+.lab-members tr:last-child td,
+.admin-panel tr:last-child td {
+  border-bottom: 0;
+}
+.lab-members form,
+.lab-members label {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: end;
+  gap: 8px;
+  font-size: var(--fl-text-xs);
+  font-weight: 600;
+}
+.lab-members label {
+  display: grid;
+  gap: 4px;
 }
 .invite-link input {
   flex: 1;
   min-width: 0;
+  font-family: var(--fl-font-mono);
+  font-size: var(--fl-text-xs);
 }
 .admin-stats {
   display: grid;
   grid-template-columns: max-content 1fr;
-  gap: 2px 12px;
+  gap: 4px 16px;
+  margin: 0;
+  font-size: var(--fl-text-sm);
+}
+.admin-stats dt {
+  color: var(--fl-muted);
+}
+.admin-stats dd {
+  margin: 0;
+  font-family: var(--fl-font-mono);
+  font-variant-numeric: tabular-nums;
 }
 .invite-banner {
-  border: 1px solid #0f4cbd;
-  border-radius: 6px;
-  padding: 12px;
+  border-color: var(--fl-primary);
+  background: var(--fl-primary-soft);
 }
-.comment-thread {
-  border-bottom: 1px solid #d9dee8;
-  padding-block: 6px;
+.invite-banner p {
+  margin: 0;
 }
-.comment-thread.resolved {
-  opacity: 0.65;
-}
-.comment-reply {
-  margin-inline-start: 1em;
-}
+
 .read-only-banner {
-  background: #fff7e6;
-  border: 1px solid #f0b54a;
-  border-radius: 4px;
-  padding: 6px 10px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 0;
+  padding: 8px 16px;
+  background: var(--fl-info-bg);
+  color: var(--fl-info-ink);
+  border-bottom: 1px solid currentColor;
+  font-size: var(--fl-text-sm);
+  font-weight: 600;
 }

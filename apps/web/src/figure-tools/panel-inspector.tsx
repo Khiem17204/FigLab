@@ -22,7 +22,7 @@ import {
   type StrokeV2,
 } from "@figlab/figure-schema";
 import { cropSourceRect, sampleHistogram } from "@figlab/image-processing";
-import { Button } from "@figlab/ui";
+import { Button, Section } from "@figlab/ui";
 import { useEffect, useState } from "react";
 import { useStore } from "zustand";
 import type { StoreApi } from "zustand/vanilla";
@@ -240,8 +240,11 @@ export function PanelInspector({
   );
   if (selectedViews.length >= 2)
     return (
-      <section aria-label="Panel inspector" className="figure-tools-panel">
-        <h3>{selectedViews.length} image panels</h3>
+      <Section
+        className="figure-tools-panel"
+        label="Panel inspector"
+        title={<>{selectedViews.length} image panels</>}
+      >
         <Button
           onClick={() => {
             const mergeId = id("merge");
@@ -257,7 +260,7 @@ export function PanelInspector({
           Merge into composite
         </Button>
         {status && <p role="status">{status}</p>}
-      </section>
+      </Section>
     );
   if (!object) return null;
 
@@ -277,8 +280,7 @@ export function PanelInspector({
     const setView = (patch: Parameters<typeof setViewCommand>[1]) =>
       apply(withSource(setViewCommand(view.id, patch)));
     return (
-      <section aria-label="Panel inspector" className="figure-tools-panel">
-        <h3>Image panel</h3>
+      <Section className="figure-tools-panel" label="Panel inspector" title="Image panel">
         {planes > 1 && (
           <label>
             Page
@@ -510,7 +512,7 @@ export function PanelInspector({
           )}
         </fieldset>
         {status && <p role="status">{status}</p>}
-      </section>
+      </Section>
     );
   }
 
@@ -519,8 +521,7 @@ export function PanelInspector({
 
   if (object.type === "composite")
     return (
-      <section aria-label="Panel inspector" className="figure-tools-panel">
-        <h3>Merged channels</h3>
+      <Section className="figure-tools-panel" label="Panel inspector" title="Merged channels">
         {numbered(object.composite.channels).map(({ item: channel, position: index }) => (
           <fieldset key={`channel-${index}`}>
             <legend>{`Channel ${index + 1}`}</legend>
@@ -568,7 +569,7 @@ export function PanelInspector({
           </fieldset>
         ))}
         {status && <p role="status">{status}</p>}
-      </section>
+      </Section>
     );
 
   if (object.type === "scale-bar") {
@@ -580,8 +581,7 @@ export function PanelInspector({
           : current,
       );
     return (
-      <section aria-label="Panel inspector" className="figure-tools-panel">
-        <h3>Scale bar</h3>
+      <Section className="figure-tools-panel" label="Panel inspector" title="Scale bar">
         <label>
           Length (µm)
           <input
@@ -637,7 +637,7 @@ export function PanelInspector({
           Show length label
         </label>
         {status && <p role="status">{status}</p>}
-      </section>
+      </Section>
     );
   }
 
@@ -650,8 +650,7 @@ export function PanelInspector({
           : current,
       );
     return (
-      <section aria-label="Panel inspector" className="figure-tools-panel">
-        <h3>Lane labels</h3>
+      <Section className="figure-tools-panel" label="Panel inspector" title="Lane labels">
         <label>
           Rows (one per line; cells separated by |, *2 spans two lanes, _ underlines)
           <textarea
@@ -702,7 +701,7 @@ export function PanelInspector({
           />
         </label>
         {status && <p role="status">{status}</p>}
-      </section>
+      </Section>
     );
   }
 
@@ -715,8 +714,7 @@ export function PanelInspector({
           : current,
       );
     return (
-      <section aria-label="Panel inspector" className="figure-tools-panel">
-        <h3>MW labels</h3>
+      <Section className="figure-tools-panel" label="Panel inspector" title="MW labels">
         <label>
           Side
           <select
@@ -747,7 +745,7 @@ export function PanelInspector({
           Show kDa
         </label>
         {status && <p role="status">{status}</p>}
-      </section>
+      </Section>
     );
   }
 
@@ -760,8 +758,7 @@ export function PanelInspector({
           : current,
       );
     return (
-      <section aria-label="Panel inspector" className="figure-tools-panel">
-        <h3>Zoom outline</h3>
+      <Section className="figure-tools-panel" label="Panel inspector" title="Zoom outline">
         <StrokeFields onChange={(stroke) => set({ stroke })} stroke={link.stroke} />
         <label className="inline">
           <input
@@ -772,7 +769,7 @@ export function PanelInspector({
           Connector lines
         </label>
         {status && <p role="status">{status}</p>}
-      </section>
+      </Section>
     );
   }
   return null;

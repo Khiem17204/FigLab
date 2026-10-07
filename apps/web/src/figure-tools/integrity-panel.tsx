@@ -20,7 +20,7 @@ import {
   integrityReportHtml,
   type RasterSourceResolver,
 } from "@figlab/image-processing";
-import { Button } from "@figlab/ui";
+import { Button, Section } from "@figlab/ui";
 import { strToU8, zipSync } from "fflate";
 import { useCallback, useEffect, useState } from "react";
 import { useStore } from "zustand";
@@ -206,8 +206,7 @@ export function IntegrityPanel({
   };
 
   return (
-    <section aria-label="Integrity" className="figure-tools-panel">
-      <h3>Integrity</h3>
+    <Section className="figure-tools-panel" label="Integrity" title="Integrity">
       <Button
         onClick={async () => {
           setStatus("Checking panels against their originals…");
@@ -343,6 +342,6 @@ export function IntegrityPanel({
           <Button onClick={() => void refreshServerReports()}>Refresh server reports</Button>
         </>
       )}
-    </section>
+    </Section>
   );
 }

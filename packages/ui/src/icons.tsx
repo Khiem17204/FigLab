@@ -52,6 +52,12 @@ export const CheckIcon = icon(<path d="M5 12.5l4.5 4.5L19 7.5" />);
 export const PlusIcon = icon(<path d="M12 5v14M5 12h14" />);
 export const MinusIcon = icon(<path d="M5 12h14" />);
 export const CloseIcon = icon(<path d="M6 6l12 12M18 6L6 18" />);
+export const CopyIcon = icon(
+  <>
+    <rect height="12" rx="2.5" width="12" x="8" y="8" />
+    <path d="M16 8V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h2" />
+  </>,
+);
 export const PencilIcon = icon(
   <>
     <path d="M4 20h4L19 9l-4-4L4 16z" />

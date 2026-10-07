@@ -1,4 +1,9 @@
-/* Functional styles for figure tools. Visual design is owned by the UI refresh. */
+/*
+ * Figure tools: canvas overlays, tool panels, figures bar, and analysis views. Colors, type
+ * and radii come from @figlab/ui tokens so tools follow the light and dark themes.
+ */
+
+/* ---------- Canvas overlays ---------- */
 .figure-canvas.tool-text,
 .figure-canvas.tool-line,
 .figure-canvas.tool-arrow,
@@ -15,110 +20,268 @@
   pointer-events: none;
 }
 .figure-overlay .snap-guide {
-  stroke: #e11d48;
+  stroke: #e0457b;
   stroke-width: 1;
   stroke-dasharray: 4 3;
 }
 .figure-overlay .marquee,
 .figure-overlay .draft {
-  fill: rgba(15, 76, 189, 0.08);
-  stroke: #0f4cbd;
-  stroke-width: 1;
-  stroke-dasharray: 3 2;
+  fill: color-mix(in srgb, var(--fl-primary) 10%, transparent);
+  stroke: var(--fl-primary);
+  stroke-width: 1.2;
+  stroke-dasharray: 4 3;
 }
 .artboard-selection.locked .move-handle {
   cursor: not-allowed;
+}
+.artboard-selection.locked.selected {
+  border-style: dashed;
 }
 .artboard-selection.object-line {
   min-height: 6px;
   min-width: 6px;
 }
-.figure-tools-panel {
-  display: grid;
-  gap: 8px;
-}
-/* Auto-sized grid columns grow to their widest content; pin them to the container instead. */
-.source-library:has(> .figure-tools-panel),
-.figure-tools-panel {
-  grid-template-columns: minmax(0, 1fr);
-}
+
+/* ---------- Tool panels ---------- */
 .figure-tools-panel {
   min-width: 0;
   max-width: 100%;
   overflow-wrap: anywhere;
+  font-size: var(--fl-text-sm);
 }
-.figure-tools-panel select,
-.figure-tools-panel input,
-.figure-tools-panel textarea {
-  max-width: 100%;
-  min-width: 0;
+.figure-tools-panel.fl-section > .fl-section-body {
+  gap: 10px;
 }
-.layer-list button {
-  min-width: 0;
-  white-space: normal;
-  text-align: left;
-  overflow-wrap: anywhere;
+.figure-tools-panel p {
+  margin: 0;
+  color: var(--fl-muted);
+  font-size: var(--fl-text-xs);
+  line-height: 1.45;
+}
+.figure-tools-panel h4 {
+  margin: 6px 0 0;
+  font: 500 var(--fl-text-xs) / 1.3 var(--fl-font-mono);
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  color: var(--fl-muted);
 }
 .figure-tools-panel fieldset {
   /* Fieldsets default to min-content width, which stops their controls from wrapping. */
   min-width: 0;
   display: flex;
   flex-wrap: wrap;
-  gap: 4px;
-  border: 1px solid #d9dee8;
-  padding: 6px;
+  align-items: center;
+  gap: 6px;
   margin: 0;
+  padding: 10px;
+  border: 1px solid var(--fl-line);
+  border-radius: var(--fl-r-md);
+  background: color-mix(in srgb, var(--fl-surface-2) 55%, transparent);
+}
+.figure-tools-panel fieldset:disabled {
+  opacity: 0.6;
 }
 .figure-tools-panel legend {
-  font-size: 12px;
-  padding: 0 4px;
+  padding: 0 6px;
+  font: 500 11px / 1.2 var(--fl-font-mono);
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  color: var(--fl-muted);
 }
 .figure-tools-panel label {
   display: grid;
-  gap: 2px;
-  font-size: 12px;
-}
-.figure-tools-panel .inline {
-  display: flex;
-  align-items: center;
   gap: 4px;
+  min-width: 0;
+  font-size: var(--fl-text-xs);
+  font-weight: 600;
+  color: var(--fl-ink);
 }
-.figures-bar {
+.figure-tools-panel fieldset > label:not(.inline) {
+  flex: 1 1 100%;
+}
+.figure-tools-panel .inline,
+.figure-tools-panel label:has(> input[type="checkbox"]),
+.figure-tools-panel label:has(> input[type="radio"]) {
   display: flex;
-  flex-wrap: wrap;
   align-items: center;
   gap: 6px;
 }
-.figures-bar [aria-pressed="true"] {
-  outline: 2px solid #0f4cbd;
+.figure-tools-panel input:not([type="checkbox"]):not([type="radio"]):not([type="range"]),
+.figure-tools-panel select,
+.figure-tools-panel textarea,
+.workspace-nav input:not([type="checkbox"]),
+.workspace-nav select,
+.project-search input,
+.create-form select,
+.project-folder select,
+.lab-members select,
+.lab-members input,
+.invite-banner input,
+.admin-panel select,
+.figures-bar input,
+.figures-bar select {
+  font: 400 var(--fl-text-sm) var(--fl-font-body);
+  color: var(--fl-ink);
+  background: var(--fl-surface);
+  border: var(--fl-bw) solid var(--fl-field-border);
+  border-radius: var(--fl-r-sm);
+  min-height: 30px;
+  padding: 3px 8px;
+  max-width: 100%;
+  min-width: 0;
 }
-.layer-list {
-  list-style: none;
+.figure-tools-panel select,
+.workspace-nav select,
+.create-form select,
+.project-folder select,
+.lab-members select,
+.admin-panel select,
+.figures-bar select {
+  padding-right: 4px;
+  cursor: pointer;
+}
+.figure-tools-panel textarea {
+  min-height: 64px;
+  resize: vertical;
+  line-height: 1.4;
+}
+.figure-tools-panel input[type="number"],
+.figures-bar input[type="number"] {
+  font-family: var(--fl-font-mono);
+  font-variant-numeric: tabular-nums;
+}
+.figure-tools-panel .inline input[type="number"] {
+  width: 76px;
+}
+.figure-tools-panel input:focus-visible,
+.figure-tools-panel select:focus-visible,
+.figure-tools-panel textarea:focus-visible,
+.workspace-nav input:focus-visible,
+.workspace-nav select:focus-visible,
+.project-search input:focus-visible,
+.create-form select:focus-visible,
+.figures-bar input:focus-visible,
+.figures-bar select:focus-visible {
+  outline: none;
+  border-color: var(--fl-primary);
+  box-shadow: 0 0 0 3px var(--fl-primary-soft);
+}
+.figure-tools-panel input[type="checkbox"],
+.figure-tools-panel input[type="radio"],
+.workspace-nav input[type="checkbox"] {
+  width: 16px;
+  height: 16px;
   margin: 0;
-  padding: 0;
-  display: grid;
-  gap: 2px;
-  max-height: 180px;
-  overflow: auto;
+  accent-color: var(--fl-primary);
 }
-.layer-list li {
-  display: flex;
-  gap: 4px;
-  align-items: center;
-  font-size: 12px;
+.figure-tools-panel input[type="range"] {
+  width: 100%;
+  accent-color: var(--fl-primary);
 }
+.figure-tools-panel output {
+  font: 500 var(--fl-text-xs) var(--fl-font-mono);
+  color: var(--fl-muted);
+}
+
+/* Text buttons inside tools are compact chips; pressed ones read as selected. */
+.figure-tools-panel .fl-button,
+.figures-bar .fl-button,
+.workspace-nav .fl-button,
+.lab-members .fl-button,
+.admin-panel .fl-button,
+.invite-banner .fl-button,
+.project-search .fl-button {
+  --_shadow: none;
+  --_border: var(--fl-line);
+  min-height: 30px;
+  padding: 0 10px;
+  font-size: 12.5px;
+  gap: 5px;
+}
+.figure-tools-panel .fl-button:hover:not(:disabled),
+.figures-bar .fl-button:hover:not(:disabled),
+.workspace-nav .fl-button:hover:not(:disabled),
+.lab-members .fl-button:hover:not(:disabled),
+.admin-panel .fl-button:hover:not(:disabled),
+.invite-banner .fl-button:hover:not(:disabled),
+.project-search .fl-button:hover:not(:disabled) {
+  --_bg: var(--fl-surface-2);
+  --_border: var(--fl-outline);
+  transform: none;
+  box-shadow: none;
+}
+.figure-tools-panel .fl-button[aria-pressed="true"],
+.figures-bar .fl-button[aria-pressed="true"] {
+  --_bg: var(--fl-primary-soft);
+  --_fg: var(--fl-primary-ink);
+  --_border: var(--fl-outline);
+  box-shadow: 1px 1px 0 var(--fl-outline);
+}
+.figure-tools-panel .fl-button:disabled,
+.figures-bar .fl-button:disabled {
+  opacity: 0.45;
+}
+
+.layer-list,
 .history-list {
   list-style: none;
   margin: 0;
   padding: 0;
   display: grid;
-  gap: 4px;
-  max-height: 260px;
+  gap: 2px;
+  width: 100%;
   overflow: auto;
-  font-size: 12px;
+}
+.layer-list {
+  max-height: 200px;
+}
+.history-list {
+  max-height: 260px;
+  gap: 4px;
+  font-size: var(--fl-text-xs);
+}
+.layer-list li,
+.history-list li {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+  padding: 4px 6px;
+  border-radius: var(--fl-r-sm);
+}
+.layer-list li:hover,
+.history-list li:hover {
+  background: var(--fl-surface-2);
+}
+.layer-list li > .fl-button:first-child {
+  flex: 1;
+  justify-content: flex-start;
+  white-space: normal;
+  text-align: left;
+  overflow-wrap: anywhere;
+  --_border: transparent;
+  --_bg: transparent;
+}
+.layer-list li > span {
+  font: 500 11px var(--fl-font-mono);
+  color: var(--fl-muted);
+}
+
+/* ---------- Source tools ---------- */
+.source-tools {
+  display: grid;
+  align-content: start;
+  gap: 8px;
+}
+.source-tools fieldset:first-child .fl-button {
+  flex: 1 1 100%;
+  justify-content: flex-start;
 }
 .source-canvas {
   position: relative;
+}
+.source-canvas[data-mode="markers"] {
+  cursor: copy;
 }
 .source-overlay {
   position: absolute;
@@ -128,65 +291,135 @@
   pointer-events: none;
 }
 .source-overlay .crop-outline {
-  fill: rgba(15, 76, 189, 0.08);
-  stroke: #0f4cbd;
-  stroke-width: 1;
+  fill: rgb(255 255 255 / 0.06);
+  stroke: rgb(255 255 255 / 0.85);
+  stroke-width: 1.2;
+  stroke-dasharray: 5 3;
 }
 .source-overlay .crop-outline.selected {
-  stroke: #e11d48;
-  stroke-width: 2;
+  fill: rgb(154 168 255 / 0.12);
+  stroke: #9aa8ff;
+  stroke-width: 2.4;
+  stroke-dasharray: none;
 }
 .source-overlay .crop-outline.draft {
+  stroke: #ffffff;
+  stroke-width: 1.6;
   stroke-dasharray: 4 3;
 }
 .source-overlay .ladder-marker {
-  stroke: #f59e0b;
-  stroke-width: 1;
+  stroke: #ffc35a;
+  stroke-width: 1.2;
 }
 .source-overlay .ladder-label {
-  fill: #f59e0b;
-  font-size: 10px;
+  fill: #ffc35a;
+  font: 600 10px var(--fl-font-mono);
+  paint-order: stroke;
+  stroke: rgb(0 0 0 / 0.6);
+  stroke-width: 2px;
 }
+
+/* ---------- Figures bar (tabs + figure settings) ---------- */
+.figures-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 8px;
+  padding: 5px 8px;
+  background: var(--fl-surface);
+  border: 1px solid var(--fl-line);
+  border-radius: var(--fl-r-md);
+  font-size: var(--fl-text-xs);
+}
+.figures-bar-divider {
+  width: 1px;
+  height: 20px;
+  margin: 0 2px;
+  background: var(--fl-line);
+}
+.figures-bar > label {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-weight: 600;
+  color: var(--fl-muted);
+  white-space: nowrap;
+}
+.figures-bar > label input:not([type="number"]) {
+  width: 104px;
+}
+.figures-bar > label input[type="number"] {
+  width: 76px;
+  -moz-appearance: textfield;
+}
+.figures-bar > label input[type="number"]::-webkit-inner-spin-button,
+.figures-bar > label input[type="number"]::-webkit-outer-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+.figures-bar > label select {
+  max-width: 150px;
+}
+
+/* ---------- Analysis views ---------- */
 .histogram {
   width: 100%;
   height: 48px;
-  background: #f1f5f9;
+  border-radius: var(--fl-r-sm);
+  background: var(--fl-surface-2);
 }
 .histogram path {
-  fill: #475569;
+  fill: var(--fl-muted);
 }
 .histogram line {
-  stroke: #e11d48;
+  stroke: var(--fl-primary);
+  stroke-width: 1.5;
 }
 .comparison {
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 6px;
+  width: 100%;
 }
 .comparison img {
   width: 100%;
+  border-radius: var(--fl-r-sm);
   image-rendering: pixelated;
-  background: #000;
+  background: #000000;
 }
 .comparison figcaption {
   font-size: 11px;
+  color: var(--fl-muted);
 }
 .quantification-table {
   border-collapse: collapse;
-  font-size: 12px;
+  width: 100%;
+  font: 500 var(--fl-text-xs) var(--fl-font-mono);
+  font-variant-numeric: tabular-nums;
 }
 .quantification-table td,
 .quantification-table th {
-  border: 1px solid #d9dee8;
-  padding: 2px 4px;
+  border-bottom: 1px solid var(--fl-line);
+  padding: 4px 6px;
+  text-align: right;
+}
+.quantification-table th {
+  font-family: var(--fl-font-body);
+  font-weight: 700;
+  color: var(--fl-muted);
+}
+.quantification-table td:first-child,
+.quantification-table th:first-child {
+  text-align: left;
 }
 .quantification-chart {
   width: 100%;
   height: 60px;
-  background: #f8fafc;
+  border-radius: var(--fl-r-sm);
+  background: var(--fl-surface-2);
 }
 .quantification-chart path {
-  fill: #0f4cbd;
+  fill: var(--fl-primary);
 }
 .derived-preview {
   margin: 0;
@@ -198,4 +431,35 @@
 }
 .derived-preview figcaption {
   font-size: 11px;
+  color: var(--fl-muted);
+}
+.thumb.derived .derived-preview,
+.thumb.derived .derived-preview img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+.thumb.derived figcaption {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+}
+
+/* ---------- Comments ---------- */
+.comment-thread {
+  display: grid;
+  gap: 4px;
+  padding: 8px 10px;
+  border-radius: var(--fl-r-md);
+  background: var(--fl-surface-2);
+  border-left: 3px solid var(--fl-highlight);
+}
+.comment-thread.resolved {
+  opacity: 0.65;
+  border-left-color: var(--fl-success-ink);
+}
+.comment-reply {
+  margin-inline-start: 1em;
 }

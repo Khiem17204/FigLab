@@ -268,7 +268,9 @@ export function FigLabEditor({
   const revealExport = () => {
     if (!layout.inspectorOpen) setLayout({ inspectorOpen: true });
     requestAnimationFrame(() => {
-      const section = document.getElementById("figure-export")?.closest("section");
+      const section = document.querySelector<HTMLElement>(
+        '.inspector section[aria-label="Export"]',
+      );
       section?.scrollIntoView({ behavior: "smooth", block: "nearest" });
       section?.querySelector<HTMLElement>("select, input")?.focus();
     });

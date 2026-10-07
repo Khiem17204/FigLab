@@ -1,6 +1,7 @@
 import { textBoxSize, updateObjectCommand } from "@figlab/editor-core";
 import type { FigureObject, StrokeV2, TextStyleV2 } from "@figlab/figure-schema";
 import type { TextMetrics } from "@figlab/image-processing";
+import { Section } from "@figlab/ui";
 import { useStore } from "zustand";
 import type { StoreApi } from "zustand/vanilla";
 
@@ -128,16 +129,19 @@ export function ObjectInspector({
   );
 
   return (
-    <section aria-label="Object inspector" className="figure-tools-panel">
-      <h3>
-        {object.type === "text"
+    <Section
+      className="figure-tools-panel"
+      label="Object inspector"
+      title={
+        object.type === "text"
           ? object.panelLabel
             ? "Panel label"
             : "Text"
           : object.type === "line"
             ? "Line"
-            : "Shape"}
-      </h3>
+            : "Shape"
+      }
+    >
       {object.locked && <p>Locked. Unlock it in Figure tools to edit.</p>}
       <fieldset disabled={object.locked}>
         {transformField("xPt", "X (pt)")}
@@ -163,7 +167,7 @@ export function ObjectInspector({
         {object.type === "line" && <LineFields object={object} update={update} />}
         {object.type === "shape" && <ShapeFields object={object} update={update} />}
       </fieldset>
-    </section>
+    </Section>
   );
 }
 
