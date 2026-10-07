@@ -580,8 +580,11 @@ test("shows the audit trail with actors and restores an earlier version", async 
   const trail = page.getByRole("list", { name: "Audit trail" });
   await expect(trail).toContainText("Display adjusted: gamma 1 → 1.4");
   await expect(trail).toContainText("pi@lab.example");
-  page.once("dialog", (dialog) => void dialog.accept());
   await page.getByRole("button", { name: "Restore revision 2" }).click();
+  await page
+    .getByRole("dialog", { name: "Restore revision 2?" })
+    .getByRole("button", { name: "Restore" })
+    .click();
   await expect.poll(() => latest()?.objects.map((object) => object.id)).toEqual(["view-a"]);
 });
 

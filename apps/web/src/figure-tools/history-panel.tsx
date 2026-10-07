@@ -1,6 +1,6 @@
 import type { AuditEventDto, ExportRecord, VersionSummary } from "@figlab/api-contract";
 import type { FigureDocument } from "@figlab/figure-schema";
-import { Button } from "@figlab/ui";
+import { Button, useDialogs } from "@figlab/ui";
 import { useCallback, useEffect, useState } from "react";
 
 import type { FigLabClient } from "../api/client";
@@ -64,6 +64,7 @@ export function HistoryPanel({
   refreshKey?: unknown;
   onRestore: (document: FigureDocument, revision: number) => void;
 }) {
+  const dialogs = useDialogs();
   const [events, setEvents] = useState<AuditEventDto[]>([]);
   const [olderThan, setOlderThan] = useState<number>();
   const [versions, setVersions] = useState<VersionSummary[]>([]);
@@ -136,12 +137,12 @@ export function HistoryPanel({
             {version.revision !== revision && (
               <Button
                 onClick={async () => {
-                  if (
-                    !window.confirm(
-                      `Restore revision ${version.revision}? It is saved as a new revision; nothing is deleted.`,
-                    )
-                  )
-                    return;
+                  const confirmed = await dialogs.confirm({
+                    title: `Restore revision ${version.revision}?`,
+                    description: "It is saved as a new revision; nothing is deleted.",
+                    confirmLabel: "Restore",
+                  });
+                  if (!confirmed) return;
                   const loaded = await client.getVersion(projectId, version.revision);
                   onRestore(loaded.document, version.revision);
                 }}

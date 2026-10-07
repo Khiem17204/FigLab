@@ -1,5 +1,5 @@
 import type { Project } from "@figlab/api-contract";
-import { ToastProvider } from "@figlab/ui";
+import { DialogsProvider, ToastProvider } from "@figlab/ui";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { useState } from "react";
 
@@ -26,16 +26,18 @@ export function FigLabApp({
   return (
     <QueryClientProvider client={queryClient}>
       <ToastProvider>
-        {project ? (
-          <EditorLoader
-            account={account}
-            client={client}
-            onBack={() => setProject(undefined)}
-            project={project}
-          />
-        ) : (
-          <Dashboard account={account} client={client} onOpen={setProject} />
-        )}
+        <DialogsProvider>
+          {project ? (
+            <EditorLoader
+              account={account}
+              client={client}
+              onBack={() => setProject(undefined)}
+              project={project}
+            />
+          ) : (
+            <Dashboard account={account} client={client} onOpen={setProject} />
+          )}
+        </DialogsProvider>
       </ToastProvider>
     </QueryClientProvider>
   );

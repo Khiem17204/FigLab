@@ -1,5 +1,5 @@
 import type { CommentDto, Project } from "@figlab/api-contract";
-import { Button } from "@figlab/ui";
+import { Button, useDialogs } from "@figlab/ui";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { useStore } from "zustand";
@@ -29,6 +29,7 @@ export function CommentsPanel({
   /** Workspace admins delete any comment; authors always can. */
   canModerate: boolean;
 }) {
+  const dialogs = useDialogs();
   const state = useStore(session);
   const queryClient = useQueryClient();
   const comments = useQuery({
@@ -162,9 +163,14 @@ export function CommentsPanel({
               {(mine || canModerate) && (
                 <Button
                   aria-label="Delete comment"
-                  onClick={() => {
-                    if (window.confirm("Delete this comment and its replies?"))
-                      void run(() => client.deleteComment(projectId, thread.id));
+                  onClick={async () => {
+                    const confirmed = await dialogs.confirm({
+                      title: "Delete this comment?",
+                      description: "Its replies are deleted too.",
+                      confirmLabel: "Delete comment",
+                      destructive: true,
+                    });
+                    if (confirmed) void run(() => client.deleteComment(projectId, thread.id));
                   }}
                 >
                   Delete

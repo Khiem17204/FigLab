@@ -17,6 +17,7 @@ export function Panel({ children, className, ...props }: HTMLAttributes<HTMLElem
  */
 export function Section({
   title,
+  label,
   actions,
   children,
   defaultOpen = true,
@@ -24,7 +25,9 @@ export function Section({
   onOpenChange,
   className,
 }: {
-  title: string;
+  title: ReactNode;
+  /** Names the region when it should differ from the visible title. */
+  label?: string;
   actions?: ReactNode;
   children: ReactNode;
   defaultOpen?: boolean;
@@ -40,7 +43,11 @@ export function Section({
     onOpenChange?.(!open);
   };
   return (
-    <section aria-labelledby={`${id}-title`} className={cx("fl-section", className)}>
+    <section
+      aria-label={label}
+      aria-labelledby={label ? undefined : `${id}-title`}
+      className={cx("fl-section", className)}
+    >
       <h3 className="fl-section-header">
         <button
           aria-controls={`${id}-body`}

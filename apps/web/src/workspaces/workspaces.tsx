@@ -7,7 +7,7 @@ import type {
   WorkspaceMemberDto,
   WorkspaceRoleDto,
 } from "@figlab/api-contract";
-import { Button } from "@figlab/ui";
+import { Button, useDialogs } from "@figlab/ui";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 
@@ -110,6 +110,7 @@ export function WorkspaceNav({
   selection: WorkspaceSelection;
 }) {
   const queryClient = useQueryClient();
+  const dialogs = useDialogs();
   const { current } = selection;
   const folders = useFolders(client, current?.id);
   const templates = useTemplates(client, current?.id);
@@ -239,8 +240,14 @@ export function WorkspaceNav({
       {writable && current && selectedFolder && (
         <div className="folder-actions">
           <Button
-            onClick={() => {
-              const name = window.prompt("Rename folder", selectedFolder.name)?.trim();
+            onClick={async () => {
+              const name = await dialogs.prompt({
+                title: "Rename folder",
+                label: "Folder name",
+                initialValue: selectedFolder.name,
+                confirmLabel: "Save name",
+                maxLength: 120,
+              });
               if (name)
                 void run(async () => {
                   await client.updateFolder(current.id, selectedFolder.id, { name });
@@ -298,8 +305,14 @@ export function WorkspaceNav({
                 {(canManage(current.role) || writable) && (
                   <button
                     aria-label={`Delete template ${template.name}`}
-                    onClick={() => {
-                      if (!window.confirm(`Delete template ${template.name}?`)) return;
+                    onClick={async () => {
+                      const confirmed = await dialogs.confirm({
+                        title: `Delete template “${template.name}”?`,
+                        description: "Projects already made from it are not affected.",
+                        confirmLabel: "Delete template",
+                        destructive: true,
+                      });
+                      if (!confirmed) return;
                       void run(async () => {
                         await client.deleteTemplate(current.id, template.id);
                         await queryClient.invalidateQueries({
@@ -462,6 +475,7 @@ export function LabMembers({
   onLeft: () => void;
 }) {
   const queryClient = useQueryClient();
+  const dialogs = useDialogs();
   const manage = canManage(workspace.role);
   const members = useQuery({
     queryKey: ["members", workspace.id],
@@ -503,8 +517,14 @@ export function LabMembers({
       <h2>{workspace.name}</h2>
       {manage && (
         <Button
-          onClick={() => {
-            const name = window.prompt("Rename lab", workspace.name)?.trim();
+          onClick={async () => {
+            const name = await dialogs.prompt({
+              title: "Rename lab",
+              label: "Lab name",
+              initialValue: workspace.name,
+              confirmLabel: "Save name",
+              maxLength: 120,
+            });
             if (name)
               void run(async () => {
                 await client.renameWorkspace(workspace.id, name);
@@ -517,9 +537,14 @@ export function LabMembers({
       )}
       {workspace.role === "owner" && (
         <Button
-          onClick={() => {
-            if (!window.confirm(`Delete ${workspace.name}? Its projects must be deleted first.`))
-              return;
+          onClick={async () => {
+            const confirmed = await dialogs.confirm({
+              title: `Delete “${workspace.name}”?`,
+              description: "Delete or move its projects first. Members lose access to the lab.",
+              confirmLabel: "Delete lab",
+              destructive: true,
+            });
+            if (!confirmed) return;
             void run(async () => {
               await client.deleteLab(workspace.id);
               onLeft();
@@ -570,8 +595,15 @@ export function LabMembers({
               <td>
                 {member.userId === currentUserId ? (
                   <Button
-                    onClick={() => {
-                      if (!window.confirm(`Leave ${workspace.name}?`)) return;
+                    onClick={async () => {
+                      const confirmed = await dialogs.confirm({
+                        title: `Leave “${workspace.name}”?`,
+                        description:
+                          "You lose access to its projects until someone invites you again.",
+                        confirmLabel: "Leave lab",
+                        destructive: true,
+                      });
+                      if (!confirmed) return;
                       void run(async () => {
                         await client.removeMember(workspace.id, member.userId);
                         onLeft();
@@ -585,9 +617,14 @@ export function LabMembers({
                   assignable(member).length > 1 && (
                     <Button
                       aria-label={`Remove ${member.email}`}
-                      onClick={() => {
-                        if (!window.confirm(`Remove ${member.email} from ${workspace.name}?`))
-                          return;
+                      onClick={async () => {
+                        const confirmed = await dialogs.confirm({
+                          title: `Remove ${member.email}?`,
+                          description: `They lose access to ${workspace.name} and its projects.`,
+                          confirmLabel: "Remove member",
+                          destructive: true,
+                        });
+                        if (!confirmed) return;
                         void run(async () => {
                           await client.removeMember(workspace.id, member.userId);
                           await refresh();

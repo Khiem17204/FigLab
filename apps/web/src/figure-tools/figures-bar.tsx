@@ -11,7 +11,7 @@ import {
   presetSizePt,
   ptToMm,
 } from "@figlab/figure-schema";
-import { Button } from "@figlab/ui";
+import { Button, useDialogs } from "@figlab/ui";
 import { useStore } from "zustand";
 import type { StoreApi } from "zustand/vanilla";
 
@@ -41,6 +41,7 @@ export function nextFigureName(artboards: ReadonlyArray<Pick<ArtboardV1, "name">
 
 /** Lists the project's figures (artboards) and edits the active one's name and size. */
 export function FiguresBar({ session }: { session: StoreApi<EditorSessionState> }) {
+  const dialogs = useDialogs();
   const state = useStore(session);
   const { artboards } = state.document;
   const active = artboards.find((artboard) => artboard.id === state.activeArtboardId);
@@ -91,9 +92,14 @@ export function FiguresBar({ session }: { session: StoreApi<EditorSessionState> 
           </Button>
           <Button
             disabled={artboards.length < 2}
-            onClick={() => {
-              if (window.confirm(`Delete ${active.name} and everything on it?`))
-                apply(removeArtboardCommand(active.id), { selectedIds: [] });
+            onClick={async () => {
+              const confirmed = await dialogs.confirm({
+                title: `Delete “${active.name}”?`,
+                description: "Everything on this figure is removed. Undo brings it back.",
+                confirmLabel: "Delete figure",
+                destructive: true,
+              });
+              if (confirmed) apply(removeArtboardCommand(active.id), { selectedIds: [] });
             }}
           >
             Delete figure

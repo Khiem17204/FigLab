@@ -10,6 +10,7 @@ export {
 } from "./button";
 export { cx } from "./cx";
 export { ConfirmDialog, Dialog, DialogClose, DialogContent, DialogTrigger } from "./dialog";
+export { type ConfirmOptions, DialogsProvider, type PromptOptions, useDialogs } from "./dialogs";
 export { acceptsFile, DropZone } from "./drop-zone";
 export { EmptyState } from "./empty-state";
 export { Field, Input, type InputProps } from "./field";
