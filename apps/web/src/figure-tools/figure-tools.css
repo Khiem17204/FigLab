@@ -205,3 +205,18 @@
 .derived-preview figcaption {
   font-size: 11px;
 }
+/* The source inspector holds crop tools above a full-width original of fixed height, so a tall
+   original can never spill over the figure tools below it. */
+.editor-layout > .workspace {
+  grid-template-rows: auto minmax(420px, 1fr);
+}
+.workspace > .original-inspector {
+  grid-template-columns: 150px minmax(0, 1fr);
+  align-items: start;
+}
+.workspace > .original-inspector > .source-canvas {
+  grid-column: 1 / -1;
+  height: 260px;
+  min-height: 0;
+  overflow: hidden;
+}
