@@ -342,3 +342,79 @@ describe("artboard commands", () => {
     expect(positions(copied)).toMatchObject(positions(document));
   });
 });
+
+describe("attached annotations", () => {
+  const calibrated = (document: FigureDocument): FigureDocument => ({
+    ...document,
+    sources: [
+      {
+        assetId: "asset",
+        widthPx: 100,
+        heightPx: 100,
+        calibration: { umPerPxX: 1, umPerPxY: 1, origin: "manual" },
+        markers: [],
+      },
+    ],
+  });
+  const bar = (target: string): FigureObject => ({
+    id: `bar-${target}`,
+    type: "scale-bar",
+    artboardId: "board",
+    transform: { xPt: 10, yPt: 90, widthPt: 20, heightPt: 2, rotationDeg: 0 },
+    zIndex: 5,
+    locked: false,
+    hidden: false,
+    scaleBar: {
+      targetObjectId: target,
+      lengthUm: 10,
+      displayUnit: "µm",
+      thicknessPt: 2,
+      colorHex: "#FFFFFF",
+      showLabel: false,
+      fontSizePt: 6,
+    },
+  });
+  const zoom: FigureObject = {
+    id: "zoom",
+    type: "zoom-link",
+    artboardId: "board",
+    transform: { xPt: 0, yPt: 0, widthPt: 1, heightPt: 1, rotationDeg: 0 },
+    zIndex: 6,
+    locked: false,
+    hidden: false,
+    zoomLink: {
+      sourceObjectId: "a",
+      insetObjectId: "b",
+      stroke: { colorHex: "#FFFFFF", widthPt: 1, dashed: false },
+      connectors: false,
+    },
+  };
+
+  it("deletes scale bars and zoom links with their panels", () => {
+    const document = calibrated(documentWith(view("a", 0, 0), view("b", 200, 0), bar("a"), zoom));
+    expect(deleteObjectsCommand(["b"])(document).objects.map((object) => object.id)).toEqual([
+      "a",
+      "bar-a",
+    ]);
+    expect(deleteObjectsCommand(["a"])(document).objects.map((object) => object.id)).toEqual(["b"]);
+  });
+
+  it("moves attached annotations with their panel", () => {
+    const document = calibrated(documentWith(view("a", 0, 0), bar("a")));
+    expect(positions(moveObjectsCommand(["a"], 5, 7)(document))["bar-a"]).toEqual([15, 97]);
+  });
+
+  it("remaps copies onto copied panels and drops orphaned annotations", () => {
+    const document = calibrated(documentWith(view("a", 0, 0), view("b", 200, 0), bar("a"), zoom));
+    const both = duplicateObjects(document, ["a", "b"], ids("copy"));
+    const copiedBar = both.document.objects.find(
+      (object) => object.type === "scale-bar" && object.id !== "bar-a",
+    );
+    expect(copiedBar?.type === "scale-bar" && copiedBar.scaleBar.targetObjectId).toBe(
+      both.idMap.get("a"),
+    );
+    expect(both.document.objects.filter((object) => object.type === "zoom-link")).toHaveLength(2);
+    const barOnly = duplicateObjects(document, ["bar-a"], ids("solo"));
+    expect(barOnly.document.objects).toHaveLength(document.objects.length);
+  });
+});

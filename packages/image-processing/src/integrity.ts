@@ -448,16 +448,16 @@ export function legendText(panels: ReadonlyArray<PanelIntegrity>): string {
 
 /** A self-contained HTML rendering of a report, for reading or printing to PDF. */
 export function integrityReportHtml(report: IntegrityReport): string {
-  const escape = (value: string) =>
+  const html = (value: string) =>
     value.replace(/[&<>"]/g, (character) => `&#${character.charCodeAt(0)};`);
   const finding = (item: IntegrityFinding) =>
-    `<li class="${item.severity}"><strong>${item.severity}</strong> ${escape(item.message)}</li>`;
+    `<li class="${item.severity}"><strong>${item.severity}</strong> ${html(item.message)}</li>`;
   const reading = (item: SourceReadingIntegrity) =>
-    `<tr><td>${escape(item.filename ?? item.assetId)}${item.planeLabel ? ` · ${escape(item.planeLabel)}` : ""}${item.channel === null ? "" : ` · channel ${item.channel + 1}`}</td><td><code>${escape(item.checksumSha256 ?? "")}</code></td><td>${Math.round(item.cropPx.x)}, ${Math.round(item.cropPx.y)}, ${Math.round(item.cropPx.width)} × ${Math.round(item.cropPx.height)}${item.rotationDeg ? `, ${item.rotationDeg.toFixed(1)}°` : ""}</td><td>${percent(item.stats.sourceSaturated)}</td><td>${percent(item.stats.displayClippedHigh + item.stats.displayClippedLow)}</td></tr>`;
-  return `<!doctype html><html lang="en"><head><meta charset="utf-8"><title>Integrity report — ${escape(report.projectName)}</title><style>body{font:14px/1.45 system-ui,sans-serif;margin:32px;max-width:960px}table{border-collapse:collapse;width:100%;margin:8px 0 16px}td,th{border:1px solid #ccc;padding:4px 6px;text-align:left;font-size:12px}code{font-size:11px;word-break:break-all}.warn strong{color:#b00020}.disclose strong{color:#8a5a00}.info strong{color:#555}</style></head><body><h1>Integrity report</h1><p>${escape(report.projectName)} · revision ${report.revision} · generated ${escape(report.generatedAt)}</p><h2>Suggested legend text</h2><p>${escape(report.legendText)}</p><h2>Figure-wide findings</h2><ul>${report.findings.map(finding).join("") || "<li>None.</li>"}</ul>${report.panels
+    `<tr><td>${html(item.filename ?? item.assetId)}${item.planeLabel ? ` · ${html(item.planeLabel)}` : ""}${item.channel === null ? "" : ` · channel ${item.channel + 1}`}</td><td><code>${html(item.checksumSha256 ?? "")}</code></td><td>${Math.round(item.cropPx.x)}, ${Math.round(item.cropPx.y)}, ${Math.round(item.cropPx.width)} × ${Math.round(item.cropPx.height)}${item.rotationDeg ? `, ${item.rotationDeg.toFixed(1)}°` : ""}</td><td>${percent(item.stats.sourceSaturated)}</td><td>${percent(item.stats.displayClippedHigh + item.stats.displayClippedLow)}</td></tr>`;
+  return `<!doctype html><html lang="en"><head><meta charset="utf-8"><title>Integrity report — ${html(report.projectName)}</title><style>body{font:14px/1.45 system-ui,sans-serif;margin:32px;max-width:960px}table{border-collapse:collapse;width:100%;margin:8px 0 16px}td,th{border:1px solid #ccc;padding:4px 6px;text-align:left;font-size:12px}code{font-size:11px;word-break:break-all}.warn strong{color:#b00020}.disclose strong{color:#8a5a00}.info strong{color:#555}</style></head><body><h1>Integrity report</h1><p>${html(report.projectName)} · revision ${report.revision} · generated ${html(report.generatedAt)}</p><h2>Suggested legend text</h2><p>${html(report.legendText)}</p><h2>Figure-wide findings</h2><ul>${report.findings.map(finding).join("") || "<li>None.</li>"}</ul>${report.panels
     .map(
       (panel) =>
-        `<h2>${escape(panel.label ? `Panel ${panel.label}` : panel.objectId)} <small>(${escape(panel.artboardName)}, ${panel.kind})</small></h2><table><tr><th>Original</th><th>SHA-256</th><th>Crop (px)</th><th>Saturated in original</th><th>Clipped by display</th></tr>${panel.readings.map(reading).join("")}</table><ul>${panel.findings.map(finding).join("") || "<li>No adjustments.</li>"}</ul>`,
+        `<h2>${html(panel.label ? `Panel ${panel.label}` : panel.objectId)} <small>(${html(panel.artboardName)}, ${panel.kind})</small></h2><table><tr><th>Original</th><th>SHA-256</th><th>Crop (px)</th><th>Saturated in original</th><th>Clipped by display</th></tr>${panel.readings.map(reading).join("")}</table><ul>${panel.findings.map(finding).join("") || "<li>No adjustments.</li>"}</ul>`,
     )
     .join("")}</body></html>`;
 }

@@ -155,19 +155,15 @@ export function updateObjectCommand(
 }
 
 /**
- * Deletes objects together with panel labels attached to them, and drops them from groups;
- * a group left with fewer than two members is dissolved.
+ * Deletes objects together with everything attached to them (panel labels, scale bars, lane
+ * tables, MW labels, zoom links), and drops them from groups; a group left with fewer than two
+ * members is dissolved.
  */
 export function deleteObjectsCommand(ids: ReadonlyArray<string>): EditorCommand {
   return (document) => {
     const deleted = new Set(ids);
     for (const object of document.objects)
-      if (
-        object.type === "text" &&
-        object.panelLabel &&
-        deleted.has(object.panelLabel.targetObjectId)
-      )
-        deleted.add(object.id);
+      if (attachedTargetIds(object).some((target) => deleted.has(target))) deleted.add(object.id);
     return decodeFigureDocument({
       ...document,
       objects: document.objects.filter((object) => !deleted.has(object.id)),

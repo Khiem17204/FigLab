@@ -29,13 +29,9 @@ export function expandSelection(document: FigureDocument, ids: Iterable<string>)
   for (const group of document.groups)
     if (group.objectIds.some((id) => selected.has(id)))
       for (const id of group.objectIds) selected.add(id);
+  // Attached objects follow their targets; zoom links follow when either panel moves.
   for (const object of document.objects)
-    if (
-      object.type === "text" &&
-      object.panelLabel &&
-      selected.has(object.panelLabel.targetObjectId)
-    )
-      selected.add(object.id);
+    if (attachedTargetIds(object).some((target) => selected.has(target))) selected.add(object.id);
   return document.objects
     .filter((object) => selected.has(object.id) && !object.locked)
     .map((object) => object.id);
