@@ -68,6 +68,29 @@ export function resizeFromDraggedCorner<T extends BoxTransform>(
   return proportionallyResizeTransform(transform, widthPt, oppositeCorner(draggedCorner));
 }
 
+/**
+ * Resizes a box from a dragged corner without keeping its aspect ratio; the opposite corner
+ * stays put. `minSizePt` 0 lets a line collapse to horizontal or vertical.
+ */
+export function resizeFreely<T extends BoxTransform>(
+  transform: T,
+  draggedCorner: ResizeAnchor,
+  deltaPt: Point,
+  minSizePt = 1,
+): T {
+  const left = draggedCorner.endsWith("left");
+  const top = draggedCorner.startsWith("top");
+  const widthPt = Math.max(minSizePt, transform.widthPt + (left ? -deltaPt.x : deltaPt.x));
+  const heightPt = Math.max(minSizePt, transform.heightPt + (top ? -deltaPt.y : deltaPt.y));
+  return {
+    ...transform,
+    xPt: left ? transform.xPt + transform.widthPt - widthPt : transform.xPt,
+    yPt: top ? transform.yPt + transform.heightPt - heightPt : transform.yPt,
+    widthPt,
+    heightPt,
+  };
+}
+
 function oppositeCorner(corner: ResizeAnchor): ResizeAnchor {
   const vertical = corner.startsWith("top") ? "bottom" : "top";
   const horizontal = corner.endsWith("left") ? "right" : "left";

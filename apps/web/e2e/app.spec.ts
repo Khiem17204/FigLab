@@ -119,6 +119,7 @@ test("uploads and verifies an original, then creates a crop with accessible hand
   });
   let exportMetadata: unknown;
   await page.route(`**/v1/projects/${project.id}/exports`, async (route) => {
+    if (route.request().method() !== "POST") return route.fulfill({ json: { exports: [] } });
     exportMetadata = route.request().postDataJSON();
     await route.fulfill({ status: 204 });
   });
@@ -179,6 +180,7 @@ test("uploads and verifies an original, then creates a crop with accessible hand
   const move = moves.last();
   const selection = move.locator("..");
   const originalLeft = await selection.evaluate((element) => (element as HTMLElement).style.left);
+  await move.scrollIntoViewIfNeeded();
   const moveBox = await move.boundingBox();
   if (!moveBox) throw new Error("move handle has no box");
   await page.mouse.move(moveBox.x + moveBox.width / 2, moveBox.y + moveBox.height / 2);
@@ -200,6 +202,7 @@ test("uploads and verifies an original, then creates a crop with accessible hand
 
   const resize = page.getByRole("button", { name: /Resize view-.* from bottom right/ }).last();
   const originalWidth = await selection.evaluate((element) => (element as HTMLElement).style.width);
+  await resize.scrollIntoViewIfNeeded();
   const resizeBox = await resize.boundingBox();
   if (!resizeBox) throw new Error("resize handle has no box");
   await page.mouse.move(resizeBox.x + resizeBox.width / 2, resizeBox.y + resizeBox.height / 2);
@@ -286,6 +289,7 @@ test("exports the exact saved revision at the current artboard dimensions", asyn
   });
   let exportMetadata: unknown;
   await page.route(`**/v1/projects/${project.id}/exports`, async (route) => {
+    if (route.request().method() !== "POST") return route.fulfill({ json: { exports: [] } });
     exportMetadata = route.request().postDataJSON();
     await route.fulfill({ status: 204 });
   });
@@ -295,7 +299,257 @@ test("exports the exact saved revision at the current artboard dimensions", asyn
   const download = page.waitForEvent("download");
   await page.getByRole("button", { name: "Export PNG" }).click();
 
-  expect((await download).suggestedFilename()).toBe("figlab-400x200.png");
-  expect(savedBody).toMatchObject({ baseRevision: 3, document: landscape.document });
-  expect(exportMetadata).toMatchObject({ format: "png", revision: 4, widthPx: 400, heightPx: 200 });
+  // 400 × 200 pt at the default 300 dpi.
+  expect((await download).suggestedFilename()).toBe("cell-atlas-figure-1-300dpi.png");
+  expect(savedBody).toMatchObject({
+    baseRevision: 3,
+    document: { ...landscape.document, schemaVersion: 2 },
+  });
+  expect(exportMetadata).toMatchObject({
+    format: "png",
+    artboardId: "board-1",
+    dpi: 300,
+    revision: 4,
+    widthPx: 1667,
+    heightPx: 833,
+  });
+});
+
+const twoPanels = {
+  ...documentResponse,
+  document: {
+    ...documentResponse.document,
+    schemaVersion: 2,
+    objects: [
+      ["view-a", 60, 120],
+      ["view-b", 320, 150],
+    ].map(([id, xPt, yPt]) => ({
+      id,
+      type: "image-view",
+      artboardId: "board-1",
+      transform: { xPt, yPt, widthPt: 200, heightPt: 150, rotationDeg: 0 },
+      zIndex: id === "view-a" ? 0 : 1,
+      locked: false,
+      hidden: false,
+      view: {
+        sourceAssetId: "asset-1",
+        viewport: { x: 0, y: 0, width: 1, height: 1 },
+        display: { brightness: 0, contrast: 1, gamma: 1, invert: false },
+      },
+    })),
+  },
+};
+
+type SavedDocument = {
+  artboards: { id: string; widthPt: number }[];
+  objects: {
+    id: string;
+    type: string;
+    transform: { xPt: number; yPt: number };
+    text?: { content: string };
+    panelLabel?: { targetObjectId: string };
+    line?: { heads: string };
+  }[];
+};
+
+async function openWithSaves(page: import("@playwright/test").Page) {
+  const saves: SavedDocument[] = [];
+  let revision = 3;
+  await page.route(new RegExp(`/v1/projects/${project.id}/document$`), async (route) => {
+    if (route.request().method() === "GET") return route.fulfill({ json: twoPanels });
+    const body = route.request().postDataJSON() as { document: SavedDocument };
+    saves.push(body.document);
+    revision += 1;
+    return route.fulfill({ json: { ...twoPanels, revision, document: body.document } });
+  });
+  await page.route("**/v1/assets/asset-1", (route) =>
+    route.fulfill({ status: 404, json: { code: "NOT_FOUND", message: "Resource not found" } }),
+  );
+  await page.goto("/");
+  await page.getByRole("button", { name: "Open Cell Atlas" }).click();
+  await expect(page.getByRole("button", { name: "Move view-a" })).toBeAttached();
+  return { saves, latest: () => saves.at(-1) };
+}
+
+/** A point at fractions of the figure canvas, scrolled to the middle of the viewport. */
+async function canvasPoint(page: import("@playwright/test").Page, fx: number, fy: number) {
+  const canvas = page.locator(".figure-canvas");
+  const before = await canvas.boundingBox();
+  if (!before) throw new Error("figure canvas has no box");
+  await page.evaluate(
+    (y) => window.scrollBy(0, y - window.innerHeight / 2),
+    before.y + before.height * fy,
+  );
+  const box = await canvas.boundingBox();
+  if (!box) throw new Error("figure canvas has no box");
+  return { x: box.x + box.width * fx, y: box.y + box.height * fy };
+}
+
+test("draws text and arrows, with symbol shortcuts, and labels panels in reading order", async ({
+  page,
+}) => {
+  const { latest } = await openWithSaves(page);
+
+  await page.getByRole("button", { name: "Text", exact: true }).click();
+  const textAt = await canvasPoint(page, 0.5, 0.15);
+  await page.mouse.click(textAt.x, textAt.y);
+  const content = page.getByLabel("Text content");
+  await content.fill("TNF\\alpha 10 \\muM");
+  await content.blur();
+  await expect
+    .poll(() => latest()?.objects.find((object) => object.type === "text")?.text?.content)
+    .toBe("TNFα 10 μM");
+
+  await page.getByRole("button", { name: "Arrow" }).click();
+  const from = await canvasPoint(page, 0.7, 0.8);
+  await page.mouse.move(from.x, from.y);
+  await page.mouse.down();
+  await page.mouse.move(from.x - 80, from.y - 20);
+  await page.mouse.up();
+  await expect
+    .poll(() => latest()?.objects.find((object) => object.type === "line")?.line?.heads)
+    .toBe("start");
+
+  await page.keyboard.press("Escape");
+  await page.getByRole("button", { name: "Label panels" }).click();
+  await expect
+    .poll(() =>
+      latest()
+        ?.objects.filter((object) => object.panelLabel)
+        .map((object) => [object.panelLabel?.targetObjectId, object.text?.content]),
+    )
+    .toEqual([
+      ["view-a", "A"],
+      ["view-b", "B"],
+    ]);
+});
+
+test("multi-selects, aligns, and adds a journal-sized figure", async ({ page }) => {
+  const { latest } = await openWithSaves(page);
+  const layers = page.getByRole("group", { name: /Layers/ });
+  await layers.getByRole("button", { name: "Image panel" }).first().click();
+  await layers
+    .getByRole("button", { name: "Image panel" })
+    .last()
+    .click({ modifiers: ["Shift"] });
+  await page.getByRole("button", { name: "Align top" }).click();
+  await expect
+    .poll(() => latest()?.objects.map((object) => object.transform.yPt))
+    .toEqual([120, 120]);
+  await page.keyboard.press("Control+z");
+  await expect
+    .poll(() => latest()?.objects.map((object) => object.transform.yPt))
+    .toEqual([120, 150]);
+
+  await page.getByRole("button", { name: "Add figure" }).click();
+  await expect(page.getByRole("button", { name: "Figure 2" })).toHaveAttribute(
+    "aria-pressed",
+    "true",
+  );
+  await page.getByLabel("Figure size").selectOption("nature-single");
+  await expect
+    .poll(() => latest()?.artboards.map((artboard) => Math.round(artboard.widthPt * 100) / 100))
+    .toEqual([612, 252.28]);
+  await expect(page.getByRole("button", { name: /Move view-/ })).toHaveCount(0);
+});
+
+test("exports every figure as TIFF in one zip and records each figure", async ({ page }) => {
+  const records: { format: string; artboardId: string; dpi: number }[] = [];
+  await page.route(`**/v1/projects/${project.id}/exports`, async (route) => {
+    if (route.request().method() !== "POST") return route.fulfill({ json: { exports: [] } });
+    records.push(route.request().postDataJSON());
+    await route.fulfill({ status: 204 });
+  });
+  const empty = {
+    ...documentResponse,
+    document: {
+      ...documentResponse.document,
+      schemaVersion: 2,
+      artboards: [
+        { id: "board-1", name: "Figure 1", widthPt: 144, heightPt: 72, backgroundHex: "#FFFFFF" },
+        { id: "board-2", name: "Blots", widthPt: 72, heightPt: 72, backgroundHex: "#FFFFFF" },
+      ],
+    },
+  };
+  await page.route(new RegExp(`/v1/projects/${project.id}/document$`), async (route) =>
+    route.fulfill({ json: route.request().method() === "GET" ? empty : { ...empty, revision: 4 } }),
+  );
+  await page.goto("/");
+  await page.getByRole("button", { name: "Open Cell Atlas" }).click();
+  await page.getByLabel("Format").selectOption("tiff");
+  await page.getByLabel("Resolution").selectOption("150");
+  await page.getByLabel(/All figures/).check();
+  const download = page.waitForEvent("download");
+  await page.getByRole("button", { name: "Export TIFF" }).click();
+  expect((await download).suggestedFilename()).toBe("cell-atlas-figures-150dpi-tiff.zip");
+  expect(records).toEqual([
+    expect.objectContaining({
+      format: "tiff",
+      artboardId: "board-1",
+      dpi: 150,
+      widthPx: 300,
+      heightPx: 150,
+    }),
+    expect.objectContaining({
+      format: "tiff",
+      artboardId: "board-2",
+      dpi: 150,
+      widthPx: 150,
+      heightPx: 150,
+    }),
+  ]);
+});
+
+test("shows the audit trail with actors and restores an earlier version", async ({ page }) => {
+  await page.route(`**/v1/projects/${project.id}/audit-events*`, (route) =>
+    route.fulfill({
+      json: {
+        events: [
+          {
+            id: "e2",
+            action: "DISPLAY_CHANGED",
+            details: { objectId: "view-a", before: { gamma: 1 }, after: { gamma: 1.4 } },
+            actor: { id: "u1", email: "pi@lab.example" },
+            sequence: 2,
+            createdAt: "2026-10-06T10:00:00.000Z",
+          },
+          {
+            id: "e1",
+            action: "CROP_CREATED",
+            details: { objectId: "view-a" },
+            sequence: 1,
+            createdAt: "2026-10-06T09:00:00.000Z",
+          },
+        ],
+      },
+    }),
+  );
+  await page.route(new RegExp(`/v1/projects/${project.id}/versions(\\?.*)?$`), (route) =>
+    route.fulfill({
+      json: {
+        versions: [
+          { revision: 3, schemaVersion: 2, createdAt: "2026-10-06T10:00:00.000Z" },
+          { revision: 2, schemaVersion: 1, createdAt: "2026-10-06T09:00:00.000Z" },
+        ],
+      },
+    }),
+  );
+  await page.route(`**/v1/projects/${project.id}/versions/2`, (route) =>
+    route.fulfill({
+      json: {
+        projectId: project.id,
+        revision: 2,
+        schemaVersion: 1,
+        createdAt: "2026-10-06T09:00:00.000Z",
+        document: { ...twoPanels.document, objects: twoPanels.document.objects.slice(0, 1) },
+      },
+    }),
+  );
+  const { latest } = await openWithSaves(page);
+  const trail = page.getByRole("list", { name: "Audit trail" });
+  await expect(trail).toContainText("Display adjusted: gamma 1 → 1.4");
+  await expect(trail).toContainText("pi@lab.example");
+  page.once("dialog", (dialog) => void dialog.accept());
+  await page.getByRole("button", { name: "Restore revision 2" }).click();
+  await expect.poll(() => latest()?.objects.map((object) => object.id)).toEqual(["view-a"]);
 });

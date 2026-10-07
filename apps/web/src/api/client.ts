@@ -1,13 +1,17 @@
 import {
   type AssetDescriptor,
   type AssetStatus,
+  type AuditEventPage,
   apiRoutes,
   type CurrentUserResponse,
+  type ExportRecord,
   type PrepareUploadResponse,
   type Project,
   type ProjectDocumentResponse,
   type RecordExportRequest,
   type SaveDocumentResponse,
+  type VersionResponse,
+  type VersionSummary,
 } from "@figlab/api-contract";
 import type { FigureDocument } from "@figlab/figure-schema";
 
@@ -151,6 +155,30 @@ export class FigLabClient {
     return asset;
   }
 
+  listAuditEvents(
+    projectId: string,
+    page: { limit?: number; beforeSequence?: number } = {},
+  ): Promise<AuditEventPage> {
+    return this.json(withQuery(path(apiRoutes.projectAuditEvents, { projectId }), page));
+  }
+
+  async listVersions(
+    projectId: string,
+    page: { limit?: number; beforeRevision?: number } = {},
+  ): Promise<VersionSummary[]> {
+    const url = withQuery(path(apiRoutes.projectVersions, { projectId }), page);
+    return (await this.json<{ versions: VersionSummary[] }>(url)).versions;
+  }
+
+  getVersion(projectId: string, revision: number): Promise<VersionResponse> {
+    return this.json(path(apiRoutes.projectVersion, { projectId, revision: String(revision) }));
+  }
+
+  async listExports(projectId: string): Promise<ExportRecord[]> {
+    const url = path(apiRoutes.projectExports, { projectId });
+    return (await this.json<{ exports: ExportRecord[] }>(url)).exports;
+  }
+
   recordExport(projectId: string, metadata: RecordExportRequest): Promise<void> {
     return this.json(path(apiRoutes.projectExports, { projectId }), {
       method: "POST",
@@ -184,6 +212,15 @@ export class FigLabClient {
       }
     }
   }
+}
+
+function withQuery(url: string, query: Record<string, number | undefined>): string {
+  const entries = Object.entries(query).filter(
+    (entry): entry is [string, number] => entry[1] !== undefined,
+  );
+  return entries.length === 0
+    ? url
+    : `${url}?${new URLSearchParams(entries.map(([key, value]) => [key, String(value)]))}`;
 }
 
 async function readBody(response: Response): Promise<unknown> {

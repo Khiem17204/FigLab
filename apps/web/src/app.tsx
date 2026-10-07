@@ -1,32 +1,29 @@
 import type { AssetDescriptor, Project, ProjectDocumentResponse } from "@figlab/api-contract";
-import type { ObjectTransform } from "@figlab/editor-core";
-import { type ResizeAnchor, selectImageProvenance } from "@figlab/editor-core";
-import {
-  type FigureDocument,
-  type ImageViewObjectV1,
-  isImageView,
-  type NormalizedRect,
-} from "@figlab/figure-schema";
+import { selectImageProvenance } from "@figlab/editor-core";
+import { type ImageViewObjectV1, isImageView, type NormalizedRect } from "@figlab/figure-schema";
 import { Button, Panel } from "@figlab/ui";
 import { QueryClient, QueryClientProvider, useMutation, useQuery } from "@tanstack/react-query";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useStore } from "zustand";
 
 import { FigLabClient } from "./api/client";
-import { createArtboardPngExporter, downloadBlob, exportPng } from "./api/export";
+import { downloadBlob } from "./api/export";
 import type { SignedInAccount } from "./auth/auth-gate";
 import { AutosaveController, type SaveStatus } from "./editor/autosave";
 import { bindAutosave } from "./editor/autosave-binding";
-import {
-  type ArtboardScreenTransform,
-  artboardScreenTransform,
-  imageContainRect,
-  normalizedPointInImage,
-  type ScreenRect,
-} from "./editor/geometry";
+import { imageContainRect, normalizedPointInImage, type ScreenRect } from "./editor/geometry";
 import { BrowserRasterRepository, type SupportedRasterMime } from "./editor/raster-sources";
 import { createEditorSession, type Point } from "./editor/session-store";
-import { PixiArtboard } from "./pixi-artboard";
+import { ArrangePanel } from "./figure-tools/arrange-panel";
+import { exportFigures } from "./figure-tools/export-figure";
+import { ExportPanel } from "./figure-tools/export-panel";
+import { FigureCanvas } from "./figure-tools/figure-canvas";
+import { FiguresBar } from "./figure-tools/figures-bar";
+import { FALLBACK_TEXT_METRICS, loadFigureFonts, useFigureFonts } from "./figure-tools/fonts";
+import { HistoryPanel } from "./figure-tools/history-panel";
+import { handleFigureShortcut } from "./figure-tools/keyboard";
+import { ObjectInspector } from "./figure-tools/object-inspector";
+import { rasterizeVectorItems } from "./figure-tools/rasterize";
 import "./styles.css";
 
 const defaultClient = new FigLabClient();
@@ -264,7 +261,10 @@ export function FigLabEditor({
       ) {
         event.preventDefault();
         session.getState().deleteSelectedObject();
+        return;
       }
+      if (!isTextEntryTarget(event.target) && handleFigureShortcut(event, session))
+        event.preventDefault();
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
@@ -303,6 +303,8 @@ export function FigLabEditor({
     .filter(isImageView)
     .find((object) => object.id === state.selectedObjectId);
   const selectedAsset = assets.find((asset) => asset.id === selectedAssetId);
+  const fonts = useFigureFonts();
+  const metrics = fonts?.metrics ?? FALLBACK_TEXT_METRICS;
   const selectedPreviewUrl = selectedAssetId
     ? rasterSources.getPreviewUrl(selectedAssetId)
     : undefined;
@@ -406,6 +408,7 @@ export function FigLabEditor({
               Original · {asset.filename}
             </button>
           ))}
+          <ArrangePanel metrics={metrics} session={session} />
         </aside>
         <section aria-label="Figure editor" className="workspace">
           <OriginalInspector
@@ -417,26 +420,22 @@ export function FigLabEditor({
               session
                 .getState()
                 .previewCrop({ x: viewport.x + viewport.width, y: viewport.y + viewport.height });
-              session.getState().commitCrop(selectedAssetId, `view-${crypto.randomUUID()}`);
+              session
+                .getState()
+                .commitCrop(
+                  selectedAssetId,
+                  `view-${crypto.randomUUID()}`,
+                  selectedAsset
+                    ? { widthPx: selectedAsset.widthPx, heightPx: selectedAsset.heightPx }
+                    : undefined,
+                );
             }}
             {...(selectedPreviewUrl ? { previewUrl: selectedPreviewUrl } : {})}
           />
-          <ArtboardEditor
-            document={state.document}
-            {...(state.objectGesture ? { gesture: state.objectGesture } : {})}
-            onCommit={() => session.getState().commitObjectTransform()}
-            onMove={(id, delta) => {
-              if (state.objectGesture?.objectId !== id) session.getState().beginObjectGesture(id);
-              session.getState().previewObjectDelta(delta);
-            }}
-            onResize={(id, delta, anchor) => {
-              if (state.objectGesture?.objectId !== id) session.getState().beginObjectGesture(id);
-              session.getState().previewObjectResize(delta, anchor);
-            }}
-            onSelect={(id) => session.getState().selectObject(id)}
-            rasterSources={rasterSources}
-            {...(state.selectedObjectId ? { selectedId: state.selectedObjectId } : {})}
-          />
+          <div className="figure-stage">
+            <FiguresBar session={session} />
+            <FigureCanvas metrics={metrics} rasterSources={rasterSources} session={session} />
+          </div>
         </section>
         <aside aria-label="Display inspector" className="display-inspector">
           <h2>Display inspector</h2>
@@ -453,9 +452,11 @@ export function FigLabEditor({
           ) : (
             <p className="empty-state">Select or crop an image to adjust its display transform.</p>
           )}
-          <ExportControls
-            artboard={state.document.artboards[0]}
-            onExport={async (widthPx, heightPx) => {
+          <ObjectInspector metrics={metrics} session={session} />
+          <ExportPanel
+            activeArtboardId={state.activeArtboardId}
+            document={state.document}
+            onExport={async (choice) => {
               setExportStatus("Saving the exact revision for export…");
               try {
                 const saved = await autosave.saveNow();
@@ -465,21 +466,28 @@ export function FigLabEditor({
                   );
                   return;
                 }
-                const artboardId = saved.document.artboards[0]?.id;
-                if (!artboardId) return;
-                setExportStatus("Preparing original-source PNG…");
-                await exportPng({
-                  document: saved.document,
-                  revision: saved.revision,
-                  widthPx,
-                  heightPx,
-                  sourceExporter: createArtboardPngExporter(artboardId, rasterSources),
-                  record: (metadata) => client.recordExport(project.id, metadata),
-                  download: downloadBlob,
-                });
-                setExportStatus("PNG downloaded and provenance recorded.");
+                setExportStatus(`Preparing ${choice.format.toUpperCase()} from original pixels…`);
+                const result = await exportFigures(
+                  {
+                    ...choice,
+                    document: saved.document,
+                    revision: saved.revision,
+                    activeArtboardId: state.activeArtboardId,
+                    projectName: project.name,
+                  },
+                  {
+                    resolver: rasterSources,
+                    fonts: fonts ?? (await loadFigureFonts()),
+                    rasterize: rasterizeVectorItems,
+                    record: (metadata) => client.recordExport(project.id, metadata),
+                    download: downloadBlob,
+                  },
+                );
+                setExportStatus(
+                  `${result.filename} downloaded and provenance recorded for ${result.figures} figure${result.figures === 1 ? "" : "s"}.`,
+                );
               } catch (error) {
-                setExportStatus(error instanceof Error ? error.message : "PNG export failed.");
+                setExportStatus(error instanceof Error ? error.message : "Export failed.");
               }
             }}
             status={exportStatus}
@@ -504,6 +512,12 @@ export function FigLabEditor({
           ) : (
             <p>Source crop details appear here.</p>
           )}
+          <HistoryPanel
+            client={client}
+            onRestore={(document) => session.getState().apply(() => document, { selectedIds: [] })}
+            projectId={project.id}
+            revision={revision}
+          />
         </aside>
       </div>
     </main>
@@ -602,178 +616,6 @@ function OriginalInspector({
   );
 }
 
-function ArtboardEditor({
-  document,
-  gesture,
-  selectedId,
-  rasterSources,
-  onSelect,
-  onMove,
-  onResize,
-  onCommit,
-}: {
-  document: FigureDocument;
-  gesture?: { objectId: string; transform: ObjectTransform };
-  selectedId?: string;
-  rasterSources: BrowserRasterRepository;
-  onSelect: (id: string) => void;
-  onMove: (id: string, delta: Point) => void;
-  onResize: (id: string, delta: Point, anchor: ResizeAnchor) => void;
-  onCommit: () => void;
-}) {
-  const host = useRef<HTMLDivElement>(null);
-  const board = document.artboards[0];
-  const [screenTransform, setScreenTransform] = useState<ArtboardScreenTransform>();
-  useEffect(() => {
-    const target = host.current;
-    if (!target || !board) return;
-    const update = () =>
-      setScreenTransform(
-        artboardScreenTransform(
-          target.clientWidth,
-          target.clientHeight,
-          board.widthPt,
-          board.heightPt,
-        ),
-      );
-    update();
-    const observer = new ResizeObserver(update);
-    observer.observe(target);
-    return () => observer.disconnect();
-  }, [board]);
-  const starts = useRef(
-    new Map<number, { x: number; y: number; id: string; resize?: ResizeAnchor }>(),
-  );
-  return (
-    <div className="artboard-wrap" ref={host}>
-      <PixiArtboard
-        document={document}
-        {...(gesture ? { preview: gesture } : {})}
-        rasterSources={rasterSources}
-        {...(screenTransform ? { screenTransform } : {})}
-      />
-      <div className="selection-layer">
-        {document.objects.map((object) => {
-          const transform =
-            object.id === selectedId && gesture ? gesture.transform : object.transform;
-          const begin = (event: React.PointerEvent, resize?: ResizeAnchor) => {
-            event.currentTarget.setPointerCapture(event.pointerId);
-            starts.current.set(event.pointerId, {
-              x: event.clientX,
-              y: event.clientY,
-              id: object.id,
-              ...(resize ? { resize } : {}),
-            });
-            onSelect(object.id);
-          };
-          const move = (event: React.PointerEvent) => {
-            const start = starts.current.get(event.pointerId);
-            if (!start) return;
-            const screenDelta = { x: event.clientX - start.x, y: event.clientY - start.y };
-            const delta = screenTransform?.screenDeltaToPoints(screenDelta) ?? screenDelta;
-            if (start.resize) onResize(start.id, delta, start.resize);
-            else onMove(start.id, delta);
-          };
-          const end = (event: React.PointerEvent) => {
-            if (!starts.current.delete(event.pointerId)) return;
-            onCommit();
-          };
-          return (
-            <div
-              className={`artboard-selection ${object.id === selectedId ? "selected" : ""}`}
-              key={object.id}
-              style={transformStyle(transform, screenTransform)}
-            >
-              <button
-                aria-label={`Move ${object.id}`}
-                className="move-handle"
-                onPointerDown={begin}
-                onPointerMove={move}
-                onPointerUp={end}
-                type="button"
-              />
-              {(["top-left", "top-right", "bottom-left", "bottom-right"] as const).map((anchor) => (
-                <button
-                  aria-label={`Resize ${object.id} from ${anchor.replace("-", " ")}`}
-                  className={`resize-handle ${anchor}`}
-                  key={anchor}
-                  onPointerDown={(event) => begin(event, anchor)}
-                  onPointerMove={move}
-                  onPointerUp={end}
-                  type="button"
-                />
-              ))}
-            </div>
-          );
-        })}
-      </div>
-    </div>
-  );
-}
-
-function ExportControls({
-  artboard,
-  onExport,
-  status,
-}: {
-  artboard: FigureDocument["artboards"][number] | undefined;
-  onExport: (width: number, height: number) => Promise<void>;
-  status: string;
-}) {
-  const [scale, setScale] = useState<"1" | "2" | "custom">("1");
-  const [custom, setCustom] = useState("1200");
-  const width =
-    scale === "custom" ? Number(custom) : Math.round((artboard?.widthPt ?? 0) * Number(scale));
-  const height = Math.round(width * ((artboard?.heightPt ?? 0) / (artboard?.widthPt ?? 1)));
-  return (
-    <section aria-labelledby="png-export" className="export-controls">
-      <h3 id="png-export">PNG export</h3>
-      <label>
-        <input
-          checked={scale === "1"}
-          name="png-scale"
-          onChange={() => setScale("1")}
-          type="radio"
-        />
-        1×
-      </label>
-      <label>
-        <input
-          checked={scale === "2"}
-          name="png-scale"
-          onChange={() => setScale("2")}
-          type="radio"
-        />
-        2×
-      </label>
-      <label>
-        <input
-          checked={scale === "custom"}
-          name="png-scale"
-          onChange={() => setScale("custom")}
-          type="radio"
-        />
-        Custom width
-      </label>
-      <input
-        aria-label="Custom width"
-        disabled={scale !== "custom"}
-        min="1"
-        onChange={(event) => setCustom(event.target.value)}
-        type="number"
-        value={custom}
-      />
-      <Button
-        disabled={!artboard || !Number.isFinite(width) || width < 1 || height < 1}
-        onClick={() => void onExport(width, height)}
-      >
-        Export PNG
-      </Button>
-      {status && <p role="status">{status}</p>}
-    </section>
-  );
-}
-
 function TransformControls({
   object,
   onChange,
@@ -840,16 +682,6 @@ function viewportStyle(viewport: NormalizedRect, imageRect?: ScreenRect) {
     height: viewport.height * imageRect.height,
   };
 }
-function transformStyle(transform: ObjectTransform, screen?: ArtboardScreenTransform) {
-  if (!screen) return { display: "none" };
-  return {
-    left: screen.leftPx + transform.xPt * screen.scale,
-    top: screen.topPx + transform.yPt * screen.scale,
-    width: transform.widthPt * screen.scale,
-    height: transform.heightPt * screen.scale,
-  };
-}
-
 function isTextEntryTarget(target: EventTarget | null): boolean {
   if (!(target instanceof HTMLElement)) return false;
   return (

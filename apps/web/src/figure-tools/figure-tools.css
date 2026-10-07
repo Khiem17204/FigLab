@@ -1,0 +1,125 @@
+/* Functional styles for figure tools. Visual design is owned by the UI refresh. */
+.figure-canvas.tool-text,
+.figure-canvas.tool-line,
+.figure-canvas.tool-arrow,
+.figure-canvas.tool-rect,
+.figure-canvas.tool-ellipse,
+.figure-canvas.tool-bracket {
+  cursor: crosshair;
+}
+.figure-overlay {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+}
+.figure-overlay .snap-guide {
+  stroke: #e11d48;
+  stroke-width: 1;
+  stroke-dasharray: 4 3;
+}
+.figure-overlay .marquee,
+.figure-overlay .draft {
+  fill: rgba(15, 76, 189, 0.08);
+  stroke: #0f4cbd;
+  stroke-width: 1;
+  stroke-dasharray: 3 2;
+}
+.artboard-selection.locked .move-handle {
+  cursor: not-allowed;
+}
+.artboard-selection.object-line {
+  min-height: 6px;
+  min-width: 6px;
+}
+.figure-tools-panel {
+  display: grid;
+  gap: 8px;
+}
+/* Auto-sized grid columns grow to their widest content; pin them to the container instead. */
+.source-library:has(> .figure-tools-panel),
+.figure-tools-panel {
+  grid-template-columns: minmax(0, 1fr);
+}
+.figure-tools-panel {
+  min-width: 0;
+  max-width: 100%;
+  overflow-wrap: anywhere;
+}
+.figure-tools-panel select,
+.figure-tools-panel input,
+.figure-tools-panel textarea {
+  max-width: 100%;
+  min-width: 0;
+}
+.layer-list button {
+  min-width: 0;
+  white-space: normal;
+  text-align: left;
+  overflow-wrap: anywhere;
+}
+.figure-tools-panel fieldset {
+  /* Fieldsets default to min-content width, which stops their controls from wrapping. */
+  min-width: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  border: 1px solid #d9dee8;
+  padding: 6px;
+  margin: 0;
+}
+.figure-tools-panel legend {
+  font-size: 12px;
+  padding: 0 4px;
+}
+.figure-tools-panel label {
+  display: grid;
+  gap: 2px;
+  font-size: 12px;
+}
+.figure-tools-panel .inline {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.figures-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+.figures-bar [aria-pressed="true"] {
+  outline: 2px solid #0f4cbd;
+}
+.layer-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 2px;
+  max-height: 180px;
+  overflow: auto;
+}
+.layer-list li {
+  display: flex;
+  gap: 4px;
+  align-items: center;
+  font-size: 12px;
+}
+.history-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 4px;
+  max-height: 260px;
+  overflow: auto;
+  font-size: 12px;
+}
+.figure-stage {
+  display: grid;
+  grid-template-rows: auto minmax(420px, 1fr);
+  gap: 8px;
+  min-height: 420px;
+}
