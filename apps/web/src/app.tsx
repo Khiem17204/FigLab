@@ -221,6 +221,7 @@ export function FigLabEditor({
     "Choose a PNG, JPEG, or TIFF original to upload.",
   );
   const [exportStatus, setExportStatus] = useState("");
+  const [exportCount, setExportCount] = useState(0);
   const [saveStatus, setSaveStatus] = useState<SaveStatus>("saved");
   const [rasterSources] = useState(() => new BrowserRasterRepository());
   const saveState = useRef({ document: initial.document, revision: initial.revision });
@@ -483,6 +484,7 @@ export function FigLabEditor({
                     download: downloadBlob,
                   },
                 );
+                setExportCount((count) => count + 1);
                 setExportStatus(
                   `${result.filename} downloaded and provenance recorded for ${result.figures} figure${result.figures === 1 ? "" : "s"}.`,
                 );
@@ -516,6 +518,7 @@ export function FigLabEditor({
             client={client}
             onRestore={(document) => session.getState().apply(() => document, { selectedIds: [] })}
             projectId={project.id}
+            refreshKey={exportCount}
             revision={revision}
           />
         </aside>

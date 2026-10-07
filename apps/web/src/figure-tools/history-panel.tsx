@@ -54,11 +54,14 @@ export function HistoryPanel({
   client,
   projectId,
   revision,
+  refreshKey,
   onRestore,
 }: {
   client: FigLabClient;
   projectId: string;
   revision: number;
+  /** Changing this (for example after an export) reloads the history. */
+  refreshKey?: unknown;
   onRestore: (document: FigureDocument, revision: number) => void;
 }) {
   const [events, setEvents] = useState<AuditEventDto[]>([]);
@@ -88,11 +91,12 @@ export function HistoryPanel({
     );
   }, [client, projectId]);
 
-  // Reload whenever a new revision is saved.
+  // Reload whenever a new revision is saved or the caller signals new history (an export).
   useEffect(() => {
     void revision;
+    void refreshKey;
     void refresh();
-  }, [refresh, revision]);
+  }, [refresh, revision, refreshKey]);
 
   return (
     <section aria-label="History" className="figure-tools-panel">
