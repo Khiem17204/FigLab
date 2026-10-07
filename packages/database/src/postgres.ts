@@ -11,6 +11,7 @@ import type {
   DocumentRecord,
   ExportRecord,
   FigLabRepository,
+  IntegrityReportRecord,
   Principal,
   ProjectRecord,
   UploadRecord,
@@ -489,6 +490,68 @@ export class PostgresFigLabRepository implements FigLabRepository {
     const result = await this.pool.query("SELECT * FROM assets WHERE project_id=$1", [projectId]);
     return result.rows.map(assetRow);
   }
+  async getDocumentAtRevision(projectId: string, revision: number): Promise<DocumentRecord> {
+    const current = await this.getDocument(projectId);
+    if (current.revision === revision) return current;
+    const version = await this.getVersion(projectId, revision);
+    return {
+      projectId,
+      revision: version.revision,
+      schemaVersion: version.schemaVersion,
+      document: version.document,
+      updatedAt: version.createdAt,
+    };
+  }
+  async requestIntegrityReport(
+    projectId: string,
+    revision: number,
+    options: ActorOptions = {},
+  ): Promise<IntegrityReportRecord> {
+    assertResourceId(projectId);
+    await this.getDocumentAtRevision(projectId, revision);
+    return this.transaction(async (client) => {
+      const id = randomUUID();
+      const result = await client.query(
+        "INSERT INTO integrity_reports(id,project_id,revision,status,requested_by,created_at) VALUES($1,$2,$3,'pending',$4,now()) RETURNING *",
+        [id, projectId, revision, options.actorUserId ?? null],
+      );
+      await this.insertAudit(
+        client,
+        projectId,
+        "INTEGRITY_REPORT_REQUESTED",
+        { reportId: id, revision },
+        options.actorUserId,
+      );
+      await addJob(client, "integrity_report", { reportId: id }, `integrity_report:${id}`);
+      return integrityRow(first(result.rows));
+    });
+  }
+  async getIntegrityReport(id: string): Promise<IntegrityReportRecord> {
+    assertResourceId(id);
+    const result = await this.pool.query("SELECT * FROM integrity_reports WHERE id=$1", [id]);
+    return integrityRow(first(result.rows));
+  }
+  async listIntegrityReports(projectId: string, limit: number): Promise<IntegrityReportRecord[]> {
+    assertResourceId(projectId);
+    const result = await this.pool.query(
+      "SELECT * FROM integrity_reports WHERE project_id=$1 ORDER BY created_at DESC, id LIMIT $2",
+      [projectId, limit],
+    );
+    return result.rows.map(integrityRow);
+  }
+  async completeIntegrityReport(
+    id: string,
+    outcome: { report: unknown } | { error: string },
+  ): Promise<IntegrityReportRecord> {
+    assertResourceId(id);
+    const result = await this.pool.query(
+      "UPDATE integrity_reports SET status=$2,report=$3,error=$4,completed_at=now() WHERE id=$1 RETURNING *",
+      "report" in outcome
+        ? [id, "ready", JSON.stringify(outcome.report), null]
+        : [id, "failed", null, outcome.error],
+    );
+    return integrityRow(first(result.rows));
+  }
   async deleteProjectData(projectId: string): Promise<void> {
     assertResourceId(projectId);
     await this.transaction(async (client) => {
@@ -659,6 +722,19 @@ function exportRow(row: QueryResultRow): ExportRecord {
     heightPx: Number(row.height_px),
     checksumSha256: row.checksum_sha256,
     createdAt: date(row.created_at),
+  };
+}
+function integrityRow(row: QueryResultRow): IntegrityReportRecord {
+  return {
+    id: row.id,
+    projectId: row.project_id,
+    revision: Number(row.revision),
+    status: row.status,
+    ...(row.report === null || row.report === undefined ? {} : { report: row.report }),
+    ...(row.error ? { error: row.error } : {}),
+    ...(row.requested_by ? { requestedBy: row.requested_by } : {}),
+    createdAt: date(row.created_at),
+    ...(row.completed_at ? { completedAt: date(row.completed_at) } : {}),
   };
 }
 const AUDIT_SELECT =

@@ -28,6 +28,7 @@ export type AuditAction =
   | "ASSET_UPLOADED"
   | "EXPORT_CREATED"
   | "PROJECT_DELETION_REQUESTED"
+  | "INTEGRITY_REPORT_REQUESTED"
   | "PROJECT_DELETED";
 
 export type PrincipalRole = "admin" | "member";
@@ -120,6 +121,19 @@ export interface ExportRecord {
   heightPx: number;
   checksumSha256: string;
   createdAt: string;
+}
+export type IntegrityReportStatus = "pending" | "ready" | "failed";
+export interface IntegrityReportRecord {
+  id: string;
+  projectId: string;
+  revision: number;
+  status: IntegrityReportStatus;
+  /** The report JSON once ready (see @figlab/image-processing `IntegrityReport`). */
+  report?: unknown;
+  error?: string;
+  requestedBy?: string;
+  createdAt: string;
+  completedAt?: string;
 }
 /** Optional attribution for audited writes. */
 export type ActorOptions = { actorUserId?: string };
@@ -228,6 +242,21 @@ export interface FigLabRepository {
     page: { limit: number; beforeRevision?: number },
   ): Promise<VersionSummary[]>;
   getVersion(projectId: string, revision: number): Promise<VersionRecord>;
+  /** The document as saved at a revision: the current one, or a stored version. */
+  getDocumentAtRevision(projectId: string, revision: number): Promise<DocumentRecord>;
+  /** Records a pending report for a saved revision and enqueues the job that computes it. */
+  requestIntegrityReport(
+    projectId: string,
+    revision: number,
+    options?: ActorOptions,
+  ): Promise<IntegrityReportRecord>;
+  getIntegrityReport(id: string): Promise<IntegrityReportRecord>;
+  /** Newest first. */
+  listIntegrityReports(projectId: string, limit: number): Promise<IntegrityReportRecord[]>;
+  completeIntegrityReport(
+    id: string,
+    outcome: { report: unknown } | { error: string },
+  ): Promise<IntegrityReportRecord>;
   listProjectAssets(projectId: string): Promise<AssetRecord[]>;
   /**
    * Removes a project's content (documents, versions, uploads, assets) and leaves a tombstone:
@@ -252,6 +281,7 @@ export class InMemoryFigLabRepository implements FigLabRepository {
   private readonly auditEvents: (Omit<AuditEvent, "actor"> & { actorUserId?: string })[] = [];
   private readonly versions: VersionRecord[] = [];
   private readonly exports: ExportRecord[] = [];
+  private readonly integrityReports: IntegrityReportRecord[] = [];
   private nextSequence = 1;
   private readonly queuedJobs: { name: string; payload: Record<string, unknown> }[] = [];
   private principal?: Principal;
@@ -560,6 +590,69 @@ export class InMemoryFigLabRepository implements FigLabRepository {
     return [...this.assets.values()]
       .filter((asset) => asset.projectId === projectId)
       .map((asset) => structuredClone(asset));
+  }
+  async getDocumentAtRevision(projectId: string, revision: number): Promise<DocumentRecord> {
+    const current = await this.getDocument(projectId);
+    if (current.revision === revision) return current;
+    const version = await this.getVersion(projectId, revision);
+    return {
+      projectId,
+      revision: version.revision,
+      schemaVersion: version.schemaVersion,
+      document: version.document,
+      updatedAt: version.createdAt,
+    };
+  }
+  async requestIntegrityReport(
+    projectId: string,
+    revision: number,
+    options: ActorOptions = {},
+  ): Promise<IntegrityReportRecord> {
+    await this.getDocumentAtRevision(projectId, revision);
+    const record: IntegrityReportRecord = {
+      id: randomUUID(),
+      projectId,
+      revision,
+      status: "pending",
+      ...(options.actorUserId ? { requestedBy: options.actorUserId } : {}),
+      createdAt: timestamp(),
+    };
+    this.integrityReports.push(record);
+    this.recordAudit(
+      projectId,
+      "INTEGRITY_REPORT_REQUESTED",
+      { reportId: record.id, revision },
+      options.actorUserId,
+    );
+    this.enqueue("integrity_report", { reportId: record.id });
+    return structuredClone(record);
+  }
+  async getIntegrityReport(id: string): Promise<IntegrityReportRecord> {
+    const record = this.integrityReports.find((candidate) => candidate.id === id);
+    if (!record) throw new NotFoundError();
+    return structuredClone(record);
+  }
+  async listIntegrityReports(projectId: string, limit: number): Promise<IntegrityReportRecord[]> {
+    return this.integrityReports
+      .filter((record) => record.projectId === projectId)
+      .reverse()
+      .slice(0, limit)
+      .map((record) => structuredClone(record));
+  }
+  async completeIntegrityReport(
+    id: string,
+    outcome: { report: unknown } | { error: string },
+  ): Promise<IntegrityReportRecord> {
+    const record = this.integrityReports.find((candidate) => candidate.id === id);
+    if (!record) throw new NotFoundError();
+    Object.assign(
+      record,
+      "report" in outcome
+        ? { status: "ready", report: structuredClone(outcome.report) }
+        : { status: "failed", error: outcome.error },
+      { completedAt: timestamp() },
+    );
+    return structuredClone(record);
   }
   async deleteProjectData(projectId: string): Promise<void> {
     const project = this.projects.get(projectId);

@@ -25,6 +25,8 @@ describe("public API contracts", () => {
       projectAuditEvents: "/v1/projects/:projectId/audit-events",
       projectVersions: "/v1/projects/:projectId/versions",
       projectVersion: "/v1/projects/:projectId/versions/:revision",
+      projectIntegrityReports: "/v1/projects/:projectId/integrity-reports",
+      projectIntegrityReport: "/v1/projects/:projectId/integrity-reports/:reportId",
     });
   });
 

@@ -5,6 +5,7 @@ import { type TiffDescription, verifyTiff } from "@figlab/image-processing";
 import { createObjectStoreFromEnv, type ObjectStore } from "@figlab/storage";
 import { type Runner, run, runMigrations, runOnce, type TaskList } from "graphile-worker";
 import sharp from "sharp";
+import { computeIntegrityReport } from "./integrity.js";
 
 const DEFAULT_MAX_IMAGE_PIXELS = 100_000_000;
 
@@ -88,6 +89,10 @@ export function createTaskList(
     delete_project: async (payload) => {
       const projectId = requiredPayloadId(payload, "projectId");
       await deleteProject(repository, store, projectId);
+    },
+    integrity_report: async (payload) => {
+      const reportId = requiredPayloadId(payload, "reportId");
+      await computeIntegrityReport(repository, store, reportId, streamBytes);
     },
   };
 }

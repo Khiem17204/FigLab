@@ -3,6 +3,7 @@ export * from "./compose.js";
 export * from "./encode.js";
 export * from "./export.js";
 export * from "./fonts.js";
+export * from "./integrity.js";
 export * from "./panel-render.js";
 export * from "./raster.js";
 export * from "./scene.js";

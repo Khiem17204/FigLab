@@ -84,6 +84,9 @@ importers:
       '@figlab/database':
         specifier: workspace:*
         version: link:../../packages/database
+      '@figlab/figure-schema':
+        specifier: workspace:*
+        version: link:../../packages/figure-schema
       '@figlab/image-processing':
         specifier: workspace:*
         version: link:../../packages/image-processing

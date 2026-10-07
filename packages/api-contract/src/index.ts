@@ -24,6 +24,8 @@ export const apiRoutes = {
   projectAuditEvents: "/v1/projects/:projectId/audit-events",
   projectVersions: "/v1/projects/:projectId/versions",
   projectVersion: "/v1/projects/:projectId/versions/:revision",
+  projectIntegrityReports: "/v1/projects/:projectId/integrity-reports",
+  projectIntegrityReport: "/v1/projects/:projectId/integrity-reports/:reportId",
 } as const;
 
 export const MAX_EXPORT_DPI = 2400;
@@ -328,6 +330,38 @@ export const VersionResponseSchema = Type.Object(
   { additionalProperties: false },
 );
 
+export const RequestIntegrityReportSchema = Type.Object(
+  { revision: Type.Optional(Type.Integer({ minimum: 0 })) },
+  { additionalProperties: false },
+);
+
+const integrityReportFields = {
+  id: Type.String({ minLength: 1 }),
+  projectId: Type.String({ minLength: 1 }),
+  revision: Type.Integer({ minimum: 0 }),
+  status: Type.Union([Type.Literal("pending"), Type.Literal("ready"), Type.Literal("failed")]),
+  error: Type.Optional(Type.String()),
+  requestedBy: Type.Optional(Type.String()),
+  createdAt: Type.String({ minLength: 1 }),
+  completedAt: Type.Optional(Type.String()),
+};
+
+/** A report's status without its body, for lists. */
+export const IntegrityReportSummarySchema = Type.Object(integrityReportFields, {
+  additionalProperties: false,
+});
+
+/** A report with its body once ready (the `figlab-integrity-report/1` JSON). */
+export const IntegrityReportRecordSchema = Type.Object(
+  { ...integrityReportFields, report: Type.Optional(Type.Unknown()) },
+  { additionalProperties: false },
+);
+
+export const IntegrityReportListSchema = Type.Object(
+  { reports: Type.Array(IntegrityReportSummarySchema) },
+  { additionalProperties: false },
+);
+
 export type ErrorEnvelope = Static<typeof ErrorEnvelopeSchema>;
 export type RevisionConflict = Static<typeof RevisionConflictSchema>;
 export type Project = Static<typeof ProjectSchema>;
@@ -346,3 +380,5 @@ export type AuditEventDto = Static<typeof AuditEventSchema>;
 export type AuditEventPage = Static<typeof AuditEventPageSchema>;
 export type VersionSummary = Static<typeof VersionSummarySchema>;
 export type VersionResponse = Static<typeof VersionResponseSchema>;
+export type IntegrityReportSummary = Static<typeof IntegrityReportSummarySchema>;
+export type IntegrityReportRecord = Static<typeof IntegrityReportRecordSchema>;

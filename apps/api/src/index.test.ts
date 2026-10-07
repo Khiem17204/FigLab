@@ -592,6 +592,60 @@ describe("buildApp", () => {
     await app.close();
   });
 
+  it("requests integrity reports for saved revisions and hides other projects' reports", async () => {
+    const repository = new InMemoryFigLabRepository();
+    const principal = await repository.bootstrapSingleUser();
+    const project = await repository.createProject(principal.workspaceId, "Integrity");
+    const other = await repository.createProject(principal.workspaceId, "Other");
+    let triggered = 0;
+    const app = await buildApp({
+      repository,
+      store: new FakeObjectStore(),
+      principal,
+      onJobsEnqueued: () => {
+        triggered += 1;
+      },
+    });
+    const requested = await app.inject({
+      method: "POST",
+      url: `/v1/projects/${project.id}/integrity-reports`,
+      payload: {},
+    });
+    expect(requested.statusCode).toBe(202);
+    expect(requested.json()).toMatchObject({
+      revision: 0,
+      status: "pending",
+      requestedBy: principal.id,
+    });
+    expect(triggered).toBe(1);
+    expect(await repository.dequeue()).toMatchObject({ name: "integrity_report" });
+    await repository.completeIntegrityReport(requested.json().id, { report: { panels: [] } });
+    const list = await app.inject({
+      method: "GET",
+      url: `/v1/projects/${project.id}/integrity-reports`,
+    });
+    expect(list.json().reports).toEqual([
+      expect.not.objectContaining({ report: expect.anything() }),
+    ]);
+    const read = await app.inject({
+      method: "GET",
+      url: `/v1/projects/${project.id}/integrity-reports/${requested.json().id}`,
+    });
+    expect(read.json()).toMatchObject({ status: "ready", report: { panels: [] } });
+    const wrongProject = await app.inject({
+      method: "GET",
+      url: `/v1/projects/${other.id}/integrity-reports/${requested.json().id}`,
+    });
+    expect(wrongProject.statusCode).toBe(404);
+    const missingRevision = await app.inject({
+      method: "POST",
+      url: `/v1/projects/${project.id}/integrity-reports`,
+      payload: { revision: 5 },
+    });
+    expect(missingRevision.statusCode).toBe(404);
+    await app.close();
+  });
+
   it("rejects remote single-user startup unless explicitly allowed", async () => {
     expect(() => assertSingleUserConfiguration("https://figlab.example")).toThrow(/loopback/);
     await expect(

@@ -88,7 +88,7 @@ describe("verifyAsset", () => {
 
   it("routes durable Graphile jobs to verification and deletion handlers", () => {
     const tasks = createTaskList(new InMemoryFigLabRepository(), new FakeObjectStore());
-    expect(Object.keys(tasks).sort()).toEqual(["delete_project", "verify_asset"]);
+    expect(Object.keys(tasks).sort()).toEqual(["delete_project", "integrity_report", "verify_asset"]);
   });
 
   it("rejects an undecodable BigTIFF through the shared TIFF decoder", async () => {

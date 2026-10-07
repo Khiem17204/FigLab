@@ -13,12 +13,15 @@ import {
   type ExportFormat,
   ExportListResponseSchema,
   ExportRecordSchema,
+  IntegrityReportListSchema,
+  IntegrityReportRecordSchema,
   MAX_UPLOAD_BYTES,
   PrepareUploadRequestSchema,
   ProjectDocumentResponseSchema,
   ProjectListResponseSchema,
   ProjectSchema,
   RecordExportRequestSchema,
+  RequestIntegrityReportSchema,
   SaveDocumentRequestSchema,
   SaveDocumentResponseSchema,
   UpdateProjectRequestSchema,
@@ -80,6 +83,10 @@ const versionParams = Type.Object({
   revision: Type.Integer({ minimum: 1 }),
 });
 const DEFAULT_PAGE_SIZE = 50;
+const reportParams = Type.Object({
+  projectId: Type.String({ minLength: 1 }),
+  reportId: Type.String({ minLength: 1 }),
+});
 const DEFAULT_SINGLE_USER_EMAIL = "local-admin@figlab.invalid";
 
 declare module "fastify" {
@@ -510,6 +517,51 @@ export async function buildApp(dependencies: AppDependencies): Promise<FastifyIn
       const { projectId, revision } = request.params as { projectId: string; revision: number };
       await projectFor(request.principal, projectId);
       return currentDocument(await dependencies.repository.getVersion(projectId, revision));
+    },
+  );
+  app.post(
+    apiRoutes.projectIntegrityReports,
+    {
+      schema: {
+        params,
+        body: RequestIntegrityReportSchema,
+        response: { 202: IntegrityReportRecordSchema },
+      },
+    },
+    async (request, reply) => {
+      const id = (request.params as { projectId: string }).projectId;
+      await projectFor(request.principal, id);
+      const body = (request.body ?? {}) as { revision?: number };
+      const revision = body.revision ?? (await dependencies.repository.getDocument(id)).revision;
+      const record = await dependencies.repository.requestIntegrityReport(
+        id,
+        revision,
+        actor(request.principal),
+      );
+      jobsEnqueued();
+      return reply.status(202).send(record);
+    },
+  );
+  app.get(
+    apiRoutes.projectIntegrityReports,
+    { schema: { params, response: { 200: IntegrityReportListSchema } } },
+    async (request) => {
+      const id = (request.params as { projectId: string }).projectId;
+      await projectFor(request.principal, id);
+      const records = await dependencies.repository.listIntegrityReports(id, 20);
+      return { reports: records.map(({ report: _body, ...summary }) => summary) };
+    },
+  );
+  app.get(
+    apiRoutes.projectIntegrityReport,
+    { schema: { params: reportParams, response: { 200: IntegrityReportRecordSchema } } },
+    async (request) => {
+      const { projectId, reportId } = request.params as { projectId: string; reportId: string };
+      await projectFor(request.principal, projectId);
+      assertResourceId(reportId);
+      const record = await dependencies.repository.getIntegrityReport(reportId);
+      if (record.projectId !== projectId) throw new NotFoundError();
+      return record;
     },
   );
   return app;

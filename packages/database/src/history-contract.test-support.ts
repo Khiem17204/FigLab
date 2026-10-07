@@ -197,4 +197,35 @@ export function historyContract(setupRepository: Setup): void {
     expect(actions.slice(-2)).toEqual(["PROJECT_DELETION_REQUESTED", "PROJECT_DELETED"]);
     expect(actions.filter((action) => action === "PROJECT_DELETED")).toHaveLength(1);
   });
+
+  it("tracks integrity reports for saved revisions", async () => {
+    const { repository, principal } = await setup();
+    const project = await createProject(repository, principal, "Integrity");
+    await repository.saveDocument(project.id, 0, document([text("A")]));
+    await repository.saveDocument(project.id, 1, document([text("B")]));
+    await expect(repository.requestIntegrityReport(project.id, 9)).rejects.toBeInstanceOf(
+      NotFoundError,
+    );
+    const older = await repository.requestIntegrityReport(project.id, 1, {
+      actorUserId: principal.id,
+    });
+    const current = await repository.requestIntegrityReport(project.id, 2);
+    expect(older).toMatchObject({ revision: 1, status: "pending", requestedBy: principal.id });
+    expect((await repository.getDocumentAtRevision(project.id, 1)).document).toEqual(
+      document([text("A")]),
+    );
+    await repository.completeIntegrityReport(older.id, { report: { panels: [] } });
+    await repository.completeIntegrityReport(current.id, { error: "original missing" });
+    expect(
+      (await repository.listIntegrityReports(project.id, 10)).map(({ id, status }) => [id, status]),
+    ).toEqual([
+      [current.id, "failed"],
+      [older.id, "ready"],
+    ]);
+    expect((await repository.getIntegrityReport(older.id)).report).toEqual({ panels: [] });
+    const audit = (await repository.listAuditEvents(project.id)).filter(
+      (event) => event.action === "INTEGRITY_REPORT_REQUESTED",
+    );
+    expect(audit.map((event) => event.details.revision)).toEqual([1, 2]);
+  });
 }
