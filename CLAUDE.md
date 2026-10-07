@@ -324,25 +324,21 @@ corepack pnpm build && corepack pnpm test:e2e && corepack pnpm test:visual && co
 - Browser e2e tests mock HTTP. `test:compose` exercises the real Compose stack, and
   `tests/live` the real hosted stack.
 
-## Current state (2026-10-06)
+## Current state (2026-10-07)
 
-- `main` is deployed to production. The live suite passes against it (7 tests, including a real
-  sign-up and email verification).
-- Worktrees: `.worktrees/ui-refresh` (`feat/ui-refresh`, visual redesign; owns `apps/web` look
-  and `packages/ui`) and `.worktrees/sciugo-parity` (`feat/sciugo-parity`, feature parity with
-  Sciugo; owns schema, editor-core, API, jobs, export). The UI branch lands first.
-- `feat/sciugo-parity` P0 (see `docs/superpowers/plans/2026-10-06-sciugo-parity-p0.md`): schema
-  v2, figures and journal presets, text/lines/arrows/shapes/brackets, panel lettering, arrange
-  tools, PNG/TIFF/SVG/PDF export with DPI, and audit/version/export history. Migration `0003` is
-  applied to Supabase (2026-10-06); the live suite passes against a draft deploy of this branch.
-- P1 (`docs/superpowers/plans/2026-10-06-sciugo-parity-p1.md`): schema v3; band crops, ladders,
-  calibration and scale bars, lane labels, MW labels, zoom insets; multi-page/tiled/OME/BigTIFF;
-  levels, LUTs, channels, split and merge; integrity reports (browser and job, migration `0004`)
-  and provenance bundles.
-- P2 (`docs/superpowers/plans/2026-10-06-sciugo-parity-p2.md`): densitometry and sample info;
-  labs with invite links and roles, folders, search, templates, comments, admin views
-  (migration `0005`); derived preview pyramid; loading-control and expected-MW checks.
-- Migrations `0004` and `0005` must be applied to Supabase (with the user's approval) before
-  this branch's API runs against it.
+- `main` (`ef22458`) is deployed to production: Sciugo parity P0–P2 (schema v3, figures and
+  drawing/arrange tools, band crops, ladders, calibration, scale bars, quantification,
+  integrity reports, TIFF/SVG/PDF export, labs with folders, search, templates, comments and
+  admin views) in the Bench Notebook redesign (`packages/ui`, see its README). Migrations
+  `0003`–`0005` are applied to Supabase. The previous production deploy was
+  `6ac669ba3414e6035fde50f9`, for rollback.
+- Known issue: under load the live suite stalls at "Upload verifying". Warm API instances
+  (frozen with their connections open, even with the 1 s idle timeout) fill Supabase's
+  15-client session pooler, so `verify_asset` fails with `EMAXCONNSESSION` until the 5-minute
+  sweep retries it. A likely fix is routing API traffic through the transaction pooler (port
+  6543) while jobs keep the session pooler. The last full pass of the live suite predates the
+  parity merge.
+- Deploy from a normal clone, not a worktree: `netlify deploy --filter` cannot find
+  `apps/web/netlify.toml` inside a git worktree, and an unlinked deploy creates a new site.
 - Out of scope: lab-notebook modules (D1), per-project sharing (D3), email invites (D2),
   OAuth/SSO, offline use, and mobile layout.
