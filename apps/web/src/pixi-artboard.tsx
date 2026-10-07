@@ -156,7 +156,9 @@ export function PixiArtboard({
             object,
             documentSourceSizes(document, rasterSources),
           );
-          return Assets.load<Texture>(previewUrl);
+          // Preview URLs are extension-less blob: URLs, so name the texture parser explicitly;
+          // without it Pixi cannot pick a loader and the panel silently renders empty.
+          return Assets.load<Texture>({ src: previewUrl, parser: "texture" });
         },
         loadVectorTexture: (item, scale) => {
           const rendered = renderVectorItemCanvas(item, scale * (window.devicePixelRatio || 1));

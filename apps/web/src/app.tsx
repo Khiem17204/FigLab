@@ -410,20 +410,30 @@ export function FigLabEditor({
       ),
     ];
     void Promise.all(
-      referencedAssetIds.map(async (assetId) => {
-        if (rasterSources.has(assetId)) return;
-        const asset = await client.getAsset(assetId);
-        if (asset.status !== "ready") return;
-        if (!cancelled) setLoadingAssets((current) => [...current, asset]);
-        try {
-          const download = await client.downloadAsset(assetId);
-          await rasterSources.add(assetId, download.bytes, asset.mimeType as SupportedRasterMime);
-          if (!cancelled)
-            setAssets((current) => [...current.filter((item) => item.id !== asset.id), asset]);
-        } finally {
-          if (!cancelled)
-            setLoadingAssets((current) => current.filter((item) => item.id !== asset.id));
-        }
+      referencedAssetIds.map((assetId) => {
+        if (rasterSources.has(assetId)) return undefined;
+        // Tracked from the start, so exports and checks begun meanwhile wait for the original.
+        return rasterSources.track(
+          assetId,
+          (async () => {
+            const asset = await client.getAsset(assetId);
+            if (asset.status !== "ready") return;
+            if (!cancelled) setLoadingAssets((current) => [...current, asset]);
+            try {
+              const download = await client.downloadAsset(assetId);
+              await rasterSources.add(
+                assetId,
+                download.bytes,
+                asset.mimeType as SupportedRasterMime,
+              );
+              if (!cancelled)
+                setAssets((current) => [...current.filter((item) => item.id !== asset.id), asset]);
+            } finally {
+              if (!cancelled)
+                setLoadingAssets((current) => current.filter((item) => item.id !== asset.id));
+            }
+          })(),
+        );
       }),
     ).catch((error: unknown) => {
       if (!cancelled)
