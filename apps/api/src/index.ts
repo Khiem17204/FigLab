@@ -62,6 +62,7 @@ import {
   UnauthorizedError,
 } from "./auth.js";
 import { createWorkspaceProject, registerCollaborationRoutes } from "./collaboration.js";
+import { validatorCompiler } from "./validation.js";
 
 const params = Type.Object({ projectId: Type.String({ minLength: 1 }) });
 const uploadParams = Type.Object({ uploadId: Type.String({ minLength: 1 }) });
@@ -141,7 +142,8 @@ export async function buildApp(dependencies: AppDependencies): Promise<FastifyIn
     );
     resolvePrincipal = singleUserResolver(dependencies.principal);
   }
-  const app = Fastify({ logger: false, ajv: { customOptions: { removeAdditional: false } } });
+  const app = Fastify({ logger: false });
+  app.setValidatorCompiler(validatorCompiler);
   const authorizer = dependencies.authorizer ?? new MembershipAuthorizer(dependencies.repository);
   const jobsEnqueued = () => {
     try {
