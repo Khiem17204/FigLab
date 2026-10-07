@@ -462,6 +462,29 @@ export function integrityReportHtml(report: IntegrityReport): string {
     .join("")}</body></html>`;
 }
 
+/**
+ * Histogram of normalized samples in `bins` buckets: one channel, luminance for color without a
+ * channel, or the single gray sample.
+ */
+export function sampleHistogram(region: RasterRegion, channel: number | null, bins = 64): number[] {
+  const counts = new Array<number>(bins).fill(0);
+  const max = region.bitDepth === 8 ? 255 : 65_535;
+  const pixels = region.widthPx * region.heightPx;
+  for (let pixel = 0; pixel < pixels; pixel += 1) {
+    const base = pixel * region.channels;
+    const at = (offset: number) => (region.data[base + offset] ?? 0) / max;
+    const value =
+      channel !== null
+        ? at(channel)
+        : region.channels === 1
+          ? at(0)
+          : luminance(at(0), at(1), at(2));
+    const bin = Math.min(bins - 1, Math.floor(value * bins));
+    counts[bin] = (counts[bin] ?? 0) + 1;
+  }
+  return counts;
+}
+
 /** One row per panel reading, for spreadsheets. */
 export function cropsCsv(report: IntegrityReport): string {
   const header = [

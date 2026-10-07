@@ -553,3 +553,176 @@ test("shows the audit trail with actors and restores an earlier version", async 
   await page.getByRole("button", { name: "Restore revision 2" }).click();
   await expect.poll(() => latest()?.objects.map((object) => object.id)).toEqual(["view-a"]);
 });
+
+const GRADIENT_PNG =
+  "iVBORw0KGgoAAAANSUhEUgAAABAAAAAICAYAAADwdn+XAAAANklEQVR4AaXBAQ2AAAzAsJJcwCRcKs5BxNuH9wshhBBCCCGEEMJYJ2OdjHUy1slYJ2OdjHXyA8+XA21qw46BAAAAAElFTkSuQmCC";
+
+type SavedV3 = {
+  sources: {
+    assetId: string;
+    widthPx: number;
+    calibration: { umPerPxX: number; origin: string } | null;
+  }[];
+  objects: {
+    id: string;
+    type: string;
+    view?: { rotationDeg: number; flipX: boolean };
+    laneTable?: { rows: { cells: { text: string; span: number; underline: boolean }[] }[] };
+    scaleBar?: { lengthUm: number };
+  }[];
+};
+
+/** Opens an empty project, uploads the 16 × 8 gradient, and records every saved document. */
+async function openWithUploadedOriginal(page: import("@playwright/test").Page) {
+  const saves: SavedV3[] = [];
+  const exports: { format: string }[] = [];
+  let revision = 3;
+  const empty = {
+    ...documentResponse,
+    document: { ...documentResponse.document, schemaVersion: 3, sources: [] },
+  };
+  await page.route(new RegExp(`/v1/projects/${project.id}/document$`), async (route) => {
+    if (route.request().method() === "GET") return route.fulfill({ json: empty });
+    const body = route.request().postDataJSON() as { document: SavedV3 };
+    saves.push(body.document);
+    revision += 1;
+    return route.fulfill({ json: { ...empty, revision, document: body.document } });
+  });
+  await page.route(`**/v1/projects/${project.id}/exports`, async (route) => {
+    if (route.request().method() !== "POST") return route.fulfill({ json: { exports: [] } });
+    exports.push(route.request().postDataJSON());
+    await route.fulfill({ status: 204 });
+  });
+  await page.route(`**/v1/projects/${project.id}/uploads`, (route) =>
+    route.fulfill({
+      json: {
+        uploadId: "upload-g",
+        assetId: "asset-g",
+        upload: {
+          url: "http://127.0.0.1:4173/minio/upload-g",
+          method: "PUT",
+          headers: {},
+          expiresAt: "later",
+        },
+      },
+    }),
+  );
+  await page.route("**/minio/upload-g", (route) => route.fulfill({ status: 200 }));
+  await page.route("**/v1/uploads/upload-g/complete", (route) =>
+    route.fulfill({ json: { assetId: "asset-g", status: "ready" } }),
+  );
+  await page.route("**/v1/assets/asset-g", (route) =>
+    route.fulfill({
+      json: {
+        id: "asset-g",
+        projectId: project.id,
+        filename: "gradient.png",
+        mimeType: "image/png",
+        checksumSha256: "b".repeat(64),
+        widthPx: 16,
+        heightPx: 8,
+        bitDepth: 8,
+        channelCount: 4,
+        status: "ready",
+        metadata: {},
+        createdAt: "2026-10-06T00:00:00.000Z",
+      },
+    }),
+  );
+  await page.goto("/");
+  await page.getByRole("button", { name: "Open Cell Atlas" }).click();
+  await page.getByLabel("Upload original").setInputFiles({
+    name: "gradient.png",
+    mimeType: "image/png",
+    buffer: Buffer.from(GRADIENT_PNG, "base64"),
+  });
+  await expect(page.getByRole("img", { name: "Original gradient.png" })).toBeVisible();
+  return { saves, latest: () => saves.at(-1), exports };
+}
+
+/** A point at fractions of the displayed original (16 × 8, letterboxed in the source canvas). */
+async function originalPoint(page: import("@playwright/test").Page, fx: number, fy: number) {
+  const canvas = page.getByTestId("source-canvas");
+  await canvas.scrollIntoViewIfNeeded();
+  const box = await canvas.evaluate((element) => {
+    const rect = element.getBoundingClientRect();
+    return {
+      left: rect.left,
+      top: rect.top,
+      width: (element as HTMLElement).clientWidth,
+      height: (element as HTMLElement).clientHeight,
+    };
+  });
+  const scale = Math.min(box.width / 16, box.height / 8);
+  const left = box.left + (box.width - 16 * scale) / 2;
+  const top = box.top + (box.height - 8 * scale) / 2;
+  return { x: left + fx * 16 * scale, y: top + fy * 8 * scale };
+}
+
+test("band-crops along a tilted line, then flips the panel", async ({ page }) => {
+  const { latest } = await openWithUploadedOriginal(page);
+  await page.getByRole("button", { name: "Band (line) crop" }).click();
+  await page.getByLabel("Band height (px)").fill("2");
+  const from = await originalPoint(page, 0.2, 0.4);
+  const to = await originalPoint(page, 0.8, 0.6);
+  await page.mouse.move(from.x, from.y);
+  await page.mouse.down();
+  await page.mouse.move(to.x, to.y, { steps: 4 });
+  await page.mouse.up();
+  await expect(page.getByRole("status").filter({ hasText: /Band crop rotated/ })).toBeVisible();
+  // 9.6 px across and 1.6 px down: atan(1.6 / 9.6) ≈ 9.46°.
+  await expect.poll(() => latest()?.objects[0]?.view?.rotationDeg).toBeCloseTo(9.46, 1);
+  expect(latest()?.sources).toEqual([expect.objectContaining({ assetId: "asset-g", widthPx: 16 })]);
+  await page.getByLabel("Flip horizontally").check();
+  await expect.poll(() => latest()?.objects[0]?.view?.flipX).toBe(true);
+});
+
+test("calibrates by hand, adds a scale bar and lane labels, and checks integrity", async ({
+  page,
+}) => {
+  const { latest, exports } = await openWithUploadedOriginal(page);
+  const from = await originalPoint(page, 0, 0);
+  const to = await originalPoint(page, 1, 1);
+  await page.mouse.move(from.x + 1, from.y + 1);
+  await page.mouse.down();
+  await page.mouse.move(to.x - 1, to.y - 1, { steps: 4 });
+  await page.mouse.up();
+  await page.getByLabel("Pixel size (µm/px)").fill("0.5");
+  await page.getByRole("button", { name: "Set pixel size" }).click();
+  await expect
+    .poll(() => latest()?.sources[0]?.calibration)
+    .toEqual({ umPerPxX: 0.5, umPerPxY: 0.5, origin: "manual" });
+
+  const panel = page.getByRole("button", { name: /Move view-/ });
+  await panel.scrollIntoViewIfNeeded();
+  await panel.click();
+  await page.getByRole("button", { name: "Add scale bar" }).click();
+  await expect
+    .poll(() => latest()?.objects.find((object) => object.type === "scale-bar")?.scaleBar?.lengthUm)
+    .toBeGreaterThan(0);
+
+  await page.getByRole("button", { name: /Move view-/ }).click();
+  await page.getByLabel("Lanes", { exact: true }).fill("4");
+  await page.getByRole("button", { name: "Add lane labels" }).click();
+  const rows = page.getByLabel(/Rows \(one per line/);
+  await rows.fill("_HeLa*2 | _HEK*2\n+ | − | + | −");
+  await rows.blur();
+  await expect
+    .poll(
+      () =>
+        latest()?.objects.find((object) => object.type === "lane-table")?.laneTable?.rows[0]?.cells,
+    )
+    .toEqual([
+      { text: "HeLa", span: 2, underline: true },
+      { text: "HEK", span: 2, underline: true },
+    ]);
+
+  await page.getByRole("button", { name: "Check integrity" }).click();
+  await expect(page.getByRole("list", { name: "Integrity findings" })).toContainText(
+    "manually entered pixel size",
+  );
+  const download = page.waitForEvent("download");
+  await page.getByRole("button", { name: "Download provenance bundle" }).click();
+  expect((await download).suggestedFilename()).toMatch(/^cell-atlas-provenance-r\d+\.zip$/);
+  expect(exports).toEqual([expect.objectContaining({ format: "pdf", dpi: 300 })]);
+});

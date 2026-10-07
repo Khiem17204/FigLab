@@ -35,7 +35,8 @@ export function createStoredOriginalResolver(
     if (!pending) {
       pending = (async () => {
         const asset = assets.get(assetId);
-        if (!asset || asset.status !== "ready") throw new Error(`Original ${assetId} is not ready`);
+        if (asset?.status !== "ready" || !asset)
+          throw new Error(`Original ${assetId} is not ready`);
         const bytes = await readBytes(await store.read(asset.storageKey));
         if (asset.mimeType === "image/tiff") {
           const exact = bytes.buffer.slice(

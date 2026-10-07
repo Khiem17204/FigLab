@@ -5,6 +5,8 @@ import {
   apiRoutes,
   type CurrentUserResponse,
   type ExportRecord,
+  type IntegrityReportRecord,
+  type IntegrityReportSummary,
   type PrepareUploadResponse,
   type Project,
   type ProjectDocumentResponse,
@@ -177,6 +179,22 @@ export class FigLabClient {
   async listExports(projectId: string): Promise<ExportRecord[]> {
     const url = path(apiRoutes.projectExports, { projectId });
     return (await this.json<{ exports: ExportRecord[] }>(url)).exports;
+  }
+
+  requestIntegrityReport(projectId: string, revision?: number): Promise<IntegrityReportRecord> {
+    return this.json(path(apiRoutes.projectIntegrityReports, { projectId }), {
+      method: "POST",
+      body: revision === undefined ? {} : { revision },
+    });
+  }
+
+  async listIntegrityReports(projectId: string): Promise<IntegrityReportSummary[]> {
+    const url = path(apiRoutes.projectIntegrityReports, { projectId });
+    return (await this.json<{ reports: IntegrityReportSummary[] }>(url)).reports;
+  }
+
+  getIntegrityReport(projectId: string, reportId: string): Promise<IntegrityReportRecord> {
+    return this.json(path(apiRoutes.projectIntegrityReport, { projectId, reportId }));
   }
 
   recordExport(projectId: string, metadata: RecordExportRequest): Promise<void> {

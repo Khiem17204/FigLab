@@ -277,6 +277,7 @@ export type ScaleBarObjectV3 = Static<typeof ScaleBarObjectV3Schema>;
 export type ZoomLinkObjectV3 = Static<typeof ZoomLinkObjectV3Schema>;
 export type LaneTableObjectV3 = Static<typeof LaneTableObjectV3Schema>;
 export type MwLabelsObjectV3 = Static<typeof MwLabelsObjectV3Schema>;
+export type LaneCellV3 = Static<typeof LaneCellV3Schema>;
 export type FigureObjectV3 = Static<typeof FigureObjectV3Schema>;
 export type SourceInfoV3 = Static<typeof SourceInfoV3Schema>;
 export type SourceCalibrationV3 = Static<typeof SourceCalibrationV3Schema>;

@@ -1,6 +1,6 @@
 import type { AssetDescriptor, Project, ProjectDocumentResponse } from "@figlab/api-contract";
 import { selectImageProvenance } from "@figlab/editor-core";
-import { type ImageViewObjectV3, isImageView, type NormalizedRect } from "@figlab/figure-schema";
+import { type ImageViewObjectV3, isImageView } from "@figlab/figure-schema";
 import { Button, Panel } from "@figlab/ui";
 import { QueryClient, QueryClientProvider, useMutation, useQuery } from "@tanstack/react-query";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -11,19 +11,22 @@ import { downloadBlob } from "./api/export";
 import type { SignedInAccount } from "./auth/auth-gate";
 import { AutosaveController, type SaveStatus } from "./editor/autosave";
 import { bindAutosave } from "./editor/autosave-binding";
-import { imageContainRect, normalizedPointInImage, type ScreenRect } from "./editor/geometry";
 import { BrowserRasterRepository, type SupportedRasterMime } from "./editor/raster-sources";
-import { createEditorSession, type Point } from "./editor/session-store";
+import { createEditorSession } from "./editor/session-store";
 import { ArrangePanel } from "./figure-tools/arrange-panel";
+import { useDerivedSync } from "./figure-tools/derived-sync";
 import { exportFigures } from "./figure-tools/export-figure";
 import { ExportPanel } from "./figure-tools/export-panel";
 import { FigureCanvas } from "./figure-tools/figure-canvas";
 import { FiguresBar } from "./figure-tools/figures-bar";
 import { FALLBACK_TEXT_METRICS, loadFigureFonts, useFigureFonts } from "./figure-tools/fonts";
 import { HistoryPanel } from "./figure-tools/history-panel";
+import { IntegrityPanel } from "./figure-tools/integrity-panel";
 import { handleFigureShortcut } from "./figure-tools/keyboard";
 import { ObjectInspector } from "./figure-tools/object-inspector";
+import { PanelInspector } from "./figure-tools/panel-inspector";
 import { rasterizeVectorItems } from "./figure-tools/rasterize";
+import { SourceInspector } from "./figure-tools/source-inspector";
 import "./styles.css";
 
 const defaultClient = new FigLabClient();
@@ -306,11 +309,8 @@ export function FigLabEditor({
   const selectedAsset = assets.find((asset) => asset.id === selectedAssetId);
   const fonts = useFigureFonts();
   const metrics = fonts?.metrics ?? FALLBACK_TEXT_METRICS;
-  const selectedPreviewUrl = selectedAssetId
-    ? rasterSources.getPreviewUrl(selectedAssetId)
-    : undefined;
+  useDerivedSync(session, metrics);
   const provenance = selected ? selectImageProvenance(state.document, selected.id) : undefined;
-  const highlightedViewport = provenance?.viewport;
 
   const upload = async (file: File) => {
     setUploadStatus("Computing SHA-256 and reserving upload…");
@@ -412,10 +412,9 @@ export function FigLabEditor({
           <ArrangePanel metrics={metrics} session={session} />
         </aside>
         <section aria-label="Figure editor" className="workspace">
-          <OriginalInspector
-            {...(selectedAsset ? { asset: selectedAsset } : {})}
-            {...(highlightedViewport ? { highlightedViewport } : {})}
-            onCrop={(viewport) => {
+          <SourceInspector
+            asset={selectedAsset}
+            onCrop={(viewport, plane) => {
               if (!selectedAssetId) return;
               session.getState().beginCrop({ x: viewport.x, y: viewport.y });
               session
@@ -429,9 +428,11 @@ export function FigLabEditor({
                   selectedAsset
                     ? { widthPx: selectedAsset.widthPx, heightPx: selectedAsset.heightPx }
                     : undefined,
+                  plane,
                 );
             }}
-            {...(selectedPreviewUrl ? { previewUrl: selectedPreviewUrl } : {})}
+            rasterSources={rasterSources}
+            session={session}
           />
           <div className="figure-stage">
             <FiguresBar session={session} />
@@ -454,6 +455,7 @@ export function FigLabEditor({
             <p className="empty-state">Select or crop an image to adjust its display transform.</p>
           )}
           <ObjectInspector metrics={metrics} session={session} />
+          <PanelInspector assets={assets} rasterSources={rasterSources} session={session} />
           <ExportPanel
             activeArtboardId={state.activeArtboardId}
             document={state.document}
@@ -514,6 +516,17 @@ export function FigLabEditor({
           ) : (
             <p>Source crop details appear here.</p>
           )}
+          <IntegrityPanel
+            assets={assets}
+            client={client}
+            download={downloadBlob}
+            fonts={fonts}
+            projectId={project.id}
+            projectName={project.name}
+            rasterSources={rasterSources}
+            saveExact={() => autosave.saveNow()}
+            session={session}
+          />
           <HistoryPanel
             client={client}
             onRestore={(document) => session.getState().apply(() => document, { selectedIds: [] })}
@@ -524,98 +537,6 @@ export function FigLabEditor({
         </aside>
       </div>
     </main>
-  );
-}
-
-function OriginalInspector({
-  asset,
-  previewUrl,
-  highlightedViewport,
-  onCrop,
-}: {
-  asset?: AssetDescriptor;
-  previewUrl?: string;
-  highlightedViewport?: NormalizedRect;
-  onCrop: (viewport: NormalizedRect) => void;
-}) {
-  const [draft, setDraft] = useState<{ start: Point; end: Point }>();
-  const draftRef = useRef<{ start: Point; end: Point } | undefined>(undefined);
-  const host = useRef<HTMLDivElement>(null);
-  const [imageRect, setImageRect] = useState<ScreenRect>();
-  useEffect(() => {
-    const target = host.current;
-    if (!target || !asset) return;
-    const update = () =>
-      setImageRect(
-        imageContainRect(
-          { width: target.clientWidth, height: target.clientHeight },
-          { width: asset.widthPx, height: asset.heightPx },
-        ),
-      );
-    update();
-    const observer = new ResizeObserver(update);
-    observer.observe(target);
-    return () => observer.disconnect();
-  }, [asset]);
-  const updateDraft = (value: { start: Point; end: Point } | undefined) => {
-    draftRef.current = value;
-    setDraft(value);
-  };
-  const point = (event: React.PointerEvent<HTMLDivElement>) => {
-    const rect = event.currentTarget.getBoundingClientRect();
-    if (!imageRect) return { x: 0, y: 0 };
-    return normalizedPointInImage(
-      { x: event.clientX - rect.left, y: event.clientY - rect.top },
-      imageRect,
-    );
-  };
-  const viewport = draft ? rectFromPoints(draft.start, draft.end) : highlightedViewport;
-  return (
-    <div className="original-inspector">
-      <div>
-        <p className="eyebrow">Original inspector</p>
-        <h2>Drag to crop</h2>
-      </div>
-      <div
-        className="source-canvas"
-        data-testid="source-canvas"
-        ref={host}
-        onPointerDown={(event) => {
-          const start = point(event);
-          updateDraft({ start, end: start });
-        }}
-        onPointerMove={(event) => {
-          const active = draftRef.current;
-          if (active) updateDraft({ ...active, end: point(event) });
-        }}
-        onPointerUp={(event) => {
-          const active = draftRef.current;
-          if (!active) return;
-          const crop = rectFromPoints(active.start, point(event));
-          updateDraft(undefined);
-          if (crop.width > 0 && crop.height > 0) onCrop(crop);
-        }}
-      >
-        {previewUrl && asset ? (
-          <img alt={`Original ${asset.filename}`} src={previewUrl} />
-        ) : (
-          <span>Upload and select an original source raster</span>
-        )}
-        {viewport && (
-          <div
-            aria-label="Crop selection"
-            className="crop-overlay"
-            role="img"
-            style={viewportStyle(viewport, imageRect)}
-          >
-            <i />
-            <i />
-            <i />
-            <i />
-          </div>
-        )}
-      </div>
-    </div>
   );
 }
 
@@ -666,25 +587,6 @@ function TransformControls({
   );
 }
 
-function rectFromPoints(start: Point, end: Point): NormalizedRect {
-  const x = Math.min(start.x, end.x);
-  const y = Math.min(start.y, end.y);
-  return {
-    x: Number(x.toFixed(6)),
-    y: Number(y.toFixed(6)),
-    width: Number(Math.abs(end.x - start.x).toFixed(6)),
-    height: Number(Math.abs(end.y - start.y).toFixed(6)),
-  };
-}
-function viewportStyle(viewport: NormalizedRect, imageRect?: ScreenRect) {
-  if (!imageRect) return { display: "none" };
-  return {
-    left: imageRect.left + viewport.x * imageRect.width,
-    top: imageRect.top + viewport.y * imageRect.height,
-    width: viewport.width * imageRect.width,
-    height: viewport.height * imageRect.height,
-  };
-}
 function isTextEntryTarget(target: EventTarget | null): boolean {
   if (!(target instanceof HTMLElement)) return false;
   return (

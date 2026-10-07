@@ -57,6 +57,11 @@ export function objectLabel(object: FigureObject): string {
       : object.shape.kind === "ellipse"
         ? "Ellipse"
         : "Bracket";
+  if (object.type === "composite") return "Merged channels";
+  if (object.type === "scale-bar") return "Scale bar";
+  if (object.type === "lane-table") return "Lane labels";
+  if (object.type === "mw-labels") return "MW labels";
+  if (object.type === "zoom-link") return "Zoom outline";
   return "Image panel";
 }
 

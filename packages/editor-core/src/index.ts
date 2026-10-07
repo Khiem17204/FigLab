@@ -14,6 +14,7 @@ import {
 
 import { pruneGroups } from "./arrange.js";
 
+export * from "./annotations.js";
 export * from "./arrange.js";
 export * from "./artboards.js";
 export * from "./bounds.js";
